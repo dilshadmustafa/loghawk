@@ -1,7 +1,7 @@
 Welcome to LogHawk
 ===================
 <center>
- <img src='https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg' width='25%' />
+ <img src='https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg' width='10%' />
 </center>
 <br>
 
