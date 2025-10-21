@@ -1,0 +1,24 @@
+Copyright (c) Dilshad Mustafa 2025. All Rights Reserved.
+
+User and Developer License
+
+1. You can use this Software for both Personal use as well as Commercial use, 
+with or without paying fee to Dilshad Mustafa. Please read fully below for the 
+terms and conditions. You may use this Software only if you comply fully with 
+all the terms and conditions of this License. 
+
+2. You can modify only configuration files like .env.
+
+3. You should not modify Python source code.
+
+4. You should not distribute this Software and its source code.
+
+5. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER
+   BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+   ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+

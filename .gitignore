@@ -1,0 +1,13 @@
+
+.venv
+tryfiles/
+security_docs_to_ragvectordb/security_docs/
+try*
+.idea
+__pycache__
+*.db
+security_kt_to_ragvectordb/docs_from_webscrap/
+
+
+
+
