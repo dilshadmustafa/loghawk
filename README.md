@@ -1,7 +1,7 @@
 Welcome to LogHawk
 ===================
 
-![LogHawk Logo](https://raw.githubusercontent.com/dilshadmustafa/loghawk/master/loghawk_logo.jpg)
+![LogHawk Logo](https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg)
 
 <br>
 <br>
@@ -24,7 +24,7 @@ Introduction
 > - Ready made pipelines to ingest BigData using PySpark.
 > - Ready made pipelines to do log analysis on files and folder on ingested data every minute, every hour.
 
-## LogHawk Architectures ##
+## LogHawk Architecture ##
 
 > **LOGHAWK SYSTEM**
 
