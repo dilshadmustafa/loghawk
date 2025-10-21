@@ -16,7 +16,7 @@ Introduction
 
 > - AI-powered log intelligence.
 > - Detection-first product: it spots anomalies and hunts threats.
-> - multi-source log threat detection platform. Ingest from ElasticSearch, Splunk, Files, JSON, CSV, etc.
+> - Multi-source log threat detection platform. Ingest from ElasticSearch, Splunk, Files, JSON, CSV, etc.
 > - Ready made ingestion pipelines to do Security KT to RAG Vector DB.
 > - Web Scrapping from NIST, CVEs, MITRE ATT&CK and builds Knowledge Base.
 > - Ingest Pdf/HTML/Markdown/CSV/Json files, folders and build Knowledge Base in RAG Vector DB.
