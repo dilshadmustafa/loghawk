@@ -1,9 +1,8 @@
 Welcome to LogHawk
 ===================
-
-![LogHawk Logo](https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg)
-
-<br>
+<center>
+ <img src='https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg' width='25%' />
+</center>
 <br>
 
 [![](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=H4V87SN5M2GG2)
