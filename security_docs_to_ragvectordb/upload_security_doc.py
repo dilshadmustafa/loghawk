@@ -1,5 +1,6 @@
 #
 # First set PYTHONPATH environment variable using below command based on your OS
+# Replace all folder path to /path/to/your/loghawkproject/
 # Linux:
 # export PYTHONPATH="${PYTHONPATH}:/path/to/your/loghawkproject/"
 # Windows cmd:
