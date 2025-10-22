@@ -12,7 +12,7 @@ Introduction
 
 **LogHawk** is an AIOps suite of tools for Local Agentic RAG chatbot for Security threat detection with multi-source Logging input using any LLM (DeepSeek R1, etc). LogHawk is 100% Private, Local, Zero Cost. Its built to run on consumer grade PCs and Systems with 16GB or 32GB RAM.
 
-> **Objectives:**
+> **Objectives And Features:**
 
 > - AI-powered log intelligence.
 > - Detection-first product: it spots anomalies and hunts threats.

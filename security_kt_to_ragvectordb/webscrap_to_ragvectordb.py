@@ -1,5 +1,3 @@
-import sqlite3
-import sqlite_vec
 import ollama
 from sentence_transformers import SentenceTransformer
 import time
@@ -15,9 +13,9 @@ import struct
 from lancedb.embeddings import get_registry
 from lancedb.pydantic import LanceModel, Vector
 from huggingface_hub import login
-import lancedb
 
 from loghawk_utils import logutils
+from loghawk_utils.lancedbutils import init_database
 
 # --- Configuration ---
 DRY_RUN = False # Set to True to test logic without running the model
@@ -38,9 +36,11 @@ DOCS_DIR = 'docs_from_webscrap/'  # Directory containing scraped documentation
 EMBEDDING_MODEL_INSTANCE = None
 
 # Documentation URLs to scrape
-DOCUMENTATION_URLS = {
-    'qwen3_ollama': 'https://dilshadmustafa.bss.design'
-}
+DOCUMENTATION_URLS = [
+    { 'name': 'cve', 'url': 'https://www.cve.org/', 'enabled': True },
+    { 'name': 'nvd', 'url': 'https://nvd.nist.gov/vuln', 'enabled': True },
+    { 'name': 'qwen3_ollama', 'url': 'https://dilshadmustafa.bss.design', 'enabled': True }
+]
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -53,11 +53,6 @@ class MyTableSchema(LanceModel):
     text: str = embedding_function.SourceField()
     vector: Vector(embedding_function.ndims()) = embedding_function.VectorField()  # Automatically gets the embedding dimension
 
-# --- Vector Serialization ---
-def serialize_f32(vector: List[float]) -> bytes:
-    """serializes a list of floats into a compact "raw bytes" format"""
-    return struct.pack("%sf" % len(vector), *vector)
-
 def get_embedding_model():
     """Get or create the global embedding model instance."""
     global EMBEDDING_MODEL_INSTANCE
@@ -66,17 +61,6 @@ def get_embedding_model():
         EMBEDDING_MODEL_INSTANCE = SentenceTransformer(EMBEDDING_MODEL)
         logutils.log_memory("Model Load", f"({EMBEDDING_MODEL})")
     return EMBEDDING_MODEL_INSTANCE
-
-def init_database():
-    """Initialize the database."""
-    # Create a LanceDB table with the schema
-    db = lancedb.connect(DB_FILE)
-
-    if TABLE_NAME not in db.table_names():
-        table = db.create_table(TABLE_NAME, schema=MyTableSchema)
-    else:
-        table = db.open_table(TABLE_NAME)
-    return db, table
 
 def scrape_docs():
     """Simple function to scrape documentation from URLs and save to docs folder."""
@@ -89,7 +73,13 @@ def scrape_docs():
     successful = 0
     total = len(DOCUMENTATION_URLS)
     
-    for name, url in DOCUMENTATION_URLS.items():
+    #for name, url in DOCUMENTATION_URLS.items():
+    for item in DOCUMENTATION_URLS:
+        name = item['name']
+        url = item['url']
+        enabled = item['enabled']
+        if not enabled:
+            continue
         print(f"📄 Fetching: {name}")
         print(f"   URL: {url}")
         
@@ -172,7 +162,7 @@ def ingest_docs():
     """Reads documents from docs directory and ingests them into the vector store."""
     logutils.log_memory("Demo Start", "")
     
-    # Always do fresh ingestion for demo purposes
+    # If needed fresh start for ingestion for demo purpose
     # if os.path.exists(DB_FILE):
     #     print("🗑️  Removing existing database for fresh demo run...")
     #     os.remove(DB_FILE)
@@ -205,7 +195,7 @@ def ingest_docs():
     model = get_embedding_model()
     
     # 3. Initialize database
-    db, table = init_database()
+    db, table = init_database(DB_FILE, TABLE_NAME)
 
     print(f"📁 Found {len(doc_files)} documentation files:")
     for file in doc_files:
@@ -253,18 +243,6 @@ def ingest_docs():
             # EmbeddingGemma uses specific prompts for optimal performance
             embedding = model.encode_document(chunk, truncate_dim=256)
             
-            # Insert into database with source information
-            # conn.execute(f"""
-            #     INSERT INTO {TABLE_NAME} (rowid, text, source, embedding)
-            #     VALUES (?, ?, ?, ?)
-            # """, (i + j + 1, chunk, source, serialize_f32(embedding.tolist())))
-            rowid = i + j + 1
-            # table.add([
-            #         {
-            #             "rowid": rowid, "chunk": chunk, "source": source,
-            #             "embedding": serialize_f32(embedding.tolist())
-            #         }
-            #      ])
             table.add([
                 {
                     "text": chunk
@@ -292,7 +270,7 @@ def semantic_search_and_query(query_text, top_k=3):
     model = get_embedding_model()
 
     # 2. Connect to database
-    db, table = init_database()
+    db, table = init_database(DB_FILE, TABLE_NAME)
 
     # 3. Generate query embedding using proper query prompt and dimension truncation
     # EmbeddingGemma uses specific prompts for optimal performance
@@ -300,13 +278,6 @@ def semantic_search_and_query(query_text, top_k=3):
 
     # 4. Find similar documents using sqlite-vec
     start_time = time.time()
-    # cursor = conn.execute(f"""
-    #     SELECT rowid, text, source, distance
-    #     FROM {TABLE_NAME}
-    #     WHERE embedding MATCH ?
-    #     ORDER BY distance
-    #     LIMIT ?
-    # """, (serialize_f32(query_embedding.tolist()), top_k))
 
     results = table.search(query_text).limit(10).to_pandas()
     print(results)
@@ -396,10 +367,10 @@ def main():
     """Main function for web scrapping."""
     print("🚀 Web Scrap To RAG Vector DB")
     print("=" * 60)
-    print("🔒 100% Private | 💰 Zero Cost | 📱 Offline Capable")
-    print("📚 Using official docs from NIST, MITRE ATTCK, CVEs, etc")
+    print("🔒 100% Private | 💰 Zero Cost | 📱 Local")
+    print("📚 Using official docs from NIST, MITRE ATTCK, CVEs, etc.")
     print()
-    print("📥 Login to Hugging Face Hub. This is needed to access Google's EmbeddingGemma-300M model")
+    print("📥 Login to Hugging Face Hub using command 'huggingface-cli login' and provide your free token. This is needed to access Google's EmbeddingGemma-300M model")
     print("📥 You will be prompted to enter your Hugging Face token")
     #login()  # You will be prompted to enter your Hugging Face token
 
@@ -415,11 +386,8 @@ def main():
 def run_demo_queries():
     """Run a series of demo queries to showcase the RAG system."""
     demo_queries = [
-        "What makes EmbeddingGemma special for mobile applications?",
-        "How do I use SQLite-vec with Python?",
-        "What are the key features of Qwen3 model?",
-        "How does vector similarity search work?",
-        "What are the benefits of using local embeddings?"
+        "What CVEs are related to vulnerabilities in vsftpd?",
+        "Based on the log data I gave above, check for vulnerability?"
     ]
     
     print("🎯 Running demo queries to showcase semantic search capabilities:")
