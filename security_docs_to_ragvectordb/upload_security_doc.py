@@ -19,10 +19,30 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama.llms import OllamaLLM
 from lancedb.embeddings import get_registry
 from lancedb.pydantic import LanceModel, Vector
+from torch.cuda import device
+import sys
+sys.path.append("C:\\aiopsmain\\loghawk\\")
 from loghawk_utils.lancedbutils import init_database
 
+# --- Configuration ---
+DB_FILE = "C:\\aiopsmain\\my_work\\mydb\\mylancedb"
+TABLE_NAME = "loghawk"
+PDF_STORAGE_PATH = './security_docs/'
+
+# EmbeddingGemma (requires Hugging Face access request)
+# Visit: https://huggingface.co/google/embeddinggemma-300m
+# Run: huggingface-cli login
+EMBEDDING_MODEL = 'google/embeddinggemma-300m'  # Google's new EmbeddingGemma model
+EMBEDDING_DIMS = 256  # Truncated from 768 for 3x faster processing (Matryoshka learning)
+
+# More efficient and powerful than llama3
+LLM_MODEL = 'deepseek-r1:1.5b' #'qwen3:4b'  # 2.5GB, 256K context, rivals much larger models
+
+# Global model instance to avoid reloading
+EMBEDDING_MODEL_INSTANCE = None
+
 # Get a sentence-transformer function
-func = get_registry().get("sentence-transformers").create()
+func = get_registry().get("sentence-transformers").create(name=EMBEDDING_MODEL)
 
 class MySchema(LanceModel):
     # Embed the 'text' field automatically
@@ -34,11 +54,9 @@ class MySchema(LanceModel):
 import lancedb
 #db = lancedb.connect("C:\\aiopsmain\\my_work\\mydb\\mylancedb")
 #table = db.open_table("mytable")
-DB_FILE = "C:\\aiopsmain\\my_work\\mydb\\mylancedb"
-TABLE_NAME = "loghawk"
 db, table = init_database(DB_FILE, TABLE_NAME)
 
-queriesQA = ""
+#queriesQA = ""
 
 def appendQA(query):
     global queriesQA
@@ -110,7 +128,7 @@ Query: {user_query}
 Context: {document_context} 
 Answer:
 """
-PDF_STORAGE_PATH = './security_docs/'
+
 LANGUAGE_MODEL = OllamaLLM(model="deepseek-r1:1.5b")
 
 def save_uploaded_file(uploaded_file):
@@ -141,7 +159,7 @@ def index_documents(document_chunks):
 
 def find_related_documents(query):
     #results = table.search(query).limit(1000).to_pandas()
-    results = table.search(query).limit(1000).to_pandas()
+    results = table.search(query).limit(1).to_pandas()
     return results.text.tolist()
 
 def generate_answer(user_query, context_documents):
@@ -149,6 +167,14 @@ def generate_answer(user_query, context_documents):
     conversation_prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     response_chain = conversation_prompt | LANGUAGE_MODEL
     return response_chain.invoke({"user_query": user_query, "document_context": context_text})
+
+if 'queriesQA' not in st.session_state:
+    st.session_state.queriesQA = ""
+queriesQA = st.session_state.queriesQA
+
+
+if 'uploaded_file_name' not in st.session_state:
+    st.session_state.uploaded_file_name = ""
 
 
 # UI Configuration
@@ -166,27 +192,35 @@ uploaded_pdf = st.file_uploader(
     accept_multiple_files=False
 
 )
-is_doc_processed = False
-if uploaded_pdf:
-    if not is_doc_processed:
-        saved_path = save_uploaded_file(uploaded_pdf)
-        raw_docs = load_pdf_documents(saved_path)
-        processed_chunks = chunk_documents(raw_docs)
-        print("-----------CALLING INDEX----------")
-        index_documents(processed_chunks)
-        is_doc_processed = True
-        st.success("✅ Document processed successfully! Ask your questions below.")
-    
-    user_input = st.chat_input("Enter your question about the document...")
-    
-    if user_input:
-        with st.chat_message("user"):
-            st.write(user_input)
-        
-        with st.spinner("Analyzing document..."):
-            relevant_docs = find_related_documents(user_input)
-            ai_response = generate_answer(queriesQA + "\n" + user_input, relevant_docs)
-            appendQA(user_input)
-            appendQA(ai_response)
-        with st.chat_message("assistant", avatar="🤖"):
-            st.write(ai_response)
+
+if uploaded_pdf and st.session_state.uploaded_file_name != uploaded_pdf.name:
+    saved_path = save_uploaded_file(uploaded_pdf)
+    raw_docs = load_pdf_documents(saved_path)
+    processed_chunks = chunk_documents(raw_docs)
+    print("-----------CALLING INDEX----------")
+    index_documents(processed_chunks)
+
+    st.success("✅ Document processed successfully! Ask your questions below.")
+    st.session_state.uploaded_file_name = uploaded_pdf.name
+
+print("queriesQA:" + queriesQA)
+
+user_input = st.chat_input("Enter your question about the document...")
+print("user_input: " + str(user_input))
+
+if user_input:
+    with st.chat_message("user"):
+        st.write(user_input)
+
+    with st.spinner("Analyzing document..."):
+        relevant_docs = find_related_documents(user_input)
+        ai_response = generate_answer(queriesQA + "\n" + user_input, relevant_docs)
+        appendQA(user_input)
+        appendQA(ai_response)
+    with st.chat_message("assistant", avatar="🤖"):
+        st.write(ai_response)
+
+st.session_state.queriesQA = queriesQA
+
+
+
