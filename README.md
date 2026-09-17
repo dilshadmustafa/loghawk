@@ -3,8 +3,6 @@ Welcome to LogHawk
 
 <center><img src="https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg" width="10%"></center>
 
-\
-
 [![](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=H4V87SN5M2GG2)
 
 Introduction
@@ -44,12 +42,140 @@ The long-term goal is to move LogHawk through:
 
 ### System Responsibilities
 
--   **LanceDB** — RAG vector embeddings.
--   **DuckDB** — analytical data and conversation/incident history.
+-   **LanceDB** — RAG retrieval store for embeddings, searchable knowledge chunks, incident evidence and associated metadata.
+-   **DuckDB** — structured analytical storage and conversation history, including chat sessions, messages, agent/tool history and incident/history records.
 -   **PySpark** — Big Data ingestion, parsing, normalization, aggregation and feature engineering.
 -   **n8n** — scheduling, ingestion pipelines and lightweight automation.
--   **Amazon Bedrock** — managed enterprise GenAI for RCA, RAG and agent reasoning.
+-   **LiteLLM** — unified LLM gateway/router for local and cloud inference, exposing a consistent OpenAI-compatible interface to LogHawk.
+-   **Ollama + Gemma 2 (`gemma2:latest`)** — local/private LLM inference for development, offline use and privacy-sensitive workloads.
+-   **Amazon Bedrock** — managed enterprise GenAI for production/cloud RCA, RAG and agent reasoning.
 -   **Temporal** — durable, auditable remediation workflows.
+
+## LLM Gateway and Model Architecture
+
+LogHawk uses **LiteLLM as the model gateway** so the application does not need to be tightly coupled to a single LLM provider. LiteLLM provides a unified interface for multiple model providers and supports routing, retries/fallbacks, authentication hooks, logging and cost tracking.
+
+The primary local development path is **Ollama running Gemma 2 (`gemma2:latest`)**. The cloud/enterprise path is **Amazon Bedrock**. Bedrock provides a unified Converse interface across supported models and also exposes OpenAI-compatible APIs through its current runtime endpoints.
+
+```text
+                         LogHawk AIOps
+                              |
+                              v
+                    +-------------------+
+                    |    LLM Gateway    |
+                    |      LiteLLM      |
+                    +---------+---------+
+                              |
+                  +-----------+-----------+
+                  |                       |
+                  v                       v
+        +------------------+     +----------------------+
+        | Local / Private  |     | Cloud / Enterprise   |
+        |                  |     |                      |
+        | Ollama           |     | Amazon Bedrock       |
+        | Gemma 2 9B       |     | Claude / Nova /      |
+        | gemma2:latest   |     | other supported      |
+        +------------------+     | foundation models    |
+                  |              +----------------------+
+                  v                       |
+             Local inference              |
+             Windows / GPU                |
+                  |                       |
+                  +-----------+-----------+
+                              |
+                              v
+                    Structured AI response
+                              |
+                              v
+                    LogHawk RCA / Agent
+```
+
+### Local Mode
+
+```text
+LogHawk
+   |
+   v
+LiteLLM
+   |
+   v
+Ollama
+   |
+   v
+Gemma 2 9B
+(gemma2:latest)
+```
+
+Local mode is intended for development, privacy-sensitive workloads, experimentation and environments where cloud inference is undesirable.
+
+### AWS Mode
+
+```text
+LogHawk
+   |
+   v
+LiteLLM
+   |
+   v
+Amazon Bedrock
+   |
+   +--> Enterprise foundation model
+   |
+   +--> Managed inference
+   |
+   +--> Production RAG / RCA / agents
+```
+
+Amazon Bedrock's `Converse` API provides a consistent interface for supported models, while the Bedrock runtime also supports OpenAI-compatible Chat Completions and Responses APIs.
+
+### Model Switching
+
+The application should call **LiteLLM rather than Ollama or Bedrock directly** wherever practical:
+
+```text
+                  LogHawk AI request
+                         |
+                         v
+                     LiteLLM
+                    /       \
+                   /         \
+          local profile     cloud profile
+               |                  |
+            Ollama             Bedrock
+               |                  |
+           Gemma 2          enterprise model
+```
+
+This allows the same RCA/agent application code to use a local Gemma 2 model during development and switch to a Bedrock-hosted model for enterprise/cloud deployment.
+
+The model-selection policy can later be extended to support:
+
+-   local-first inference
+-   cloud fallback
+-   task-specific model routing
+-   cost-aware routing
+-   privacy-aware routing
+-   retry/fallback between model deployments
+
+### Provider-Neutral Application Contract
+
+LogHawk's RCA and agent layers should depend on the **LiteLLM endpoint/model alias**, not on provider-specific SDK calls. This keeps the application logic unchanged when moving between local Gemma 2 and Amazon Bedrock.
+
+```text
+LogHawk application
+        |
+        | OpenAI-compatible request
+        v
+     LiteLLM
+        |
+   +----+----+
+   |         |
+   v         v
+Ollama     Bedrock
+Gemma 2    managed model
+```
+
+The model/provider configuration is therefore infrastructure configuration rather than application business logic.
 
 ## End-to-End AIOps Flow
 
@@ -107,59 +233,71 @@ Data Sources
 ## Reference Architecture
 
 ```text
-                         LOGHAWK
-                            |
-       +--------------------+--------------------+
-       |                    |                    |
-       v                    v                    v
-  Observability         Security             Knowledge
- Logs/Metrics/Traces   NIST/CVE/ATT&CK      Runbooks/History
-       |                    |                    |
-       +--------------------+--------------------+
-                            |
-                            v
-                 Ingestion / Normalization
-                       PySpark / OTel
-                            |
-              +-------------+-------------+
-              |                           |
-              v                           v
-       DuckDB / Parquet                LanceDB
-       analytics/history             RAG vectors
-              |                           |
-              +-------------+-------------+
-                            |
-                            v
-                  AIOps Intelligence
-             Detection / Correlation / RCA
-                            |
-                   +--------+--------+
-                   |                 |
-                   v                 v
-              Bedrock               n8n
-          AI/RAG/Agents       schedules/pipelines
-                   |
-                   v
-              Policy Gate
-                   |
-                   v
-               Temporal
-          Durable Remediation
-                   |
-          +--------+--------+
-          |        |        |
-          v        v        v
-         AWS      K8s    Terraform
-          \        |        /
-           +-------+-------+
-                   |
-                   v
-              Verification
-                   |
-                   v
-            Incident History
-                   |
-                   +-----> RAG / Future RCA
+                              LOGHAWK
+                                 |
+        +------------------------+------------------------+
+        |                        |                        |
+        v                        v                        v
+ Observability               Security                Knowledge
+Logs/Metrics/Traces       NIST/CVE/ATT&CK          Runbooks/History
+        |                        |                        |
+        +------------------------+------------------------+
+                                 |
+                                 v
+                       Ingestion / Normalization
+                             PySpark / OTel
+                                 |
+                    +------------+------------+
+                    |                         |
+                    v                         v
+             DuckDB / Parquet             LanceDB
+        analytics / conversation       RAG / hybrid retrieval
+              / incident history       vectors + text + metadata
+                    |                         |
+                    +------------+------------+
+                                 |
+                                 v
+                       AIOps Intelligence
+                  Detection / Correlation / RCA
+                                 |
+                         +-------+-------+
+                         |               |
+                         v               v
+                      LiteLLM            n8n
+                   LLM Gateway     schedules/pipelines
+                         |
+                +--------+--------+
+                |                 |
+                v                 v
+             Ollama          Amazon Bedrock
+           Gemma 2 9B       Enterprise GenAI
+         gemma2:latest          cloud
+                |                 |
+                +--------+--------+
+                         |
+                         v
+                    Policy Gate
+                         |
+                         v
+                      Temporal
+                 Durable Remediation
+                         |
+                  +------+------+
+                  |      |      |
+                  v      v      v
+                 AWS     K8s   Terraform
+                  \      |      /
+                   +-----+-----+
+                         |
+                         v
+                    Verification
+                         |
+                         v
+                   Incident History
+                         |
+                         +------> DuckDB / Parquet
+                         |
+                         +------> LanceDB evidence / RAG
 ```
 
 ## Anomaly Detection Pipeline
@@ -305,11 +443,13 @@ Example controlled tools can include `get_pod_status`, `get_pod_logs`, `restart_
 | Elasticsearch / Splunk / Files / JSON / CSV | Log sources |
 | OpenTelemetry | Future logs/metrics/traces integration |
 | PySpark | Big-data ingestion, aggregation and feature engineering |
-| DuckDB / Parquet | Analytical and history storage |
-| LanceDB | RAG vector storage |
+| DuckDB / Parquet | Structured analytics, conversation history and operational history storage |
+| LanceDB | RAG retrieval: embeddings, searchable text, metadata and hybrid vector/keyword search |
 | Statistical/EWMA detectors | Explainable baseline detection |
 | scikit-learn Isolation Forest | Initial ML anomaly detection on aggregated features |
-| Amazon Bedrock | Enterprise GenAI, RAG, RCA and agent reasoning |
+| LiteLLM | Unified LLM gateway/router for local and cloud models |
+| Ollama + Gemma 2 (`gemma2:latest`) | Local/private LLM inference |
+| Amazon Bedrock | Managed enterprise GenAI, RAG, RCA and agent reasoning |
 | n8n | Scheduling and lightweight automation |
 | Temporal | Durable remediation workflows |
 | Kubernetes / AWS / Terraform | Remediation targets |
@@ -340,16 +480,28 @@ Example controlled tools can include `get_pod_status`, `get_pod_logs`, `restart_
 
 ### Phase 3 — RAG-Based RCA
 
--   [ ]  Index incident history
--   [ ]  Index runbooks and architecture documentation
+-   [ ]  Persist structured incident history in DuckDB / Parquet
+-   [ ]  Index incident evidence and summaries in LanceDB
+-   [ ]  Index runbooks and architecture documentation in LanceDB
 -   [ ]  Retrieve similar incidents
 -   [ ]  Build structured RCA context
 -   [ ]  Generate evidence-based RCA
 -   [ ]  Generate remediation recommendations
 
-### Phase 4 — Bedrock and Agentic AIOps
+### Phase 4 — Local and Cloud LLM Gateway
 
--   [ ]  Integrate Amazon Bedrock
+-   [ ]  Add LiteLLM as the unified LLM gateway
+-   [ ]  Configure Ollama as the local inference provider
+-   [ ]  Configure Gemma 2 (`gemma2:latest`) for local RCA/development
+-   [ ]  Add Amazon Bedrock as the managed cloud provider
+-   [ ]  Define local-vs-cloud model routing policy
+-   [ ]  Add provider fallback and retry policies
+-   [ ]  Add model/request observability
+-   [ ]  Keep application-level AI code provider-neutral
+
+### Phase 5 — Bedrock and Agentic AIOps
+
+-   [ ]  Integrate Amazon Bedrock through LiteLLM
 -   [ ]  Add Bedrock-powered RCA
 -   [ ]  Add operational RAG
 -   [ ]  Add controlled AI tools
@@ -357,7 +509,7 @@ Example controlled tools can include `get_pod_status`, `get_pod_logs`, `restart_
 -   [ ]  Add policy/approval gates
 -   [ ]  Add audit trail
 
-### Phase 5 — Temporal Autonomous Operations
+### Phase 6 — Temporal Autonomous Operations
 
 -   [ ]  Introduce Temporal
 -   [ ]  Define remediation workflows
@@ -368,7 +520,7 @@ Example controlled tools can include `get_pod_status`, `get_pod_logs`, `restart_
 -   [ ]  Implement escalation
 -   [ ]  Persist remediation history
 
-### Phase 6 — Full Observability
+### Phase 7 — Full Observability
 
 -   [ ]  Add metrics ingestion
 -   [ ]  Add trace ingestion
@@ -413,6 +565,12 @@ The intended end state is an enterprise-oriented **GenAI AIOps platform** that m
 ## Architectural Design
 
 ## Documentation
+
+### LLM Provider References
+
+-   LiteLLM: https://docs.litellm.ai/
+-   Ollama: https://docs.ollama.com/
+-   Amazon Bedrock Runtime: https://docs.aws.amazon.com/bedrock/latest/userguide/apis.html
 
 Copyright
 -------------------
