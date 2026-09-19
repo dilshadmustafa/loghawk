@@ -22,7 +22,7 @@ from lancedb.pydantic import LanceModel, Vector
 from torch.cuda import device
 import sys
 sys.path.append("C:\\aiopsmain\\loghawk\\")
-from loghawk_utils.lancedbutils import init_database
+from src.loghawk.loghawk_utils.lancedbutils import init_database
 
 # --- Configuration ---
 DB_FILE = "C:\\aiopsmain\\my_work\\mydb\\mylancedb"

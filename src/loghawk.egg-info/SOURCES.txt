@@ -1,0 +1,17 @@
+LICENSE
+NOTICE
+README.md
+pyproject.toml
+src/loghawk/__init__.py
+src/loghawk/config.py
+src/loghawk.egg-info/PKG-INFO
+src/loghawk.egg-info/SOURCES.txt
+src/loghawk.egg-info/dependency_links.txt
+src/loghawk.egg-info/requires.txt
+src/loghawk.egg-info/top_level.txt
+src/loghawk/admin/__init__.py
+src/loghawk/loghawk_utils/__init__.py
+src/loghawk/loghawk_utils/duckdbutils.py
+src/loghawk/loghawk_utils/genutils.py
+src/loghawk/loghawk_utils/lancedbutils.py
+src/loghawk/loghawk_utils/logutils.py

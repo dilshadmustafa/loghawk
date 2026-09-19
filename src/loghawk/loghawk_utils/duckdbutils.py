@@ -2,6 +2,7 @@ import duckdb
 import json
 from dotenv import load_dotenv
 import os
+import loghawk.config as config
 
 def db_insert(con,
               table_name,
@@ -48,18 +49,17 @@ def populate_convo_from_db(con, table_name, convo):
 
 
 def main():
-    load_dotenv()
-    DUCKDB_FILE_PATH = os.getenv("DUCKDB_FILE_PATH")
-    DUCKDB_TABLE_NAME = os.getenv("DUCKDB_TABLE_NAME")
-    print("DUCKDB FILE PATH : ", DUCKDB_FILE_PATH)
-    print("DUCKDB TABLE NAME : ", DUCKDB_TABLE_NAME)
+    
+    
+    print("here LH DUCKDB FILE PATH : ", config.LH_DUCKDB_FILE_PATH)
+    print("LH DUCKDB TABLE NAME : ", config.LH_DUCKDB_TABLE_NAME)
 
-    con = duckdb.connect(database="C:\\aiopsmain\\my_work\\mydb\\my_database.duckdb")
+    con = duckdb.connect(database=config.LH_DUCKDB_FILE_PATH)
 
-    # db_drop_table(con, DUCKDB_TABLE_NAME)
-    # db_create_table(con, DUCKDB_TABLE_NAME)
-    convo2 = []
-    populate_convo_from_db(con, DUCKDB_TABLE_NAME, convo2)
+    # db_drop_table(con, config.LH_DUCKDB_TABLE_NAME)
+    #db_create_table(con, config.LH_DUCKDB_TABLE_NAME)
+    convo = []
+    populate_convo_from_db(con, config.LH_DUCKDB_TABLE_NAME, convo)
     con.close()
 
 if __name__ == '__main__':
