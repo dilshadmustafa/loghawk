@@ -26,6 +26,34 @@ LH_DUCKDB_TABLE_NAME = os.getenv(
     "convo"
 )
 
+LH_LANCEDB_FILE_PATH = Path(os.getenv("LH_LANCEDB_FILE_PATH"))
+
+if not LH_LANCEDB_FILE_PATH.is_absolute():
+    LH_LANCEDB_FILE_PATH = PROJECT_ROOT / LH_LANCEDB_FILE_PATH
+
+LH_LANCEDB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+LH_LANCEDB_TABLE_NAME = os.getenv(
+    "LH_LANCEDB_TABLE_NAME",
+    "loghawk"
+)
+
+LH_DOCS_STORAGE_DIR_PATH = Path(os.getenv("LH_DOCS_STORAGE_DIR_PATH"))
+
+if not LH_DOCS_STORAGE_DIR_PATH.is_absolute():
+    LH_DOCS_STORAGE_DIR_PATH = PROJECT_ROOT / LH_DOCS_STORAGE_DIR_PATH
+
+LH_DOCS_STORAGE_DIR_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+LH_EMBEDDING_MODEL = os.getenv(
+    "LH_EMBEDDING_MODEL",
+    "BAAI/bge-small-en-v1.5"
+)
+
+
+
+
+
 def main():
     print("LH DUCKDB FILE PATH : ", LH_DUCKDB_FILE_PATH)
     print("LH DUCKDB TABLE NAME : ", LH_DUCKDB_TABLE_NAME)

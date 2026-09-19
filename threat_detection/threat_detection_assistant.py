@@ -1,10 +1,10 @@
 import ollama
 import duckdb
 from dotenv import load_dotenv
-from src.loghawk.loghawk_utils import genutils
+from src.loghawk.utils import genutils
 import os
 
-from src.loghawk.loghawk_utils import duckdbutils
+from src.loghawk.utils import duckdbutils
 
 load_dotenv()
 

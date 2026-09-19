@@ -14,8 +14,8 @@ from lancedb.embeddings import get_registry
 from lancedb.pydantic import LanceModel, Vector
 from huggingface_hub import login
 
-from src.loghawk.loghawk_utils import logutils
-from src.loghawk.loghawk_utils.lancedbutils import init_database
+from src.loghawk.utils import logutils
+from src.loghawk.utils.lancedbutils import init_database
 
 # --- Configuration ---
 DRY_RUN = False # Set to True to test logic without running the model

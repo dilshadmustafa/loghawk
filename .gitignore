@@ -8,6 +8,6 @@ __pycache__
 *.db
 security_kt_to_ragvectordb/docs_from_webscrap/
 old*
-
+data/*
 
 

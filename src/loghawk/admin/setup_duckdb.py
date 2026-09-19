@@ -2,7 +2,7 @@ import duckdb
 import json
 import os
 import loghawk.config as config
-import loghawk.loghawk_utils.duckdbutils as duckdbutils
+import loghawk.utils.duckdbutils as duckdbutils
 
 def main():
     
