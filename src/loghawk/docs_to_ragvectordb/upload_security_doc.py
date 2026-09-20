@@ -7,7 +7,8 @@
 # set PYTHONPATH=%PYTHONPATH%;C:\aiopsmain\loghawk\
 # Windows PowerShell:
 # $Env:PYTHONPATH = "%PYTHONPATH%;C:\aiopsmain\loghawk\"
-# Run this program using command 'streamlit run .\upload_security_doc.py'
+# Run this program using below command
+# streamlit run .\src\loghawk\docs_to_ragvectordb\upload_security_doc.py
 # This will open the upload web page in your Browser
 #
 import streamlit as st
@@ -19,30 +20,17 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama.llms import OllamaLLM
 from lancedb.embeddings import get_registry
 from lancedb.pydantic import LanceModel, Vector
-from torch.cuda import device
+#from torch.cuda import device
 import sys
-sys.path.append("C:\\aiopsmain\\loghawk\\")
-from src.loghawk.utils.lancedbutils import init_database
+import loghawk.config as config
+import loghawk.utils.lancedbutils as lancedbutils
+#import lancedb
+from pathlib import Path
 
-# --- Configuration ---
-DB_FILE = "C:\\aiopsmain\\my_work\\mydb\\mylancedb"
-TABLE_NAME = "loghawk"
-PDF_STORAGE_PATH = './security_docs/'
-
-# EmbeddingGemma (requires Hugging Face access request)
-# Visit: https://huggingface.co/google/embeddinggemma-300m
-# Run: huggingface-cli login
-EMBEDDING_MODEL = 'google/embeddinggemma-300m'  # Google's new EmbeddingGemma model
-EMBEDDING_DIMS = 256  # Truncated from 768 for 3x faster processing (Matryoshka learning)
-
-# More efficient and powerful than llama3
-LLM_MODEL = 'deepseek-r1:1.5b' #'qwen3:4b'  # 2.5GB, 256K context, rivals much larger models
-
-# Global model instance to avoid reloading
-EMBEDDING_MODEL_INSTANCE = None
+sys.path.append(".")
 
 # Get a sentence-transformer function
-func = get_registry().get("sentence-transformers").create(name=EMBEDDING_MODEL)
+func = get_registry().get("sentence-transformers").create(name=config.LH_EMBEDDING_MODEL)
 
 class MySchema(LanceModel):
     # Embed the 'text' field automatically
@@ -51,10 +39,7 @@ class MySchema(LanceModel):
     vector: Vector(func.ndims()) = func.VectorField()
 
 # Create a LanceDB table with the schema
-import lancedb
-#db = lancedb.connect("C:\\aiopsmain\\my_work\\mydb\\mylancedb")
-#table = db.open_table("mytable")
-db, table = init_database(DB_FILE, TABLE_NAME)
+db, table = lancedbutils.init_database(config.LH_LANCEDB_FILE_PATH, config.LH_LANCEDB_TABLE_NAME)
 
 #queriesQA = ""
 
@@ -129,10 +114,11 @@ Context: {document_context}
 Answer:
 """
 
-LANGUAGE_MODEL = OllamaLLM(model="deepseek-r1:1.5b")
+LANGUAGE_MODEL = OllamaLLM(model=config.LH_LLM_MODEL)
 
 def save_uploaded_file(uploaded_file):
-    file_path = PDF_STORAGE_PATH + uploaded_file.name
+    print("here: " + str(config.LH_DOCS_STORAGE_DIR_PATH) + str(Path("/")))
+    file_path = str(config.LH_DOCS_STORAGE_DIR_PATH) + str(Path("/")) + uploaded_file.name
     with open(file_path, "wb") as file:
         file.write(uploaded_file.getbuffer())
     return file_path

@@ -50,7 +50,10 @@ LH_EMBEDDING_MODEL = os.getenv(
     "BAAI/bge-small-en-v1.5"
 )
 
-
+LH_LLM_MODEL = os.getenv(
+    "LH_LLM_MODEL",
+    "gemma2:latest"
+)
 
 
 
