@@ -8,7 +8,7 @@ Before contributing, please read:
 
 *   `LICENSE`
 *   `NOTICE`
-*   `CLA.md`
+*   `ContributorLicenseAgreement.md`
 
 ## 1\. Contribution Model
 
