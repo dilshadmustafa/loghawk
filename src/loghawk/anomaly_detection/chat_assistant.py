@@ -1,30 +1,24 @@
 import ollama
 import duckdb
-from dotenv import load_dotenv
-from src.loghawk.utils import genutils
+from loghawk.utils import genutils
 import os
+from loghawk.utils import duckdbutils
+import loghawk.config as config
 
-from src.loghawk.utils import duckdbutils
-
-load_dotenv()
-
-DUCKDB_FILE_PATH = os.getenv("DUCKDB_FILE_PATH")
-DUCKDB_TABLE_NAME = os.getenv("DUCKDB_TABLE_NAME")
-
-print("DUCKDB FILE PATH : ", DUCKDB_FILE_PATH)
-print("DUCKDB TABLE NAME : ", DUCKDB_TABLE_NAME)
+print("DUCKDB FILE PATH : ", config.LH_DUCKDB_FILE_PATH)
+print("DUCKDB TABLE NAME : ", config.LH_DUCKDB_TABLE_NAME)
 
 convo = []
-con = duckdb.connect(database=DUCKDB_FILE_PATH)
+con = duckdb.connect(database=config.LH_DUCKDB_FILE_PATH)
 
 def stream_response(prompt):
     convo.append({"role": "user", "content": prompt})
     if not genutils.contains_mostly_numbers(prompt):
-        duckdbutils.db_insert(con, DUCKDB_TABLE_NAME, 'anon', 'anon',
+        duckdbutils.db_insert(con, config.LH_DUCKDB_TABLE_NAME, 'anon', 'anon',
                               'anon@anon.com', 'user',
                               content=prompt)
     response = ''
-    stream = ollama.chat(model="deepseek-r1:1.5b", messages=convo, stream=True)
+    stream = ollama.chat(model=config.LH_LLM_MODEL, messages=convo, stream=True)
     print(f"ASSISTANT: ")
     for chunk in stream:
         content = chunk["message"]["content"]
@@ -33,11 +27,11 @@ def stream_response(prompt):
     print("\n")
     print("End of Assistant Response\n")
     convo.append({ "role" : "assistant", "content" : response })
-    duckdbutils.db_insert(con, DUCKDB_TABLE_NAME, 'anon', 'anon',
+    duckdbutils.db_insert(con, config.LH_DUCKDB_TABLE_NAME, 'anon', 'anon',
                           'anon@anon.com', 'assistant',
                           content=response)
 
-duckdbutils.populate_convo_from_db(con, DUCKDB_TABLE_NAME, convo)
+duckdbutils.populate_convo_from_db(con, config.LH_DUCKDB_TABLE_NAME, convo)
 while True:
     prompt = genutils.get_multiline_input()
     #print("length of prompt : " + str(len(prompt)))

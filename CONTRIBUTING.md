@@ -37,9 +37,9 @@ For substantial architectural changes, please open an issue before starting impl
 
 ## 2\. Contributor License Agreement
 
-Before a contribution is accepted, the contributor must agree to the LogHawk Contributor License Agreement (`CLA.md`).
+Before a contribution is accepted, the contributor must agree to the LogHawk Contributor License Agreement (`ContributorLicenseAgreement.md`).
 
-The CLA is intended to establish that:
+The Contributor License Agreement (CLA) is intended to establish that:
 
 1.  The contributor has the right to submit the contribution.
 2.  The contributor retains ownership of the copyright in the contribution unless separately assigned.
@@ -52,7 +52,7 @@ Unless separately assigned in writing, contributors retain copyright in their or
 
 Acceptance of a contribution does not by itself transfer copyright ownership to the LogHawk maintainer.
 
-The contributor grants the rights specified in `CLA.md`.
+The contributor grants the rights specified in `ContributorLicenseAgreement.md`.
 
 ## 4\. Third-Party Code
 
@@ -106,7 +106,7 @@ Keep pull requests focused on a specific change whenever possible.
 
 Accepted contributions will be incorporated into LogHawk and distributed under the project's applicable licensing terms.
 
-The contributor grants the project the additional rights specified in `CLA.md`, including rights necessary for future commercial development and licensing of LogHawk.
+The contributor grants the project the additional rights specified in `ContributorLicenseAgreement.md`, including rights necessary for future commercial development and licensing of LogHawk.
 
 ## 9\. PolyForm Perimeter
 
@@ -132,7 +132,7 @@ Acceptance of a pull request does not alter the copyright ownership of the contr
 
 The LogHawk project may in the future be operated by a company, organization, foundation, or other legal entity.
 
-The rights granted under `CLA.md` are intended to permit the continued development and distribution of contributions if the project is transferred to such an entity.
+The rights granted under `ContributorLicenseAgreement.md` are intended to permit the continued development and distribution of contributions if the project is transferred to such an entity.
 
 ## 12\. Questions
 
