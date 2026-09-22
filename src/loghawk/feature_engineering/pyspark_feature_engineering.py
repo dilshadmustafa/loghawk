@@ -9,6 +9,13 @@ from pyspark.sql.types import (
 )
 import loghawk.config as config
 
+import os
+
+os.environ["JAVA_HOME"] = r"C:\\jdk-17"
+os.environ["HADOOP_HOME"] = r"C:\\hadoop"
+os.environ["PATH"] += r";C:\\hadoop\\bin"
+os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"
+
 # ---------------------------------------------------------
 # 1. Spark session
 # ---------------------------------------------------------
@@ -26,8 +33,8 @@ spark.sparkContext.setLogLevel("WARN")
 # 2. Input
 # ---------------------------------------------------------
 
-INPUT_PATH = config.LH_LOG_DIR / "*.json"
-OUTPUT_PATH = config.LH_FEATURE_DIR
+INPUT_PATH = str(config.LH_LOG_DIR)
+OUTPUT_PATH = str(config.LH_FEATURE_DIR)
 
 # Expected JSON example:
 #

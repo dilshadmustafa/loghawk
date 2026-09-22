@@ -1,0 +1,81 @@
+{\rtf1\ansi\deff0\fs24\viewkind4\pard\sa200
+LogHawk Windows PySpark Setup Guide\par
+\par
+1. Why this is needed\par
+PySpark on Windows needs a compatible JDK and a Hadoop WinUtils install.\par
+If the Java version is not compatible with the Spark build, Spark fails at startup.\par
+If WinUtils is missing or mismatched, Hadoop file access fails.\par
+\par
+2. Install JDK 17\par
+Recommended: Java 17 LTS\par
+Download: https://www.oracle.com/java/technologies/downloads/#java17\par
+Alternative: https://adoptium.net/temurin/releases/?version=17\par
+Install JDK 17 and then set:\par
+setx JAVA_HOME "C:\\Program Files\\Java\\jdk-17"\par
+setx PATH "%JAVA_HOME%\\bin;%PATH%"\par
+Verify:\par
+java -version\par
+Important: do not use JDK 27 or an unsupported Java version with a typical Spark 3.x install.\par
+\par
+3. Install Hadoop WinUtils for Windows\par
+Use a Hadoop version compatible with the Spark build.\par
+For Spark 3.x, Hadoop 3.3.x is a safe choice.\par
+WinUtils repository: https://github.com/cdarlint/winutils\par
+Example matching version: https://github.com/cdarlint/winutils/tree/master/hadoop-3.3.4/bin\par
+Apache Hadoop release page: https://downloads.apache.org/hadoop/common/\par
+Create the folder:\par
+C:\\hadoop\\bin\par
+Copy these files into that folder:\par
+winutils.exe\par
+hadoop.dll\par
+Set environment variables:\par
+setx HADOOP_HOME "C:\\hadoop"\par
+setx PATH "%HADOOP_HOME%\\bin;%PATH%"\par
+Restart VS Code or the terminal after setting the variables.\par
+\par
+4. Use the correct environment setup in Python\par
+Example:\par
+import os\par
+os.environ["JAVA_HOME"] = r"C:\\Program Files\\Java\\jdk-17"\par
+os.environ["HADOOP_HOME"] = r"C:\\hadoop"\par
+os.environ["PATH"] = r"C:\\Program Files\\Java\\jdk-17\\bin;C:\\hadoop\\bin;" + os.environ.get("PATH", "")\par
+os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"\par
+\par
+5. Spark session example\par
+from pyspark.sql import SparkSession\par
+spark = (\par
+    SparkSession.builder\par
+    .appName("LogHawk-FeatureEngineering")\par
+    .master("local[*]")\par
+    .getOrCreate()\par
+)\par
+\par
+6. Common errors and what they mean\par
+Error: ClassNotFoundException: jdk.internal.ref.Cleaner\par
+Cause: incompatible Java version. Use Java 17.\par
+Error: HADOOP_HOME and hadoop.home.dir are unset\par
+Cause: WinUtils/Hadoop home not configured.\par
+Error: UnsatisfiedLinkError: NativeIO$Windows.access0\par
+Cause: missing or incompatible hadoop.dll / WinUtils install.\par
+\par
+7. Final checklist\par
+- Java 17 installed\par
+- JAVA_HOME set to C:\\Program Files\\Java\\jdk-17\par
+- Hadoop 3.3.x WinUtils downloaded\par
+- C:\\hadoop\\bin contains winutils.exe and hadoop.dll\par
+- HADOOP_HOME set to C:\\hadoop\par
+- VS Code terminal restarted\par
+- Spark session starts successfully\par
+\par
+8. Recommended setup pair\par
+- JDK: 17\par
+- Spark: 3.x\par
+- Hadoop WinUtils: 3.3.x\par
+\par
+9. If you still get errors\par
+1. Verify the Java version: java -version\par
+2. Verify the Hadoop home: echo %HADOOP_HOME%\par
+3. Check the files in C:\\hadoop\\bin\par
+4. Make sure the WinUtils version matches the Spark/Hadoop compatibility you installed\par
+5. Restart the terminal and rerun the script\par
+}
