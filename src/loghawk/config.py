@@ -55,6 +55,20 @@ LH_LLM_MODEL = os.getenv(
     "gemma2:latest"
 )
 
+LH_LOG_DIR = Path(os.getenv("LH_LOG_DIR"))
+
+if not LH_LOG_DIR.is_absolute():
+    LH_LOG_DIR = PROJECT_ROOT / LH_LOG_DIR
+
+LH_LOG_DIR.parent.mkdir(parents=True, exist_ok=True)
+
+LH_FEATURE_DIR = Path(os.getenv("LH_FEATURE_DIR"))
+
+if not LH_FEATURE_DIR.is_absolute():
+    LH_FEATURE_DIR = PROJECT_ROOT / LH_FEATURE_DIR
+
+LH_FEATURE_DIR.parent.mkdir(parents=True, exist_ok=True)
+
 
 
 def main():
