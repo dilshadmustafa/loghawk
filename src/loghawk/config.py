@@ -69,6 +69,29 @@ if not LH_FEATURE_DIR.is_absolute():
 
 LH_FEATURE_DIR.parent.mkdir(parents=True, exist_ok=True)
 
+LH_ANOMALY_DETECTION_DIR = Path(os.getenv("LH_ANOMALY_DETECTION_DIR"))
+
+if not LH_ANOMALY_DETECTION_DIR.is_absolute():
+    LH_ANOMALY_DETECTION_DIR = PROJECT_ROOT / LH_ANOMALY_DETECTION_DIR
+
+LH_ANOMALY_DETECTION_DIR.parent.mkdir(parents=True, exist_ok=True)
+
+LH_MODEL_DIR = Path(os.getenv("LH_MODEL_DIR"))
+
+if not LH_MODEL_DIR.is_absolute():
+    LH_MODEL_DIR = PROJECT_ROOT / LH_MODEL_DIR
+
+LH_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
+
+
+
+
+
+
+
+
+
+
 
 
 def main():
