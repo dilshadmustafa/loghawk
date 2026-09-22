@@ -1,0 +1,118 @@
+{\rtf1\ansi\deff0\fs24\viewkind4\pard\sa200
+MinIO Setup Guide for Windows\par
+\par
+1. Download MinIO\par
+Go to: https://min.io/download\par
+\par
+2. Create local data directory\par
+mkdir C:\\minio\\data\par
+\par
+3. Set MinIO credentials\par
+setx MINIO_ROOT_USER minioadmin\par
+setx MINIO_ROOT_PASSWORD minioadmin\par
+\par
+4. Start MinIO\par
+C:\\minio\\minio.exe server C:\\minio\\data --console-address ":9001"\par
+\par
+5. Open MinIO console\par
+http://localhost:9001\par
+\par
+Login:\par
+Username: minioadmin\par
+Password: minioadmin\par
+\par
+6. Create bucket\par
+Create a bucket named:\par
+loghawk\par
+\par
+7. Optional: create a folder inside the bucket\par
+You can use:\par
+loghawk/logs\par
+\par
+8. Upload local files to MinIO\par
+import os\par
+import boto3\par
+\par
+s3 = boto3.client(\par
+    "s3",\par
+    endpoint_url="http://localhost:9000",\par
+    aws_access_key_id="minioadmin",\par
+    aws_secret_access_key="minioadmin",\par
+    region_name="us-east-1"\par
+)\par
+\par
+bucket = "loghawk"\par
+local_dir = r"C:\\mywork\\loghawk\\data\\logs"\par
+\par
+for root, _, files in os.walk(local_dir):\par
+    for file in files:\par
+        local_path = os.path.join(root, file)\par
+        key = os.path.relpath(local_path, local_dir).replace("\\\\", "/")\par
+        s3.upload_file(local_path, bucket, f"logs/\{key\}")\par
+        print(f"Uploaded: \{local_path\} -> logs/\{key\}")\par
+\par
+9. List objects in the bucket\par
+import boto3\par
+\par
+s3 = boto3.client(\par
+    "s3",\par
+    endpoint_url="http://localhost:9000",\par
+    aws_access_key_id="minioadmin",\par
+    aws_secret_access_key="minioadmin",\par
+    region_name="us-east-1"\par
+)\par
+\par
+response = s3.list_objects_v2(Bucket="loghawk", Prefix="logs/")\par
+for item in response.get("Contents", []):\par
+    print(item["Key"])\par
+\par
+10. Read a file from MinIO\par
+import boto3\par
+\par
+s3 = boto3.client(\par
+    "s3",\par
+    endpoint_url="http://localhost:9000",\par
+    aws_access_key_id="minioadmin",\par
+    aws_secret_access_key="minioadmin",\par
+    region_name="us-east-1"\par
+)\par
+\par
+obj = s3.get_object(Bucket="loghawk", Key="logs/sample.json")\par
+print(obj["Body"].read().decode("utf-8"))\par
+\par
+11. S3 URI style\par
+MinIO is S3-compatible, so you can think in S3 paths like:\par
+s3://loghawk/logs/sample.json\par
+\par
+Your client still needs:\par
+- endpoint URL\par
+- access key\par
+- secret key\par
+- bucket name\par
+\par
+12. Spark with MinIO\par
+from pyspark.sql import SparkSession\par
+\par
+spark = (\par
+    SparkSession.builder\par
+    .appName("MinIO-Spark-Example")\par
+    .config("spark.hadoop.fs.s3a.endpoint", "http://localhost:9000")\par
+    .config("spark.hadoop.fs.s3a.access.key", "minioadmin")\par
+    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin")\par
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")\par
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")\par
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")\par
+    .getOrCreate()\par
+)\par
+\par
+df = spark.read.json("s3a://loghawk/logs/")\par
+df.show()\par
+\par
+13. Notes\par
+MinIO is not a Windows folder.\par
+It is an S3-compatible object store.\par
+Local files stay in: C:\\mywork\\loghawk\\data\\logs\par
+MinIO is used for S3-style storage and access.\par
+\par
+End of guide.\par
+}
