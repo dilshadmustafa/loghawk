@@ -80,6 +80,39 @@ def retrieve_rag_context(prompt: str, top_k: int = 5) -> str:
 
     return "\n\n".join(context_chunks[:top_k])
 
+def safe_ollama_chat(model_name: str, messages: list, stream: bool = True):
+    candidates = []
+    primary = str(model_name).strip()
+    if primary:
+        candidates.append(primary)
+
+    fallback_models = [
+        getattr(config, "LH_LLM_FALLBACK_MODEL", None),
+        "llama3.2:1b",
+        "qwen2.5:0.5b",
+        "tinyllama",
+    ]
+    for fallback in fallback_models:
+        if fallback and fallback not in candidates:
+            candidates.append(str(fallback))
+
+    last_error = None
+    for candidate in candidates:
+        for attempt in (
+            {"model": candidate, "messages": messages, "stream": stream, "options": {"num_gpu": 1}},
+            {"model": candidate, "messages": messages, "stream": stream},
+        ):
+            try:
+                print(f"Trying Ollama model: {candidate} (GPU on: {attempt.get('options') is not None})")
+                return ollama.chat(**attempt)
+            except Exception as e:
+                last_error = e
+                print(f"Ollama model failed: {candidate} -> {e}")
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError("All Ollama model attempts failed.")
 
 def stream_response(prompt):
     rag_context = retrieve_rag_context(prompt)
@@ -106,12 +139,22 @@ def stream_response(prompt):
         )
 
     response = ""
-    stream = ollama.chat(model=config.LH_LLM_MODEL, messages=convo, stream=True)
-    print("ASSISTANT: ")
-    for chunk in stream:
-        content = chunk["message"]["content"]
-        response += content
-        print(content, end="", flush=True)
+    try:
+        stream = safe_ollama_chat(config.LH_LLM_MODEL, convo, stream=True)
+        print("ASSISTANT: ")
+        for chunk in stream:
+            content = chunk["message"]["content"]
+            response += content
+            print(content, end="", flush=True)
+    except Exception as e:
+        print(f"\nOllama chat failed: {e}")
+        print("Falling back to a short error response.")
+        response = (
+            "I couldn't generate a response because the local Ollama model failed to initialize. "
+            "Please verify the model is installed and the local GPU/driver is compatible."
+        )
+        print(response)
+
     print("\n")
     print("End of Assistant Response\n")
 
@@ -125,7 +168,6 @@ def stream_response(prompt):
         "assistant",
         content=response
     )
-
 
 duckdbutils.populate_convo_from_db(con, config.LH_DUCKDB_TABLE_NAME, convo)
 
