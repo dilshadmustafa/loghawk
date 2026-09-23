@@ -1,0 +1,135 @@
+SeaweedFS + WSL2 + Docker Desktop + AWS CLI Setup Guide for Windows
+
+Install WSL2
+Open PowerShell as Administrator and run:
+wsl --list --online
+wsl --install -d Ubuntu-26.04
+If Ubuntu is already installed, confirm WSL version:
+wsl -l -v
+
+Install Docker Desktop for Windows
+Download and install Docker Desktop from:
+https://www.docker.com/products/docker-desktop/
+After install, open Docker Desktop and go to Settings > General.
+Enable:
+"Use the WSL 2 based engine"
+
+Verify Docker is working
+Open a fresh PowerShell window and run:
+docker --version
+docker compose version
+
+Put the SeaweedFS Docker Compose file in a folder
+Example folder:
+C:\mywork\loghawk\src\loghawk\admin
+
+Use the following file:
+docker-compose.yml
+
+version: "3.8"
+
+services:
+master:
+image: chrislusf/seaweedfs:latest
+container_name: seaweed-master
+command: "master -ip=master -port=9333"
+ports:
+- "9333:9333"
+- "19333:19333"
+networks:
+- seaweed
+
+volume:
+image: chrislusf/seaweedfs:latest
+container_name: seaweed-volume
+command: "volume -mserver=master:9333 -dir=/data -port=8080"
+depends_on:
+- master
+volumes:
+- C:/seaweedfs/data:/data
+ports:
+- "8080:8080"
+networks:
+- seaweed
+
+filer:
+image: chrislusf/seaweedfs:latest
+container_name: seaweed-filer
+command: "filer -master=master:9333 -port=8888"
+depends_on:
+- master
+- volume
+ports:
+- "8888:8888"
+networks:
+- seaweed
+
+s3:
+image: chrislusf/seaweedfs:latest
+container_name: seaweed-s3
+command: "s3 -filer=filer:8888 -port=8333"
+depends_on:
+- filer
+ports:
+- "8333:8333"
+networks:
+- seaweed
+
+networks:
+seaweed:
+driver: bridge
+
+Start SeaweedFS with Docker Compose
+From the folder containing docker-compose.yml:
+cd C:\mywork\loghawk\src\loghawk\admin
+docker compose up -d
+Check running containers:
+docker ps
+
+Install AWS CLI on Windows
+Open PowerShell and run:
+winget install Amazon.AWSCLI
+Then verify:
+aws --version
+
+Configure local S3 credentials
+Set dummy credentials because SeaweedFS is S3-compatible but not AWS:
+set AWS_ACCESS_KEY_ID=somekey
+set AWS_SECRET_ACCESS_KEY=somesecret
+set AWS_DEFAULT_REGION=us-east-1
+
+Test SeaweedFS S3 endpoint
+List buckets:
+aws --endpoint-url http://localhost:8333 s3 ls
+
+Create a bucket
+aws --endpoint-url http://localhost:8333 s3 mb s3://mybucket
+
+Upload a sample file
+aws --endpoint-url http://localhost:8333 s3 cp loghawk_sample_logs.json s3://mybucket/sample_logs.json
+
+Verify the uploaded file
+aws --endpoint-url http://localhost:8333 s3 ls s3://mybucket
+
+Notes
+
+SeaweedFS provides an S3-compatible API, not Azure Blob protocol.
+Docker Desktop should be running with WSL2 backend.
+The local AWS CLI credentials are dummy values for the local object store.
+For better Docker performance, keep your project in the WSL filesystem if possible.
+Troubleshooting
+If Docker compose is not recognized:
+Ensure Docker Desktop is installed and running
+Ensure WSL2 backend is enabled
+Restart PowerShell or the machine
+If AWS CLI says "Unable to locate credentials":
+Set the dummy credentials again:
+set AWS_ACCESS_KEY_ID=somekey
+set AWS_SECRET_ACCESS_KEY=somesecret
+set AWS_DEFAULT_REGION=us-east-1
+
+If the SeaweedFS endpoint is not reachable:
+
+Check docker ps
+Check docker compose logs
+Confirm the S3 port 8333 is exposed
