@@ -1,4 +1,4 @@
-venv
+venv*
 .venv
 tryfiles/
 security_docs_to_ragvectordb/security_docs/
@@ -9,5 +9,8 @@ __pycache__
 security_kt_to_ragvectordb/docs_from_webscrap/
 old*
 data/*
+.vscode
+loghawk.egg-info
+
 
 
