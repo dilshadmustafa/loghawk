@@ -24,20 +24,20 @@ The long-term goal is to move LogHawk through:
 
 ### Objectives And Features
 
-> - **Multi-source observability:** ingest logs from Elasticsearch, Splunk, files, JSON and CSV, with future support for metrics, traces and OpenTelemetry.
-> - **AI-powered log intelligence:** combine deterministic detection, machine learning and GenAI for operational and security analysis.
-> - **Detection-first anomaly detection:** detect volume, error-rate, HTTP 4xx/5xx, timeout, connection-error, authentication-failure and novel-event anomalies.
-> - **Feature-based detection:** normalize logs, aggregate them into time windows, engineer numerical features, establish baselines and apply statistical/time-series detectors plus Isolation Forest.
-> - **Incident correlation:** group related anomalies into coherent incidents instead of producing alert storms.
-> - **Security threat detection:** retain NIST, CVE and MITRE ATT&CK knowledge and security-focused RAG.
-> - **Operational RAG:** ingest runbooks, incident history, architecture documentation and troubleshooting material in addition to PDF/HTML/Markdown/CSV/JSON sources.
-> - **AI-assisted RCA:** generate incident summaries, probable root causes, supporting evidence, uncertainty and recommended actions from retrieved context.
-> - **Amazon Bedrock integration:** use managed GenAI for enterprise RAG, RCA, agent reasoning and tool selection.
-> - **Agentic AIOps:** allow an AI agent to investigate incidents and recommend actions through controlled tools.
-> - **Durable remediation:** use Temporal for stateful workflows, retries, timeouts, approval waits, verification, rollback and escalation.
-> - **Big-data processing:** use PySpark for large-scale ingestion, normalization, aggregation and feature engineering.
-> - **Workflow automation:** use n8n for scheduled ingestion, knowledge refreshes, notifications and lightweight integrations.
-> - **Durable data pipeline:** use SeaweedFS S3-compatible object storage as a local/cloud-neutral data boundary between ingestion, feature engineering, anomaly detection and downstream AI processing.
+> -   **Multi-source observability:** ingest logs from Elasticsearch, Splunk, files, JSON and CSV, with future support for metrics, traces and OpenTelemetry.
+> -   **AI-powered log intelligence:** combine deterministic detection, machine learning and GenAI for operational and security analysis.
+> -   **Detection-first anomaly detection:** detect volume, error-rate, HTTP 4xx/5xx, timeout, connection-error, authentication-failure and novel-event anomalies.
+> -   **Feature-based detection:** normalize logs, aggregate them into time windows, engineer numerical features, establish baselines and apply statistical/time-series detectors plus Isolation Forest.
+> -   **Incident correlation:** group related anomalies into coherent incidents instead of producing alert storms.
+> -   **Security threat detection:** retain NIST, CVE and MITRE ATT&CK knowledge and security-focused RAG.
+> -   **Operational RAG:** ingest runbooks, incident history, architecture documentation and troubleshooting material in addition to PDF/HTML/Markdown/CSV/JSON sources.
+> -   **AI-assisted RCA:** generate incident summaries, probable root causes, supporting evidence, uncertainty and recommended actions from retrieved context.
+> -   **Amazon Bedrock integration:** use managed GenAI for enterprise RAG, RCA, agent reasoning and tool selection.
+> -   **Agentic AIOps:** allow an AI agent to investigate incidents and recommend actions through controlled tools.
+> -   **Durable remediation:** use Temporal for stateful workflows, retries, timeouts, approval waits, verification, rollback and escalation.
+> -   **Big-data processing:** use PySpark for large-scale ingestion, normalization, aggregation and feature engineering.
+> -   **Workflow automation:** use n8n for scheduled ingestion, knowledge refreshes, notifications and lightweight integrations.
+> -   **Durable data pipeline:** use SeaweedFS S3-compatible object storage as a local/cloud-neutral data boundary between ingestion, feature engineering, anomaly detection and downstream AI processing.
 
 ---
 
@@ -71,12 +71,12 @@ The machine-learning and data-processing stages should remain independently exec
 
 This separation allows LogHawk to run:
 
-- individual processing stages during development;
-- the complete pipeline through Temporal;
-- local inference through Ollama;
-- cloud inference through Amazon Bedrock;
-- lightweight external automation through n8n;
-- deterministic remediation through Temporal workflows.
+-   individual processing stages during development;
+-   the complete pipeline through Temporal;
+-   local inference through Ollama;
+-   cloud inference through Amazon Bedrock;
+-   lightweight external automation through n8n;
+-   deterministic remediation through Temporal workflows.
 
 ---
 
@@ -126,7 +126,7 @@ The processing flow is:
 Raw JSON / Application Logs
             |
             v
-      SeaweedFS S3
+      SeaweedFS S3 / MINIO S3 / AWS S3
             |
             v
          PySpark
@@ -144,7 +144,7 @@ Raw JSON / Application Logs
           Parquet
             |
             v
-      SeaweedFS S3
+      SeaweedFS S3 / MINIO S3 / AWS S3
 ```
 
 Example:
@@ -153,7 +153,6 @@ Example:
 Input
 
 s3a://loghawk-data/raw/year=2026/month=09/day=23/
-
 
 Output
 
@@ -192,15 +191,15 @@ The output is a structured feature dataset rather than raw log text.
 
 Stage A is responsible for:
 
-- log parsing;
-- schema normalization;
-- timestamp normalization;
-- service identification;
-- severity normalization;
-- time-window aggregation;
-- numerical feature generation;
-- baseline preparation;
-- writing feature datasets to SeaweedFS/S3.
+-   log parsing;
+-   schema normalization;
+-   timestamp normalization;
+-   service identification;
+-   severity normalization;
+-   time-window aggregation;
+-   numerical feature generation;
+-   baseline preparation;
+-   writing feature datasets to SeaweedFS/S3.
 
 Stage A should **not** perform LLM-based RCA or remediation.
 
@@ -241,7 +240,7 @@ Stage B consumes the feature dataset generated by Stage A.
        Evidence / Metadata
                 |
                 v
-          SeaweedFS S3
+          SeaweedFS S3 / MINIO S3 / AWS S3
 ```
 
 The initial ML detector is **scikit-learn Isolation Forest**.
@@ -250,13 +249,13 @@ The initial ML detector is **scikit-learn Isolation Forest**.
 
 Stage B is responsible for:
 
-- reading feature datasets;
-- applying statistical/baseline detectors;
-- applying Isolation Forest;
-- generating anomaly scores;
-- determining anomaly flags;
-- attaching detector metadata;
-- persisting anomaly results.
+-   reading feature datasets;
+-   applying statistical/baseline detectors;
+-   applying Isolation Forest;
+-   generating anomaly scores;
+-   determining anomaly flags;
+-   attaching detector metadata;
+-   persisting anomaly results.
 
 Example output:
 
@@ -298,7 +297,7 @@ The recommended architecture is to **keep Stage A and Stage B as separate proces
               Feature Parquet
                        |
                        v
-                 SeaweedFS
+                 SeaweedFS S3 / MINIO S3 / AWS S3
                        |
                        v
               Stage B Activity
@@ -310,7 +309,7 @@ The recommended architecture is to **keep Stage A and Stage B as separate proces
              Anomaly Parquet
                        |
                        v
-                 SeaweedFS
+                 SeaweedFS S3 / MINIO S3 / AWS S3
 ```
 
 Temporal does not replace PySpark or scikit-learn.
@@ -408,7 +407,6 @@ def run_feature_engineering(input_path, output_path):
     # Execute Stage A PySpark processing
     ...
 
-
 @activity.defn
 def run_anomaly_detection(feature_path, output_path):
     # Execute Stage B Isolation Forest processing
@@ -453,17 +451,17 @@ Temporal is used for the core, durable AIOps execution pipeline.
 
 It is appropriate for:
 
-- long-running workflows;
-- durable workflow state;
-- retries;
-- timeouts;
-- failure recovery;
-- human approval/wait states;
-- verification;
-- compensation/rollback;
-- escalation;
-- auditability;
-- remediation workflows.
+-   long-running workflows;
+-   durable workflow state;
+-   retries;
+-   timeouts;
+-   failure recovery;
+-   human approval/wait states;
+-   verification;
+-   compensation/rollback;
+-   escalation;
+-   auditability;
+-   remediation workflows.
 
 The Stage A → Stage B pipeline therefore belongs primarily to Temporal.
 
@@ -529,14 +527,14 @@ Therefore:
 
 ---
 
-# SeaweedFS as the Data Boundary
+# SeaweedFS S3 / MINIO S3 / AWS S3 as the Data Boundary
 
 SeaweedFS provides the local S3-compatible object-storage layer for the development environment.
 
 The object-storage boundary allows the processing stages to remain loosely coupled.
 
 ```text
-                    SeaweedFS S3
+                    SeaweedFS S3 / MINIO S3 / AWS S3
                          |
         +----------------+----------------+
         |                |                |
@@ -602,7 +600,7 @@ Data Sources
           n8n / OTel / APIs
                 |
                 v
-            SeaweedFS
+            SeaweedFS S3 / MINIO S3 / AWS S3
                 |
                 v
        +--------------------+
@@ -665,18 +663,18 @@ Data Sources
 
 # System Responsibilities
 
-- **SeaweedFS S3** — local S3-compatible object storage and durable data boundary between processing stages.
-- **LanceDB** — RAG retrieval store for embeddings, searchable knowledge chunks, incident evidence and associated metadata.
-- **DuckDB** — structured analytical storage and conversation history, including chat sessions, messages, agent/tool history and incident/history records.
-- **PySpark** — large-scale ingestion, parsing, normalization, aggregation and feature engineering.
-- **scikit-learn Isolation Forest** — initial machine-learning anomaly detection.
-- **Statistical/EWMA detectors** — explainable baseline and time-series anomaly detection.
-- **Temporal** — durable orchestration of the core AIOps workflow and remediation.
-- **n8n** — scheduling, ingestion triggers, knowledge refreshes, notifications and lightweight integrations.
-- **LiteLLM** — unified LLM gateway/router for local and cloud inference.
-- **Ollama + Gemma 2 (`gemma2:latest`)** — local/private LLM inference for development, offline use and privacy-sensitive workloads.
-- **Amazon Bedrock** — managed enterprise GenAI for production/cloud RCA, RAG and agent reasoning.
-- **Kubernetes / AWS / Terraform** — remediation targets.
+-   **SeaweedFS S3 / MINIO S3 / AWS S3** — local S3-compatible or AWS cloud S3 object storage and durable data boundary between processing stages.
+-   **LanceDB** — RAG retrieval store for embeddings, searchable knowledge chunks, incident evidence and associated metadata.
+-   **DuckDB** — structured analytical storage and conversation history, including chat sessions, messages, agent/tool history and incident/history records.
+-   **PySpark** — large-scale ingestion, parsing, normalization, aggregation and feature engineering.
+-   **scikit-learn Isolation Forest** — initial machine-learning anomaly detection.
+-   **Statistical/EWMA detectors** — explainable baseline and time-series anomaly detection.
+-   **Temporal** — durable orchestration of the core AIOps workflow and remediation.
+-   **n8n** — scheduling, ingestion triggers, knowledge refreshes, notifications and lightweight integrations.
+-   **LiteLLM** — unified LLM gateway/router for local and cloud inference.
+-   **Ollama + Gemma 2 (`gemma2:latest`)** — local/private LLM inference for development, offline use and privacy-sensitive workloads.
+-   **Amazon Bedrock** — managed enterprise GenAI for production/cloud RCA, RAG and agent reasoning.
+-   **Kubernetes / AWS / Terraform** — remediation targets.
 
 ---
 
@@ -781,12 +779,12 @@ This allows the same RCA/agent application code to use local Gemma 2 during deve
 
 The model-selection policy can later support:
 
-- local-first inference;
-- cloud fallback;
-- task-specific model routing;
-- cost-aware routing;
-- privacy-aware routing;
-- retry/fallback between model deployments.
+-   local-first inference;
+-   cloud fallback;
+-   task-specific model routing;
+-   cost-aware routing;
+-   privacy-aware routing;
+-   retry/fallback between model deployments.
 
 ---
 
@@ -830,7 +828,7 @@ Logs/Metrics/Traces       NIST/CVE/ATT&CK          Runbooks/History
                            n8n / OpenTelemetry
                                  |
                                  v
-                          SeaweedFS S3
+                          SeaweedFS S3 / MINIO S3 / AWS S3
                                  |
                                  v
                       +---------------------+
@@ -956,14 +954,14 @@ Rolling/EWMA/Statistical   Isolation Forest
 
 ## Initial Detector Types
 
-1. Volume anomaly
-2. Error-rate anomaly
-3. HTTP 4xx/5xx anomaly
-4. Timeout anomaly
-5. Connection-error anomaly
-6. Authentication-failure anomaly
-7. Novel-event anomaly
-8. Isolation Forest multivariate anomaly
+1.  Volume anomaly
+2.  Error-rate anomaly
+3.  HTTP 4xx/5xx anomaly
+4.  Timeout anomaly
+5.  Connection-error anomaly
+6.  Authentication-failure anomaly
+7.  Novel-event anomaly
+8.  Isolation Forest multivariate anomaly
 
 ---
 
@@ -1045,11 +1043,11 @@ hypothesis       remediation
 
 RCA should distinguish:
 
-- **observed evidence**;
-- **likely explanation**;
-- **uncertainty**;
-- **alternative hypotheses**;
-- **recommended action**.
+-   **observed evidence**;
+-   **likely explanation**;
+-   **uncertainty**;
+-   **alternative hypotheses**;
+-   **recommended action**.
 
 The AI should not directly execute high-impact infrastructure actions without the appropriate policy and workflow controls.
 
@@ -1122,7 +1120,6 @@ raw/
    v
 features/
 
-
 Stage B
 
 features/
@@ -1130,14 +1127,12 @@ features/
    v
 anomalies/
 
-
 Stage C
 
 anomalies/
    |
    v
 incidents/
-
 
 Stage D
 
@@ -1149,7 +1144,6 @@ RAG knowledge
    |
    v
 RCA
-
 
 Stage E
 
@@ -1163,11 +1157,11 @@ remediation
 
 This allows every stage to be:
 
-- independently developed;
-- independently tested;
-- independently executed;
-- retried independently;
-- replaced without redesigning the entire system.
+-   independently developed;
+-   independently tested;
+-   independently executed;
+-   retried independently;
+-   replaced without redesigning the entire system.
 
 ---
 
@@ -1203,7 +1197,6 @@ n8n
  +--> Schedule
  +--> Refresh
 
-
 Temporal
  |
  +--> Orchestrate
@@ -1224,7 +1217,7 @@ Temporal
 |---|---|
 | Elasticsearch / Splunk / Files / JSON / CSV | Log sources |
 | OpenTelemetry | Future logs/metrics/traces integration |
-| SeaweedFS S3 | Local S3-compatible object storage and stage-to-stage data boundary |
+| SeaweedFS S3 / MINIO S3 / AWS S3 | Local S3-compatible or AWS cloud S3 object storage and stage-to-stage data boundary |
 | PySpark | Big-data ingestion, aggregation and feature engineering |
 | DuckDB / Parquet | Structured analytics, conversation history and operational history storage |
 | LanceDB | RAG retrieval: embeddings, searchable text, metadata and hybrid vector/keyword search |
@@ -1312,43 +1305,43 @@ Temporal should therefore **call** the processing components rather than duplica
 
 ## Phase 1 — Detection Foundation
 
-- [ ] Define normalized event schema
-- [ ] Parse and normalize logs
-- [ ] Implement SeaweedFS S3 raw-log storage
-- [ ] Implement 1-minute aggregation
-- [ ] Implement anomaly feature extraction
-- [ ] Build baseline datasets
-- [ ] Implement statistical/EWMA detectors
-- [ ] Implement Isolation Forest
-- [ ] Persist feature datasets as Parquet
-- [ ] Persist anomaly results
-- [ ] Add anomaly API/dashboard
-- [ ] Add synthetic anomalous-log test data
+-   [ ]  Define normalized event schema
+-   [ ]  Parse and normalize logs
+-   [ ]  Implement SeaweedFS S3 raw-log storage
+-   [ ]  Implement 1-minute aggregation
+-   [ ]  Implement anomaly feature extraction
+-   [ ]  Build baseline datasets
+-   [ ]  Implement statistical/EWMA detectors
+-   [ ]  Implement Isolation Forest
+-   [ ]  Persist feature datasets as Parquet
+-   [ ]  Persist anomaly results
+-   [ ]  Add anomaly API/dashboard
+-   [ ]  Add synthetic anomalous-log test data
 
 ## Phase 2 — Stage A → Stage B Pipeline
 
-- [ ] Finalize Stage A PySpark interface
-- [ ] Finalize Stage A input/output data contract
-- [ ] Finalize Stage B Isolation Forest interface
-- [ ] Finalize Stage B input/output data contract
-- [ ] Validate `raw → features → anomalies`
-- [ ] Add stage-level logging
-- [ ] Add stage-level error handling
-- [ ] Add stage-level test datasets
-- [ ] Validate SeaweedFS S3 data boundaries
+-   [ ]  Finalize Stage A PySpark interface
+-   [ ]  Finalize Stage A input/output data contract
+-   [ ]  Finalize Stage B Isolation Forest interface
+-   [ ]  Finalize Stage B input/output data contract
+-   [ ]  Validate `raw → features → anomalies`
+-   [ ]  Add stage-level logging
+-   [ ]  Add stage-level error handling
+-   [ ]  Add stage-level test datasets
+-   [ ]  Validate SeaweedFS S3 data boundaries
 
 ## Phase 3 — Temporal Orchestration
 
-- [ ] Introduce Temporal
-- [ ] Create LogHawk Temporal Worker
-- [ ] Implement Stage A Activity
-- [ ] Implement Stage B Activity
-- [ ] Create Stage A → Stage B workflow
-- [ ] Add retries
-- [ ] Add timeouts
-- [ ] Add workflow failure handling
-- [ ] Add workflow observability
-- [ ] Add workflow audit metadata
+-   [ ]  Introduce Temporal
+-   [ ]  Create LogHawk Temporal Worker
+-   [ ]  Implement Stage A Activity
+-   [ ]  Implement Stage B Activity
+-   [ ]  Create Stage A → Stage B workflow
+-   [ ]  Add retries
+-   [ ]  Add timeouts
+-   [ ]  Add workflow failure handling
+-   [ ]  Add workflow observability
+-   [ ]  Add workflow audit metadata
 
 Initial target:
 
@@ -1370,77 +1363,77 @@ anomalies/
 
 ## Phase 4 — Incident Intelligence
 
-- [ ] Correlate related anomalies
-- [ ] Generate incident IDs and severity
-- [ ] Generate incident summaries
-- [ ] Implement incident lifecycle
-- [ ] Store incident history
-- [ ] Add investigation API/UI
-- [ ] Add incident correlation to Temporal workflow
+-   [ ]  Correlate related anomalies
+-   [ ]  Generate incident IDs and severity
+-   [ ]  Generate incident summaries
+-   [ ]  Implement incident lifecycle
+-   [ ]  Store incident history
+-   [ ]  Add investigation API/UI
+-   [ ]  Add incident correlation to Temporal workflow
 
 ## Phase 5 — RAG-Based RCA
 
-- [ ] Persist structured incident history in DuckDB / Parquet
-- [ ] Index incident evidence and summaries in LanceDB
-- [ ] Index runbooks and architecture documentation in LanceDB
-- [ ] Retrieve similar incidents
-- [ ] Build structured RCA context
-- [ ] Generate evidence-based RCA
-- [ ] Generate remediation recommendations
+-   [ ]  Persist structured incident history in DuckDB / Parquet
+-   [ ]  Index incident evidence and summaries in LanceDB
+-   [ ]  Index runbooks and architecture documentation in LanceDB
+-   [ ]  Retrieve similar incidents
+-   [ ]  Build structured RCA context
+-   [ ]  Generate evidence-based RCA
+-   [ ]  Generate remediation recommendations
 
 ## Phase 6 — Local and Cloud LLM Gateway
 
-- [ ] Add LiteLLM as the unified LLM gateway
-- [ ] Configure Ollama as the local inference provider
-- [ ] Configure Gemma 2 (`gemma2:latest`) for local RCA/development
-- [ ] Add Amazon Bedrock as the managed cloud provider
-- [ ] Define local-vs-cloud model routing policy
-- [ ] Add provider fallback and retry policies
-- [ ] Add model/request observability
-- [ ] Keep application-level AI code provider-neutral
+-   [ ]  Add LiteLLM as the unified LLM gateway
+-   [ ]  Configure Ollama as the local inference provider
+-   [ ]  Configure Gemma 2 (`gemma2:latest`) for local RCA/development
+-   [ ]  Add Amazon Bedrock as the managed cloud provider
+-   [ ]  Define local-vs-cloud model routing policy
+-   [ ]  Add provider fallback and retry policies
+-   [ ]  Add model/request observability
+-   [ ]  Keep application-level AI code provider-neutral
 
 ## Phase 7 — Bedrock and Agentic AIOps
 
-- [ ] Integrate Amazon Bedrock through LiteLLM
-- [ ] Add Bedrock-powered RCA
-- [ ] Add operational RAG
-- [ ] Add controlled AI tools
-- [ ] Add agent planning/tool selection
-- [ ] Add policy/approval gates
-- [ ] Add audit trail
+-   [ ]  Integrate Amazon Bedrock through LiteLLM
+-   [ ]  Add Bedrock-powered RCA
+-   [ ]  Add operational RAG
+-   [ ]  Add controlled AI tools
+-   [ ]  Add agent planning/tool selection
+-   [ ]  Add policy/approval gates
+-   [ ]  Add audit trail
 
 ## Phase 8 — Temporal Autonomous Operations
 
-- [ ] Define remediation workflows
-- [ ] Implement pre-checks and actions
-- [ ] Implement retries/timeouts
-- [ ] Implement human approval states
-- [ ] Implement verification
-- [ ] Implement rollback/compensation
-- [ ] Implement escalation
-- [ ] Persist remediation history
-- [ ] Add remediation audit trail
+-   [ ]  Define remediation workflows
+-   [ ]  Implement pre-checks and actions
+-   [ ]  Implement retries/timeouts
+-   [ ]  Implement human approval states
+-   [ ]  Implement verification
+-   [ ]  Implement rollback/compensation
+-   [ ]  Implement escalation
+-   [ ]  Persist remediation history
+-   [ ]  Add remediation audit trail
 
 ## Phase 9 — n8n Integrations
 
-- [ ] Add scheduled ingestion workflows
-- [ ] Add webhook integration
-- [ ] Add notification workflows
-- [ ] Add Slack/Teams integration
-- [ ] Add email integration
-- [ ] Add Jira/service-management integration
-- [ ] Add knowledge-base refresh workflows
-- [ ] Allow n8n to trigger LogHawk Temporal workflows
+-   [ ]  Add scheduled ingestion workflows
+-   [ ]  Add webhook integration
+-   [ ]  Add notification workflows
+-   [ ]  Add Slack/Teams integration
+-   [ ]  Add email integration
+-   [ ]  Add Jira/service-management integration
+-   [ ]  Add knowledge-base refresh workflows
+-   [ ]  Allow n8n to trigger LogHawk Temporal workflows
 
 ## Phase 10 — Full Observability
 
-- [ ] Add metrics ingestion
-- [ ] Add trace ingestion
-- [ ] Integrate OpenTelemetry
-- [ ] Correlate logs + metrics + traces
-- [ ] Add deployment/change correlation
-- [ ] Improve service dependency mapping
-- [ ] Improve incident correlation and RCA
+-   [ ]  Add metrics ingestion
+-   [ ]  Add trace ingestion
+-   [ ]  Integrate OpenTelemetry
+-   [ ]  Correlate logs + metrics + traces
+-   [ ]  Add deployment/change correlation
+-   [ ]  Improve service dependency mapping
+-   [ ]  Improve incident correlation and RCA
 
 ---
 
@@ -1458,7 +1451,7 @@ anomalies/
                     +---------+
                          |
                          v
-                    SeaweedFS
+                    SeaweedFS S3 / MINIO S3 / AWS S3
                          |
                          v
                 +----------------+
@@ -1539,7 +1532,7 @@ This allows AI capabilities to evolve independently from deterministic operation
 
 # Architectural Design Principles
 
-## 1. Processing and orchestration are separate
+## 1\. Processing and orchestration are separate
 
 PySpark and scikit-learn perform data processing and machine learning.
 
@@ -1557,7 +1550,7 @@ Temporal
 Next Stage
 ```
 
-## 2. Data stages communicate through durable datasets
+## 2\. Data stages communicate through durable datasets
 
 ```text
 raw
@@ -1569,25 +1562,25 @@ anomalies
 incidents
 ```
 
-SeaweedFS/S3 provides the data boundary.
+SeaweedFS S3 / MINIO S3 / AWS S3 provides the data boundary.
 
-## 3. AI does not directly control infrastructure
+## 3\. AI does not directly control infrastructure
 
 AI produces:
 
-- analysis;
-- evidence;
-- hypotheses;
-- recommendations;
-- tool selections.
+-   analysis;
+-   evidence;
+-   hypotheses;
+-   recommendations;
+-   tool selections.
 
 Temporal and deterministic tools perform controlled execution.
 
-## 4. Provider independence
+## 4\. Provider independence
 
 The application uses LiteLLM rather than embedding provider-specific LLM logic throughout the codebase.
 
-## 5. Local-first development
+## 5\. Local-first development
 
 The development architecture supports:
 
@@ -1598,7 +1591,7 @@ Windows
    |      |
    |   Gemma 2
    |
-   +--> SeaweedFS
+   +--> SeaweedFS S3 / MINIO S3 / AWS S3
    |
    +--> PySpark
    |
@@ -1627,22 +1620,22 @@ AWS
 
 ### LLM Provider References
 
-- LiteLLM: https://docs.litellm.ai/
-- Ollama: https://docs.ollama.com/
-- Amazon Bedrock Runtime: https://docs.aws.amazon.com/bedrock/latest/userguide/apis.html
+-   LiteLLM: https://docs.litellm.ai/
+-   Ollama: https://docs.ollama.com/
+-   Amazon Bedrock Runtime: https://docs.aws.amazon.com/bedrock/latest/userguide/apis.html
 
 ### Workflow References
 
-- Temporal: https://temporal.io/
-- n8n: https://n8n.io/
+-   Temporal: https://temporal.io/
+-   n8n: https://n8n.io/
 
 ### Data Processing References
 
-- Apache Spark: https://spark.apache.org/
-- scikit-learn: https://scikit-learn.org/
-- SeaweedFS: https://seaweedfs.com/
-- LanceDB: https://lancedb.com/
-- DuckDB: https://duckdb.org/
+-   Apache Spark: https://spark.apache.org/
+-   scikit-learn: https://scikit-learn.org/
+-   SeaweedFS: https://seaweedfs.com/
+-   LanceDB: https://lancedb.com/
+-   DuckDB: https://duckdb.org/
 
 ---
 

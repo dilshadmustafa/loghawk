@@ -36,13 +36,13 @@ S3_ENDPOINT = "http://localhost:8333"
 S3_BUCKET = "loghawk-data"
 
 # Stage A output
-INPUT_PATH = (
+input_path = (
     f"s3://{S3_BUCKET}/features/"
     "year=2026/month=09/day=23/"
 )
 
 # Stage B output
-OUTPUT_PATH = (
+output_path = (
     f"s3://{S3_BUCKET}/anomalies/"
     "year=2026/month=09/day=23/"
     "isolation_forest_results.parquet"
@@ -112,6 +112,12 @@ FEATURE_COLUMNS = [
 # Utility functions
 # ============================================================
 
+def normalize_s3_uri(path: str) -> str:
+    """Convert Hadoop S3A URI to fsspec-compatible S3 URI."""
+    if path.startswith("s3a://"):
+        return "s3://" + path[len("s3a://"):]
+    return path
+
 def validate_features(df: pd.DataFrame):
     """Verify that all Stage A feature columns exist."""
 
@@ -126,97 +132,36 @@ def validate_features(df: pd.DataFrame):
             f"Missing required feature columns: {missing}"
         )
 
-def load_features():
-    """Load Stage A partitioned Parquet features from SeaweedFS S3."""
-
-    print(f"Loading Stage A features from: {INPUT_PATH}")
+def load_features(input_path: str):
+    input_path = normalize_s3_uri(input_path)
 
     fs = get_s3_filesystem()
 
-    # --------------------------------------------------------
-    # Find Parquet files recursively.
-    #
-    # Stage A writes partitioned data like:
-    #
-    # features/
-    #   year=2026/
-    #     month=09/
-    #       day=23/
-    #         service=auth-service/
-    #             part-00000-....parquet
-    #         service=order-service/
-    #             part-00000-....parquet
-    #         service=payment-service/
-    #             part-00000-....parquet
-    # --------------------------------------------------------
+    s3_prefix = input_path.replace("s3://", "").rstrip("/")
 
-    s3_prefix = INPUT_PATH.replace("s3://", "").rstrip("/")
+    print(f"Reading features from: {input_path}")
 
-    parquet_files = [
-        path
-        for path in fs.find(s3_prefix)
-        if path.lower().endswith(".parquet")
-    ]
+    parquet_files = fs.glob(f"{s3_prefix}/**/*.parquet")
 
     if not parquet_files:
         raise FileNotFoundError(
-            f"No Parquet files found recursively under: {INPUT_PATH}"
+            f"No Parquet files found under: {input_path}"
         )
 
-    print(f"Found {len(parquet_files)} Parquet file(s):")
+    dfs = []
 
-    for path in parquet_files:
-        print(f"  s3://{path}")
+    for file_path in parquet_files:
+        print(f"Reading: {file_path}")
 
-    # --------------------------------------------------------
-    # Read each Parquet file.
-    #
-    # We explicitly recover the service name from the
-    # partition directory because the Parquet file itself
-    # may not contain the partition column.
-    # --------------------------------------------------------
+        with fs.open(file_path, "rb") as f:
+            df = pd.read_parquet(f)
 
-    storage_options = {
-        "anon": True,
-        "client_kwargs": {
-            "endpoint_url": S3_ENDPOINT
-        },
-    }
+        dfs.append(df)
 
-    dataframes = []
+    if not dfs:
+        raise ValueError(f"No feature data loaded from {input_path}")
 
-    for path in parquet_files:
-
-        s3_url = f"s3://{path}"
-
-        df_part = pd.read_parquet(
-            s3_url,
-            storage_options=storage_options,
-        )
-
-        # Recover service=xxx from the partition path
-        service = None
-
-        for component in path.split("/"):
-            if component.startswith("service="):
-                service = component.split("=", 1)[1]
-                break
-
-        if service is not None and "service" not in df_part.columns:
-            df_part["service"] = service
-
-        dataframes.append(df_part)
-
-    # Combine all service partitions
-    df = pd.concat(
-        dataframes,
-        ignore_index=True
-    )
-
-    print(
-        f"Loaded {len(df):,} feature rows "
-        f"from {len(dataframes)} Parquet file(s)"
-    )
+    df = pd.concat(dfs, ignore_index=True)
 
     validate_features(df)
 
@@ -227,17 +172,21 @@ def clean_features(df):
 
     df = df.copy()
 
-    # Replace +/- infinity
-    df[FEATURE_COLUMNS] = (
-        df[FEATURE_COLUMNS]
-        .replace([np.inf, -np.inf], np.nan)
+    # Preserve metadata columns such as:
+    # timestamp, service
+
+    for column in FEATURE_COLUMNS:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        )
+
+    df[FEATURE_COLUMNS] = df[FEATURE_COLUMNS].replace(
+        [np.inf, -np.inf],
+        np.nan,
     )
 
-    # Replace missing values
-    df[FEATURE_COLUMNS] = (
-        df[FEATURE_COLUMNS]
-        .fillna(0)
-    )
+    df[FEATURE_COLUMNS] = df[FEATURE_COLUMNS].fillna(0)
 
     return df
 
@@ -470,7 +419,7 @@ def save_model(model, scaler):
 
 def save_results(df):
 
-    print(f"Saving anomaly results to: {OUTPUT_PATH}")
+    print(f"Saving anomaly results to: {output_path}")
 
     storage_options = {
         "anon": True,
@@ -480,20 +429,20 @@ def save_results(df):
     }
 
     df.to_parquet(
-        OUTPUT_PATH,
+        output_path,
         index=False,
         storage_options=storage_options,
     )
 
     print(
-        f"Anomaly results saved to: {OUTPUT_PATH}"
+        f"Anomaly results saved to: {output_path}"
     )
 
 
 # ============================================================
 # Main
 # ============================================================
-def run(INPUT_PATH: str, OUTPUT_PATH: str):
+def run(input_path: str, output_path: str):
     """
     Execute Stage B Isolation Forest.
     """
@@ -506,7 +455,7 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
     # 1. Load Stage A dataset from S3
     # --------------------------------------------------------
 
-    df = load_features()
+    df = load_features(input_path)
 
     # --------------------------------------------------------
     # 2. Clean features
@@ -570,6 +519,47 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
     # 10. Print summary
     # --------------------------------------------------------
 
+    anomalies = df[df["is_anomaly"]]
+
+    print()
+    print("=" * 70)
+    print("ANOMALY SUMMARY")
+    print("=" * 70)
+
+    print(df["severity"].value_counts())
+
+    print()
+    print(f"Detected anomalies: {len(anomalies)}")
+
+    if not anomalies.empty:
+        print()
+        print("Top anomalies:")
+
+        display_columns = [
+            "timestamp",
+            "service",
+            "anomaly_score",
+            "severity",
+            "reason",
+        ]
+
+        # Only display columns that actually exist.
+        display_columns = [
+            col for col in display_columns
+            if col in anomalies.columns
+        ]
+
+        print(
+            anomalies[display_columns]
+            .sort_values("anomaly_score")
+            .head(10)
+            .to_string(index=False)
+        )
+    print()
+    print("Stage B completed successfully.")
+    return output_path
+
+"""
     print()
     print("=" * 70)
     print("ANOMALY SUMMARY")
@@ -615,16 +605,12 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
                 index=False
             )
         )
-
-    print()
-    print("Stage B completed successfully.")
-
-    return OUTPUT_PATH
+"""
 
 if __name__ == "__main__":
     run(
-        INPUT_PATH=INPUT_PATH,
-        OUTPUT_PATH=OUTPUT_PATH,
+        input_path=input_path,
+        output_path=output_path,
     )
 
 

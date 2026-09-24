@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from loghawk.workflows.temporal.activities import (
@@ -42,7 +43,7 @@ class LogHawkPipeline:
             start_to_close_timeout=timedelta(
                 hours=2
             ),
-            retry_policy=workflow.RetryPolicy(
+            retry_policy=RetryPolicy(
                 maximum_attempts=3,
             ),
         )
@@ -60,7 +61,7 @@ class LogHawkPipeline:
             start_to_close_timeout=timedelta(
                 hours=1
             ),
-            retry_policy=workflow.RetryPolicy(
+            retry_policy=RetryPolicy(
                 maximum_attempts=3,
             ),
         )

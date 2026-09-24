@@ -18,8 +18,8 @@ async def main():
     result = await client.execute_workflow(
         LogHawkPipeline.run,
         args=[
-            "s3://loghawk-data/raw/year=2026/month=09/day=23/",
-            "s3://loghawk-data/features/year=2026/month=09/day=23/",
+            "s3a://loghawk-data/raw/year=2026/month=09/day=23/",
+            "s3a://loghawk-data/features/year=2026/month=09/day=23/",
             "s3://loghawk-data/anomalies/year=2026/month=09/day=23/",
         ],
         id=workflow_id,

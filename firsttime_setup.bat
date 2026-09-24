@@ -19,8 +19,13 @@ python -m loghawk.admin.setup_lancedb
 docker-compose -f src\loghawk\admin\seaweedfss3-docker-compose.yml up
 docker-compose -f src\loghawk\admin\temporal-docker-compose.yml up
 
-streamlit run .\src\loghawk\docs_to_ragvectordb\upload_docs.py
-python .\src\loghawk\chat_assistant\chat_assistant.py
+# optional: run the following command in separate terminal
+# web based doc upload interface to RAG vector database
+# streamlit run .\src\loghawk\docs_to_ragvectordb\upload_docs.py
+
+# optional: run the following command in separate terminal
+# chat assistant
+# python .\src\loghawk\chat_assistant\chat_assistant.py
 
 
 

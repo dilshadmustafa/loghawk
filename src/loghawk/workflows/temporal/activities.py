@@ -1,7 +1,4 @@
-from datetime import timedelta
-
 from temporalio import activity
-
 
 @activity.defn
 async def run_stage_a(
@@ -9,39 +6,34 @@ async def run_stage_a(
     output_path: str,
 ) -> str:
     """
-    Run Stage A PySpark feature engineering.
+    Temporal Activity for LogHawk Stage A.
 
-    Stage A:
-        raw logs -> feature parquet
+    Raw logs -> Spark feature parquet
     """
 
     activity.logger.info(
-        f"Starting Stage A feature engineering: "
-        f"{input_path} -> {output_path}"
+        f"Starting Stage A: {input_path} -> {output_path}"
     )
 
-    # Import the existing Stage A implementation.
     from loghawk.feature_engineering import (
         pyspark_s3_feature_engineering
     )
 
-    # ---------------------------------------------------------
-    # IMPORTANT:
-    #
-    # Adapt this call to the actual callable exposed by your
-    # current Stage A module.
-    # ---------------------------------------------------------
+    activity.logger.info(
+        f"Stage A module: "
+        f"{pyspark_s3_feature_engineering.__file__}"
+    )
 
-    pyspark_s3_feature_engineering.run(
-        input_path=input_path,
-        output_path=output_path,
+    result = pyspark_s3_feature_engineering.run(
+        input_path,
+        output_path,
     )
 
     activity.logger.info(
-        f"Stage A completed successfully: {output_path}"
+        f"Stage A completed: {result}"
     )
 
-    return output_path
+    return result
 
 
 @activity.defn
@@ -50,36 +42,31 @@ async def run_stage_b(
     output_path: str,
 ) -> str:
     """
-    Run Stage B Isolation Forest anomaly detection.
+    Temporal Activity for LogHawk Stage B.
 
-    Stage B:
-        feature parquet -> anomaly results
+    Feature parquet -> Isolation Forest anomaly results
     """
 
     activity.logger.info(
-        f"Starting Stage B anomaly detection: "
-        f"{input_path} -> {output_path}"
+        f"Starting Stage B: {input_path} -> {output_path}"
     )
 
-    # Import the existing Stage B implementation.
     from loghawk.anomaly_detection import (
         scikit_s3_isolation_forest
     )
 
-    # ---------------------------------------------------------
-    # IMPORTANT:
-    #
-    # Adapt this call to the actual callable exposed by your
-    # current Stage B module.
-    # ---------------------------------------------------------
+    activity.logger.info(
+        f"Stage B module: "
+        f"{scikit_s3_isolation_forest.__file__}"
+    )
 
-    scikit_s3_isolation_forest.run(
-        input_path=input_path,
-        output_path=output_path,
+    result = scikit_s3_isolation_forest.run(
+        input_path,
+        output_path,
     )
 
     activity.logger.info(
-        f"Stage B completed successfully: {output_path}"
+        f"Stage B completed: {result}"
     )
 
-    return output_path
+    return result

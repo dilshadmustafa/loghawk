@@ -20,10 +20,10 @@ os.environ["HADOOP_HOME"] = r"C:\\hadoop"
 os.environ["PATH"] = r"C:\\jdk-17\\bin;C:\\hadoop\\bin;" + os.environ.get("PATH", "")
 os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"
 
-INPUT_PATH = "s3a://loghawk-data/raw/year=2026/month=09/day=23/"
-OUTPUT_PATH = "s3a://loghawk-data/features/year=2026/month=09/day=23/"
+input_path = "s3a://loghawk-data/raw/year=2026/month=09/day=23/"
+output_path = "s3a://loghawk-data/features/year=2026/month=09/day=23/"
 
-def run(INPUT_PATH: str, OUTPUT_PATH: str):
+def run(input_path: str, output_path: str):
     """
     Execute Stage A feature engineering.
     """
@@ -71,8 +71,8 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
     # =========================================================
 
 
-    print("Input :", INPUT_PATH)
-    print("Output:", OUTPUT_PATH)
+    print("Input :", input_path)
+    print("Output:", output_path)
 
 
     # =========================================================
@@ -98,7 +98,7 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
     logs = (
         spark.read
         .schema(schema)
-        .json(INPUT_PATH)
+        .json(input_path)
     )
 
 
@@ -275,7 +275,7 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
         .write
         .mode("overwrite")
         .partitionBy("service")
-        .parquet(OUTPUT_PATH)
+        .parquet(output_path)
     )
 
 
@@ -288,19 +288,19 @@ def run(INPUT_PATH: str, OUTPUT_PATH: str):
     print("LogHawk feature generation completed")
     print("==============================================")
     print("")
-    print("Input : ", INPUT_PATH)
-    print("Output: ", OUTPUT_PATH)
+    print("Input : ", input_path)
+    print("Output: ", output_path)
     print("")
 
     spark.stop()
 
-    return OUTPUT_PATH
+    return output_path
 
 
 if __name__ == "__main__":
     run(
-        INPUT_PATH=INPUT_PATH,
-        OUTPUT_PATH=OUTPUT_PATH,
+        input_path=input_path,
+        output_path=output_path,
     )
 
 
