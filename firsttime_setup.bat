@@ -16,6 +16,9 @@ python -m loghawk.admin.setup_duckdb
 python -m loghawk.admin.setup_lancedb
 
 # replace with current file name
+docker-compose -f src\loghawk\admin\seaweedfss3-docker-compose.yml up
+docker-compose -f src\loghawk\admin\temporal-docker-compose.yml up
+
 streamlit run .\src\loghawk\docs_to_ragvectordb\upload_docs.py
 python .\src\loghawk\chat_assistant\chat_assistant.py
 
