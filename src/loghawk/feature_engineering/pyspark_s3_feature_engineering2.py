@@ -20,8 +20,8 @@ os.environ["HADOOP_HOME"] = r"C:\\hadoop"
 os.environ["PATH"] = r"C:\\jdk-17\\bin;C:\\hadoop\\bin;" + os.environ.get("PATH", "")
 os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"
 
-input_path = "s3a://loghawk-data/raw/year=2026/month=09/day=23/"
-output_path = "s3a://loghawk-data/features/year=2026/month=09/day=23/"
+INPUT_PATH = "s3a://loghawk-data/raw/year=2026/month=09/day=23/"
+OUTPUT_PATH = "s3a://loghawk-data/features/year=2026/month=09/day=23/"
 
 def run(input_path: str, output_path: str):
     """
@@ -38,17 +38,17 @@ def run(input_path: str, output_path: str):
         .master("local[1]")
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4")
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://localhost:8333")
-        .config("spark.hadoop.fs.s3a.access.key", "somekey")
-        .config("spark.hadoop.fs.s3a.secret.key", "somesecret")
+        .config("spark.hadoop.fs.s3a.endpoint", "http://localhost:9000")
+        .config("spark.hadoop.fs.s3a.access.key", "rustfsadmin")
+        .config("spark.hadoop.fs.s3a.secret.key", "rustfsadmin")
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-        #.config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
-        .config(
-            "spark.hadoop.fs.s3a.aws.credentials.provider",
-            "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
-        )
+        #.config(
+        #    "spark.hadoop.fs.s3a.aws.credentials.provider",
+        #    "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider"
+        #)
 
         .config("spark.hadoop.fs.s3a.connection.timeout", "60000")
         .config("spark.hadoop.fs.s3a.connection.establish.timeout", "60000")
@@ -299,8 +299,8 @@ def run(input_path: str, output_path: str):
 
 if __name__ == "__main__":
     run(
-        input_path=input_path,
-        output_path=output_path,
+        input_path=INPUT_PATH,
+        output_path=OUTPUT_PATH,
     )
 
 

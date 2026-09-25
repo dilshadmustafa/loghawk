@@ -16,15 +16,15 @@ async def run_stage_a(
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering
+        pyspark_s3_feature_engineering2
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering.__file__}"
+        f"{pyspark_s3_feature_engineering2.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering.run(
+    result = pyspark_s3_feature_engineering2.run(
         input_path,
         output_path,
     )
@@ -52,15 +52,15 @@ async def run_stage_b(
     )
 
     from loghawk.anomaly_detection import (
-        scikit_s3_isolation_forest
+        scikit_s3_isolation_forest2
     )
 
     activity.logger.info(
         f"Stage B module: "
-        f"{scikit_s3_isolation_forest.__file__}"
+        f"{scikit_s3_isolation_forest2.__file__}"
     )
 
-    result = scikit_s3_isolation_forest.run(
+    result = scikit_s3_isolation_forest2.run(
         input_path,
         output_path,
     )

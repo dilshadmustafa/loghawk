@@ -13,9 +13,6 @@ Output:
 Model:
     s3://loghawk-data/models/isolation_forest.joblib
     s3://loghawk-data/models/isolation_scaler.joblib
-
-This version is designed for the local SeaweedFS S3 endpoint:
-    http://localhost:8333
 """
 
 from io import BytesIO
@@ -32,17 +29,22 @@ from sklearn.preprocessing import StandardScaler
 # S3 / SeaweedFS configuration
 # ============================================================
 
-S3_ENDPOINT = "http://localhost:8333"
+S3_ENDPOINT = "http://localhost:9000"
 S3_BUCKET = "loghawk-data"
+S3_ACCESS_KEY = "rustfsadmin"
+S3_SECRET_KEY = "rustfsadmin"
+S3_REGION = "us-east-1"
+
+
 
 # Stage A output
-input_path = (
+INPUT_PATH = (
     f"s3://{S3_BUCKET}/features/"
     "year=2026/month=09/day=23/"
 )
 
 # Stage B output
-output_path = (
+OUTPUT_PATH = (
     f"s3://{S3_BUCKET}/anomalies/"
     "year=2026/month=09/day=23/"
     "isolation_forest_results.parquet"
@@ -66,12 +68,18 @@ def get_s3_filesystem():
     """
     return fsspec.filesystem(
         "s3",
-        anon=True,
+        key=S3_ACCESS_KEY,
+        secret=S3_SECRET_KEY,
         client_kwargs={
-            "endpoint_url": S3_ENDPOINT
+            "endpoint_url": S3_ENDPOINT,
+            "region_name": S3_REGION,
         },
-    )
-
+        config_kwargs={
+            "s3": {
+                "addressing_style": "path"
+            }
+        },
+    )    
 
 # ============================================================
 # Isolation Forest configuration
@@ -419,23 +427,30 @@ def save_model(model, scaler):
 
 def save_results(df):
 
-    print(f"Saving anomaly results to: {output_path}")
+    print(f"Saving anomaly results to: {OUTPUT_PATH}")
 
     storage_options = {
-        "anon": True,
+        "key": S3_ACCESS_KEY,
+        "secret": S3_SECRET_KEY,
         "client_kwargs": {
-            "endpoint_url": S3_ENDPOINT
+            "endpoint_url": S3_ENDPOINT,
+            "region_name": S3_REGION,
+        },
+        "config_kwargs": {
+            "s3": {
+                "addressing_style": "path"
+            }
         },
     }
 
     df.to_parquet(
-        output_path,
+        OUTPUT_PATH,
         index=False,
         storage_options=storage_options,
     )
 
     print(
-        f"Anomaly results saved to: {output_path}"
+        f"Anomaly results saved to: {OUTPUT_PATH}"
     )
 
 
@@ -609,8 +624,8 @@ def run(input_path: str, output_path: str):
 
 if __name__ == "__main__":
     run(
-        input_path=input_path,
-        output_path=output_path,
+        input_path=INPUT_PATH,
+        output_path=OUTPUT_PATH,
     )
 
 
