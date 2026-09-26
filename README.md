@@ -1618,6 +1618,15 @@ AWS
 
 # Documentation
 
+### QUICKSTART LOGHAWK AIOPS
+
+```plaintext
+First time setup:
+firsttime_setup_terminal_1.bat
+firsttime_setup_terminal_2.bat
+firsttime_setup_terminal_3.bat
+```
+
 ### LLM Provider References
 
 -   LiteLLM: https://docs.litellm.ai/

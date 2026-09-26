@@ -83,20 +83,42 @@ if not LH_MODEL_DIR.is_absolute():
 
 LH_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
 
+LH_S3_ENDPOINT = os.getenv(
+    "LH_S3_ENDPOINT",
+    "http://localhost:9000"
+)
 
+LH_S3_BUCKET= os.getenv(
+    "LH_S3_BUCKET",
+    "loghawk-data"
 
+LH_S3_ACCESS_KEY_ID= os.getenv(
+    "AWS_ACCESS_KEY_ID",
+    "rustfsadmin"
+)
 
+LH_S3_SECRET_ACCESS_KEY= os.getenv(
+    "AWS_SECRET_ACCESS_KEY",
+    "rustfsadmin"
+)
 
+LH_S3_REGION= os.getenv(
+    "AWS_REGION",
+    "us-east-1"
+)
 
+LH_S3_SELECT_RECORD_FILTER = os.getenv(
+    "LH_S3_SELECT_RECORD_FILTER",
+    "WARN,ERROR"
+)
 
-
-
-
+LH_S3_SELECT_RECORD_FILTER_LIST = [x.strip() for x in LH_S3_SELECT_RECORD_FILTER.split(",")]
 
 
 def main():
     print("LH DUCKDB FILE PATH : ", LH_DUCKDB_FILE_PATH)
     print("LH DUCKDB TABLE NAME : ", LH_DUCKDB_TABLE_NAME)
+    print("LH S3 SELECT RECORD FILTER : ", LH_S3_SELECT_RECORD_FILTER)
 
 if __name__ == '__main__':
     main()
