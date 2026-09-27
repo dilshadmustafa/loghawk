@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
@@ -17,7 +19,8 @@ import loghawk.config as config
 
 os.environ["JAVA_HOME"] = config.JAVA_HOME
 os.environ["HADOOP_HOME"] = config.HADOOP_HOME
-os.environ["PATH"] = f"{config.JAVA_HOME}\\bin;{config.HADOOP_HOME}\\bin;" + os.environ.get("PATH", "")
+#os.environ["PATH"] = f"{config.JAVA_HOME}" + Path("\\") + \\bin;{config.HADOOP_HOME}\\bin;" + os.environ.get("PATH", "")
+os.environ["PATH"] = str(Path(config.JAVA_HOME)) + str(Path("\\bin")) + ";" + str(Path(config.HADOOP_HOME)) + str(Path("\\bin")) + ";" + os.environ.get("PATH", "")
 os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"
 
 INPUT_PATH = "s3a://loghawk-data/raw/year=2026/month=09/day=23/"
