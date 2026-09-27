@@ -15,9 +15,9 @@ import loghawk.config as config
 # 0. Local Spark / Java configuration
 # =========================================================
 
-os.environ["JAVA_HOME"] = r"C:\\jdk-17"
-os.environ["HADOOP_HOME"] = r"C:\\hadoop"
-os.environ["PATH"] = r"C:\\jdk-17\\bin;C:\\hadoop\\bin;" + os.environ.get("PATH", "")
+os.environ["JAVA_HOME"] = config.JAVA_HOME
+os.environ["HADOOP_HOME"] = config.HADOOP_HOME
+os.environ["PATH"] = f"{config.JAVA_HOME}\\bin;{config.HADOOP_HOME}\\bin;" + os.environ.get("PATH", "")
 os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"
 
 INPUT_PATH = "s3a://loghawk-data/raw/year=2026/month=09/day=23/"
@@ -38,9 +38,9 @@ def run(input_path: str, output_path: str):
         .master("local[1]")
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4")
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://localhost:9000")
-        .config("spark.hadoop.fs.s3a.access.key", "rustfsadmin")
-        .config("spark.hadoop.fs.s3a.secret.key", "rustfsadmin")
+        .config("spark.hadoop.fs.s3a.endpoint", config.LH_S3_ENDPOINT)
+        .config("spark.hadoop.fs.s3a.access.key", config.LH_S3_ACCESS_KEY_ID)
+        .config("spark.hadoop.fs.s3a.secret.key", config.LH_S3_SECRET_ACCESS_KEY)
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")

@@ -91,6 +91,7 @@ LH_S3_ENDPOINT = os.getenv(
 LH_S3_BUCKET= os.getenv(
     "LH_S3_BUCKET",
     "loghawk-data"
+)
 
 LH_S3_ACCESS_KEY_ID= os.getenv(
     "AWS_ACCESS_KEY_ID",
@@ -113,6 +114,18 @@ LH_S3_SELECT_RECORD_FILTER = os.getenv(
 )
 
 LH_S3_SELECT_RECORD_FILTER_LIST = [x.strip() for x in LH_S3_SELECT_RECORD_FILTER.split(",")]
+
+JAVA_HOME = os.getenv(
+    "JAVA_HOME",
+    r"C:\jdk-17"
+)
+
+HADOOP_HOME = os.getenv(
+    "HADOOP_HOME",
+    r"C:\hadoop"
+)
+
+
 
 
 def main():
