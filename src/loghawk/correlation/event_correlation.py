@@ -21,6 +21,8 @@ from typing import List
 import fsspec
 import pandas as pd
 
+import loghawk.config as config
+
 
 # ============================================================
 # Configuration
@@ -44,20 +46,34 @@ def normalize_s3_uri(path: str) -> str:
     return path
 
 
+def s3_storage_options() -> dict:
+    """Build fsspec options for the configured S3-compatible store."""
+    return {
+        "key": config.LH_S3_ACCESS_KEY_ID,
+        "secret": config.LH_S3_SECRET_ACCESS_KEY,
+        "client_kwargs": {
+            "endpoint_url": config.LH_S3_ENDPOINT,
+            "region_name": config.LH_S3_REGION,
+        },
+        "config_kwargs": {
+            "s3": {
+                "addressing_style": "path",
+            },
+        },
+    }
+
+
 def read_parquet(path: str) -> pd.DataFrame:
 
     path = normalize_s3_uri(path)
 
     print(f"Reading anomaly results from: {path}")
 
-    storage_options = {}
-
-    if path.startswith("s3://"):
-        storage_options = {
-            "client_kwargs": {
-                "endpoint_url": "http://localhost:8333"
-            }
-        }
+    storage_options = (
+        s3_storage_options()
+        if path.startswith("s3://")
+        else {}
+    )
 
     df = pd.read_parquet(
         path,
@@ -78,14 +94,11 @@ def write_parquet(
 
     print(f"Writing correlated incidents to: {path}")
 
-    storage_options = {}
-
-    if path.startswith("s3://"):
-        storage_options = {
-            "client_kwargs": {
-                "endpoint_url": "http://localhost:8333"
-            }
-        }
+    storage_options = (
+        s3_storage_options()
+        if path.startswith("s3://")
+        else {}
+    )
 
     df.to_parquet(
         path,

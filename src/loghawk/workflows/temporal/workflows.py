@@ -5,6 +5,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from loghawk.workflows.temporal.activities import (
+        run_identity_mapping,
         run_stage_a,
         run_stage_b,
         run_stage_c,
@@ -14,7 +15,7 @@ with workflow.unsafe.imports_passed_through():
 @workflow.defn
 class LogHawkPipeline:
     """
-    LogHawk Stage A -> Stage B pipeline.
+    Identity Mapping -> Stage A -> Stage B -> Stage C pipeline.
 
     Stage A:
         Raw logs -> Feature dataset
@@ -30,6 +31,14 @@ class LogHawkPipeline:
         feature_output_path: str,
         anomaly_output_path: str,
     ) -> str:
+
+        # Identity mappings for every raw file must be ready before Stage A.
+        await workflow.execute_activity(
+            run_identity_mapping,
+            args=[input_path],
+            start_to_close_timeout=timedelta(hours=2),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
 
         # =====================================================
         # STAGE A

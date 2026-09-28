@@ -1,5 +1,27 @@
 from temporalio import activity
 
+
+@activity.defn
+async def run_identity_mapping(raw_folder: str) -> str:
+    """Generate or verify identity mappings for every raw file."""
+    activity.logger.info(
+        f"Starting identity mapping for raw folder: {raw_folder}"
+    )
+
+    from loghawk.identity_mapping import identity_mapping3
+
+    activity.logger.info(
+        f"Identity mapping module: {identity_mapping3.__file__}"
+    )
+    mapping_paths = identity_mapping3.generate_identity_mappings(
+        raw_folder
+    )
+    activity.logger.info(
+        f"Identity mapping completed for {len(mapping_paths)} raw file(s)"
+    )
+    return raw_folder
+
+
 @activity.defn
 async def run_stage_a(
     input_path: str,
@@ -16,15 +38,15 @@ async def run_stage_a(
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering2
+        pyspark_s3_feature_engineering5
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering2.__file__}"
+        f"{pyspark_s3_feature_engineering5.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering2.run(
+    result = pyspark_s3_feature_engineering5.run(
         input_path,
         output_path,
     )
@@ -52,15 +74,15 @@ async def run_stage_b(
     )
 
     from loghawk.anomaly_detection import (
-        scikit_s3_isolation_forest2
+        scikit_s3_isolation_forest4
     )
 
     activity.logger.info(
         f"Stage B module: "
-        f"{scikit_s3_isolation_forest2.__file__}"
+        f"{scikit_s3_isolation_forest4.__file__}"
     )
 
-    result = scikit_s3_isolation_forest2.run(
+    result = scikit_s3_isolation_forest4.run(
         input_path,
         output_path,
     )

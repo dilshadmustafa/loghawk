@@ -1,3 +1,4 @@
+# process all folders corresponsing to Stage A output and generate anomaly detection results using Isolation Forest.
 """
 LogHawk Stage B - Folder-Based Isolation Forest Anomaly Detection
 
@@ -24,6 +25,7 @@ column where that column is present in the Stage A output.
 from io import BytesIO
 import json
 import os
+import traceback
 
 import fsspec
 import joblib
@@ -993,7 +995,8 @@ def run(input_path: str, output_path: str):
             print(
                 f"ERROR processing {feature_folder}:"
             )
-            print(str(exc))
+            print(f"{type(exc).__name__}: {exc}")
+            traceback.print_exc()
 
             failed.append(
                 (
