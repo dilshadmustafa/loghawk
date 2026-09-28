@@ -300,6 +300,70 @@ git status
 git diff
 ```
 
+## File Modification Approval — REQUIRED
+
+Codex MUST NOT create, modify, delete, rename, move, or overwrite any file without explicit user approval.
+
+Before making ANY file-system change:
+
+1. Inspect the relevant existing files.
+2. Explain what needs to change and why.
+3. Show the proposed changes to me.
+4. Clearly identify every file that would be created, modified, deleted, renamed, or moved.
+5. Show the proposed code/configuration changes, preferably as a unified diff.
+6. STOP and wait for my explicit approval.
+
+Only after I explicitly approve the proposed changes may Codex modify files.
+
+Examples of approval:
+- "Yes, make those changes."
+- "Proceed."
+- "Apply it."
+
+Do NOT interpret these as approval:
+- "What do you think?"
+- "How would you fix it?"
+- "Show me the changes."
+- "What should we change?"
+- "Explain the fix."
+
+Those requests require analysis/proposed changes only. Do not modify files.
+
+### Read-only operations allowed without approval
+
+Codex may freely perform read-only operations such as:
+
+- reading files
+- searching the repository
+- listing files
+- inspecting Git status
+- inspecting Git diffs
+- running commands that do not modify project files
+- running tests, provided the tests themselves do not modify project source files
+
+### Commands with potential side effects
+
+Before running commands that could modify project files, dependencies, databases, containers, Git history, or other persistent state, Codex must ask for approval.
+
+Examples include:
+
+- `git commit`
+- `git reset`
+- `git checkout` when it changes files
+- package installation/upgrades
+- database migrations
+- Docker commands that modify persistent project state
+- code formatters that modify files
+- automatic code generators
+
+When uncertain whether an operation changes persistent state, ask first.
+
+### Approval is per proposed change
+
+Approval applies only to the specific changes shown.
+
+If Codex discovers additional changes are necessary after approval, it must stop again, explain the additional changes, show the new diff, and request approval.
+
 ## Working style for Codex
 
 When modifying LogHawk:
