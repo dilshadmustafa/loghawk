@@ -7,6 +7,7 @@ with workflow.unsafe.imports_passed_through():
     from loghawk.workflows.temporal.activities import (
         run_stage_a,
         run_stage_b,
+        run_stage_c,
     )
 
 
@@ -66,8 +67,29 @@ class LogHawkPipeline:
             ),
         )
 
+        incident_output_path = (
+            "s3://loghawk-data/"
+            "incidents/year=2026/month=09/day=23/"
+            "correlated_incidents.parquet"
+        )
+
+        incident_path = await workflow.execute_activity(
+            run_stage_c,
+            args=[
+                anomaly_path,
+                incident_output_path,
+            ],
+            start_to_close_timeout=timedelta(
+                minutes=30
+            ),
+            retry_policy=RetryPolicy(
+                maximum_attempts=3,
+            ),
+        )
+
         # =====================================================
         # PIPELINE RESULT
         # =====================================================
 
-        return anomaly_path
+        #return anomaly_path
+        return incident_path

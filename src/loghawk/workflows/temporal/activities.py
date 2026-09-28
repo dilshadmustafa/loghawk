@@ -70,3 +70,39 @@ async def run_stage_b(
     )
 
     return result
+
+from temporalio import activity
+
+
+@activity.defn
+async def run_stage_c(
+    input_path: str,
+    output_path: str,
+) -> str:
+
+    activity.logger.info(
+        f"Starting Stage C: "
+        f"{input_path} -> {output_path}"
+    )
+
+    from loghawk.correlation import (
+        event_correlation,
+    )
+
+    activity.logger.info(
+        f"Stage C module: "
+        f"{event_correlation.__file__}"
+    )
+
+    result = event_correlation.run(
+        input_path,
+        output_path,
+        correlation_window_minutes=5,
+    )
+
+    activity.logger.info(
+        f"Stage C completed: {result}"
+    )
+
+    return result
+

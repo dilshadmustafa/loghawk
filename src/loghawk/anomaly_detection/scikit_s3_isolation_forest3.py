@@ -1,3 +1,4 @@
+# separate METADATA_COLUMNS
 """
 LogHawk Stage B - Isolation Forest Anomaly Detection
 
