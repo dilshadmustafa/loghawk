@@ -37,7 +37,7 @@ The long-term goal is to move LogHawk through:
 > -   **Durable remediation:** use Temporal for stateful workflows, retries, timeouts, approval waits, verification, rollback and escalation.
 > -   **Big-data processing:** use PySpark for large-scale ingestion, normalization, aggregation and feature engineering.
 > -   **Workflow automation:** use n8n for scheduled ingestion, knowledge refreshes, notifications and lightweight integrations.
-> -   **Durable data pipeline:** use SeaweedFS S3-compatible object storage as a local/cloud-neutral data boundary between ingestion, feature engineering, anomaly detection and downstream AI processing.
+> -   **Durable data pipeline:** use RustFS S3-compatible object storage as a local/cloud-neutral data boundary between ingestion, feature engineering, anomaly detection and downstream AI processing.
 
 ---
 
@@ -116,68 +116,199 @@ The initial implementation focuses on **Stage A and Stage B**.
 
 ---
 
-# Stage A — Feature Engineering
+# Stage A — Identity Mapping and Feature Engineering
 
-Stage A converts raw application logs into structured numerical feature vectors suitable for machine-learning and statistical anomaly detection.
+Stage A now uses a **folder-based, per-input-file processing convention**.
 
-The processing flow is:
+Before feature engineering begins, a separate Identity Mapping activity enumerates the raw input folder and creates one identity-mapping JSON document for each raw input file.
+
+The processing contract is:
 
 ```text
-Raw JSON / Application Logs
-            |
-            v
-      SeaweedFS S3 / MINIO S3 / AWS S3
-            |
-            v
-         PySpark
-            |
-            +--> Parse
-            |
-            +--> Normalize
-            |
-            +--> Aggregate
-            |
-            +--> Feature Engineering
-            |
-            v
-       Feature Dataset
-          Parquet
-            |
-            v
-      SeaweedFS S3 / MINIO S3 / AWS S3
+Raw input folder
+    |
+    +-- input-file-1.json
+    +-- input-file-2.json
+    +-- input-file-3.json
+    |
+    v
+Identity Mapping
+    |
+    +-- identitymapping_input-file-1.json
+    +-- identitymapping_input-file-2.json
+    +-- identitymapping_input-file-3.json
+    |
+    v
+Stage A
+    |
+    +-- process input-file-1 using its mapping
+    +-- process input-file-2 using its mapping
+    +-- process input-file-3 using its mapping
+    |
+    v
+Per-input Feature Datasets
+```
+
+### Identity Mapping
+
+Identity Mapping is a separate Temporal activity.
+
+For each raw file:
+
+```text
+raw/<inputfilename>
+        |
+        v
+identitymapping/identitymapping_<inputfilename>.json
 ```
 
 Example:
 
 ```text
-Input
+s3://loghawk-data/raw/2026-09-28/container_logs.json
 
-s3a://loghawk-data/raw/year=2026/month=09/day=23/
+        |
 
-Output
-
-s3a://loghawk-data/features/year=2026/month=09/day=23/
+s3://loghawk-data/identitymapping/2026-09-28/
+    identitymapping_container_logs.json
 ```
+
+The mapping contains the source information and the logical identity mapping:
+
+```json
+{
+  "source": {
+    "raw_input_path": "...",
+    "column_names": ["..."],
+    "sample_row": {}
+  },
+  "identity_mapping": {
+    "identity_columns": ["..."],
+    "priority_order": ["..."],
+    "recommended_entity_column": "...",
+    "fallback_entity_id": "unknown-entity",
+    "reason": "..."
+  }
+}
+```
+
+The Identity Mapping activity is idempotent:
+
+- existing mappings are skipped;
+- successful mappings are not regenerated during a retry;
+- Stage A starts only after all required mappings have been generated successfully.
+
+The LLM is used to interpret source identity fields, but it must use only actual source columns and must not invent identity fields.
+
+### Stage A Folder Convention
+
+Stage A enumerates:
+
+```text
+s3://loghawk-data/raw/2026-09-28/
+```
+
+For every raw file it finds the corresponding mapping and produces a separate feature dataset.
+
+Example:
+
+```text
+s3://loghawk-data/raw/2026-09-28/
+    |
+    +-- container_logs.json
+    |
+    +-- loghawk_sample_logs.json
+```
+
+becomes:
+
+```text
+s3://loghawk-data/features/2026-09-28/
+    |
+    +-- container_logs/
+    |     +-- *.parquet
+    |
+    +-- loghawk_sample_logs/
+          +-- *.parquet
+```
+
+The complete contract is:
+
+```text
+raw/
+  container_logs.json
+        |
+        +--> identitymapping_container_logs.json
+        |
+        +--> features/container_logs/
+
+  loghawk_sample_logs.json
+        |
+        +--> identitymapping_loghawk_sample_logs.json
+        |
+        +--> features/loghawk_sample_logs/
+```
+
+### S3 Protocol Convention
+
+LogHawk deliberately distinguishes Python S3 access from Spark S3 access.
+
+```text
+Python / s3fs / fsspec
+        |
+        +--> s3://
+
+Apache Spark / Hadoop
+        |
+        +--> s3a://
+```
+
+For example:
+
+```python
+# Python / fsspec
+s3://loghawk-data/raw/2026-09-28/
+
+# Spark
+s3a://loghawk-data/raw/2026-09-28/container_logs.json
+```
+
+An `s3://` URI must not be passed directly to Spark when the configured Hadoop filesystem is `s3a`.
+
+This separation is an important implementation detail of the current local RustFS setup.
+
+### Stage A Processing
+
+For each raw file, Stage A:
+
+1. loads the corresponding identity mapping;
+2. infers the source schema;
+3. validates the identity mapping;
+4. constructs the processing schema;
+5. normalizes fields;
+6. creates `entity_id`;
+7. aggregates events into one-minute windows;
+8. generates numerical features;
+9. writes the feature dataset to the input-specific output folder.
 
 ### Example Features
 
 Logs are aggregated into time windows, initially using a one-minute window.
 
-Example features include:
-
 ```text
 total_log_count
+info_count
+warning_count
 error_count
 error_rate
-warning_count
+warning_rate
 
 http_4xx_count
-http_4xx_rate
-
 http_5xx_count
 http_5xx_rate
 
 timeout_count
+timeout_rate
 connection_error_count
 authentication_failure_count
 
@@ -185,21 +316,73 @@ unique_exception_count
 unique_error_message_count
 ```
 
-The output is a structured feature dataset rather than raw log text.
+### Entity Identity
+
+Stage A does not assume that `service` is the universal identity.
+
+The identity mapping can identify logical entities such as:
+
+```text
+application
+service
+container
+pod
+host
+database
+device
+```
+
+The resulting generic field is:
+
+```text
+entity_id
+```
+
+The identity mapping's `priority_order` determines which identity field is preferred.
+
+Fallback:
+
+```text
+unknown-entity
+```
+
+### Future Field-Role Mapping
+
+The current mapping primarily determines entity identity.
+
+A future enhancement will allow the same mapping document to identify source-specific field roles:
+
+```json
+{
+  "identity_mapping": {
+    "identity_columns": ["application_id"],
+    "priority_order": ["application_id"],
+    "recommended_entity_column": "application_id"
+  },
+  "field_mapping": {
+    "timestamp_column": "event_time",
+    "level_column": "severity",
+    "message_column": "msg",
+    "status_code_column": "http_status",
+    "exception_column": "exception"
+  }
+}
+```
+
+This will make Stage A more completely source-independent.
 
 ### Stage A Responsibility
 
 Stage A is responsible for:
 
--   log parsing;
--   schema normalization;
--   timestamp normalization;
--   service identification;
--   severity normalization;
--   time-window aggregation;
--   numerical feature generation;
--   baseline preparation;
--   writing feature datasets to SeaweedFS/S3.
+- source-file processing;
+- schema inference and normalization;
+- timestamp normalization;
+- identity/entity construction;
+- severity normalization;
+- time-window aggregation;
+- numerical feature generation;
+- writing per-input Parquet feature datasets.
 
 Stage A should **not** perform LLM-based RCA or remediation.
 
@@ -207,109 +390,245 @@ Stage A should **not** perform LLM-based RCA or remediation.
 
 # Stage B — Anomaly Detection
 
-Stage B consumes the feature dataset generated by Stage A.
+Stage B follows **exactly the same folder-based convention as Stage A**.
+
+It enumerates the per-input feature folders generated by Stage A and processes each folder independently.
+
+Example input:
 
 ```text
-             Stage A
-                |
-                v
-        Feature Parquet
-                |
-                v
-       +----------------+
-       | Stage B        |
-       | Anomaly        |
-       | Detection      |
-       +-------+--------+
-               |
-       +-------+---------+
-       |                 |
-       v                 v
- Statistical       Isolation Forest
- Detectors              |
-       |                 |
-       +--------+--------+
-                |
-                v
-          Anomaly Score
-                |
-                v
-        is_anomaly = true/false
-                |
-                v
-       Evidence / Metadata
-                |
-                v
-          SeaweedFS S3 / MINIO S3 / AWS S3
+s3://loghawk-data/features/2026-09-28/
+    |
+    +-- container_logs/
+    |     +-- *.parquet
+    |
+    +-- loghawk_sample_logs/
+          +-- *.parquet
 ```
+
+Stage B produces:
+
+```text
+s3://loghawk-data/anomalies/2026-09-28/
+    |
+    +-- container_logs/
+    |     +-- isolation_forest_results.parquet
+    |
+    +-- loghawk_sample_logs/
+          +-- isolation_forest_results.parquet
+```
+
+### Per-input Stage B Contract
+
+For every Stage A input folder:
+
+```text
+features/<inputfilename>/
+        |
+        v
+Stage B
+        |
+        +--> optional identity mapping validation
+        |
+        +--> clean features
+        |
+        +--> select normal baseline
+        |
+        +--> train Isolation Forest
+        |
+        +--> score every feature window
+        |
+        +--> calculate severity
+        |
+        +--> generate explanation
+        |
+        v
+anomalies/<inputfilename>/isolation_forest_results.parquet
+```
+
+### Identity Mapping in Stage B
+
+Stage B can locate the corresponding mapping:
+
+```text
+s3://loghawk-data/identitymapping/2026-09-28/
+    identitymapping_<inputfilename>.json
+```
+
+The mapping is optional for Stage B.
+
+Stage A has already created `entity_id`, so Stage B does not reconstruct identity.
+
+When a mapping exists, Stage B can load it and validate that the recommended entity column is consistent with the Stage A feature dataset.
+
+This keeps identity construction in Stage A and prevents duplicate identity logic.
+
+### Isolation Forest
 
 The initial ML detector is **scikit-learn Isolation Forest**.
 
-### Stage B Responsibilities
+For each input feature dataset Stage B:
 
-Stage B is responsible for:
+1. loads the complete Parquet feature dataset;
+2. cleans numerical features;
+3. sorts by timestamp;
+4. selects the earliest portion as the normal baseline;
+5. scales the ML features with `StandardScaler`;
+6. trains Isolation Forest;
+7. calculates anomaly scores;
+8. marks anomalous feature windows;
+9. assigns operational severity;
+10. generates a human-readable reason;
+11. writes the anomaly result for that input.
 
--   reading feature datasets;
--   applying statistical/baseline detectors;
--   applying Isolation Forest;
--   generating anomaly scores;
--   determining anomaly flags;
--   attaching detector metadata;
--   persisting anomaly results.
-
-Example output:
+### Stage B Feature Columns
 
 ```text
-s3a://loghawk-data/anomalies/year=2026/month=09/day=23/
+total_log_count
+info_count
+warning_count
+error_count
+http_4xx_count
+http_5xx_count
+timeout_count
+connection_error_count
+authentication_failure_count
+unique_exception_count
+unique_error_message_count
+error_rate
+warning_rate
+http_5xx_rate
+timeout_rate
 ```
 
-Example logical result:
+### Stage B Metadata
+
+Stage B preserves generic entity and identity metadata where available:
 
 ```text
 timestamp
+entity_id
 service
-error_rate
-timeout_count
-http_5xx_rate
-anomaly_score
-is_anomaly
-detector
+application_id
+app_name
+container_name
+pod_name
+namespace
+hostname
+host
+database
+device
 ```
 
-Stage B should remain independent from the LLM layer.
+### Stage B Output
+
+Each input file gets its own anomaly dataset:
+
+```text
+s3://loghawk-data/anomalies/2026-09-28/<inputfilename>/
+    isolation_forest_results.parquet
+```
+
+The anomaly result contains fields such as:
+
+```text
+timestamp
+entity_id
+anomaly_score
+is_anomaly
+severity
+reason
+```
+
+plus the Stage A feature and identity metadata.
+
+### Per-input Model Artifacts
+
+The current folder-based implementation also keeps Isolation Forest artifacts separate per input dataset:
+
+```text
+s3://loghawk-data/models/2026-09-28/
+    isolation_forest_container_logs.joblib
+    isolation_scaler_container_logs.joblib
+
+    isolation_forest_loghawk_sample_logs.joblib
+    isolation_scaler_loghawk_sample_logs.joblib
+```
+
+This prevents one input dataset from overwriting another dataset's model.
+
+### Stage B Responsibility
+
+Stage B is responsible for:
+
+- reading per-input feature datasets;
+- baseline selection;
+- statistical/baseline detection;
+- Isolation Forest;
+- anomaly scoring;
+- anomaly flags;
+- severity;
+- evidence/reason generation;
+- persisting per-input anomaly results.
+
+Stage B remains independent from the LLM layer.
 
 ---
 
 # Stage A → Stage B Stitching
 
-The recommended architecture is to **keep Stage A and Stage B as separate processing components** and use Temporal to orchestrate them.
+Stage A and Stage B remain separate processing components.
+
+Temporal orchestrates them using the durable S3-compatible data contract.
 
 ```text
-                    Temporal
-                       |
-                       v
-              Stage A Activity
-                       |
-                       v
-                 PySpark Job
-                       |
-                       v
-              Feature Parquet
-                       |
-                       v
-                 SeaweedFS S3 / MINIO S3 / AWS S3
-                       |
-                       v
-              Stage B Activity
-                       |
-                       v
-             Isolation Forest
-                       |
-                       v
-             Anomaly Parquet
-                       |
-                       v
-                 SeaweedFS S3 / MINIO S3 / AWS S3
+                         Temporal
+                            |
+                            v
+                    Identity Mapping
+                         Activity
+                            |
+                            v
+                    Raw File Mappings
+                            |
+                            v
+                    Stage A Activity
+                            |
+                            v
+                  +------------------+
+                  | Per-input        |
+                  | Feature Folders  |
+                  +------------------+
+                            |
+                            v
+                    Stage B Activity
+                            |
+                            v
+                  +------------------+
+                  | Per-input        |
+                  | Anomaly Folders  |
+                  +------------------+
+                            |
+                            v
+                         Stage C
+```
+
+The data contract is:
+
+```text
+raw/<inputfilename>
+        |
+        v
+identitymapping/identitymapping_<inputfilename>.json
+        |
+        v
+features/<inputfilename>/
+        |
+        v
+anomalies/<inputfilename>/
+        |
+        v
+incidents/
 ```
 
 Temporal does not replace PySpark or scikit-learn.
@@ -319,15 +638,19 @@ Instead:
 ```text
 Temporal
    |
-   +--> calls Stage A
+   +--> Identity Mapping
+   |
+   +--> waits for all mappings
+   |
+   +--> Stage A
    |
    +--> waits for Stage A completion
    |
-   +--> calls Stage B
+   +--> Stage B
    |
    +--> waits for Stage B completion
    |
-   +--> starts Stage C
+   +--> Stage C
 ```
 
 This provides a clean separation between **workflow orchestration** and **data-processing logic**.
@@ -338,106 +661,134 @@ This provides a clean separation between **workflow orchestration** and **data-p
 
 Temporal is the primary workflow orchestration layer for the LogHawk core AIOps pipeline.
 
-A simplified workflow is:
+The current workflow evolves around the folder-based processing model:
 
 ```text
-                    LogHawk Workflow
+                    LogHawk Pipeline
                            |
                            v
-                 +-------------------+
-                 | Validate Input    |
-                 +---------+---------+
+              +-------------------------+
+              | Identity Mapping        |
+              | Activity                |
+              +------------+------------+
                            |
                            v
-                 +-------------------+
-                 | Stage A Activity  |
-                 | PySpark Feature   |
-                 | Engineering      |
-                 +---------+---------+
+              All mappings successful?
                            |
                            v
-                 Feature Dataset
+              +-------------------------+
+              | Stage A                 |
+              | Folder Feature          |
+              | Engineering Activity    |
+              +------------+------------+
                            |
                            v
-                 +-------------------+
-                 | Stage B Activity  |
-                 | Anomaly Detection |
-                 +---------+---------+
+              features/<inputfilename>/
                            |
                            v
-                  Anomaly Dataset
+              +-------------------------+
+              | Stage B                 |
+              | Folder Anomaly          |
+              | Detection Activity      |
+              +------------+------------+
                            |
                            v
-                 +-------------------+
-                 | Stage C Activity  |
-                 | Incident          |
-                 | Correlation       |
-                 +---------+---------+
+              anomalies/<inputfilename>/
                            |
                            v
-                 +-------------------+
-                 | Stage D Activity  |
-                 | AI / RAG / RCA    |
-                 +---------+---------+
+              +-------------------------+
+              | Stage C                 |
+              | Incident Correlation    |
+              +------------+------------+
                            |
                            v
-                 +-------------------+
-                 | Policy / Approval |
-                 +---------+---------+
+              +-------------------------+
+              | Stage D                 |
+              | AI / RAG / RCA           |
+              +------------+------------+
                            |
                            v
-                 +-------------------+
-                 | Remediation       |
-                 | Workflow          |
-                 +---------+---------+
+              +-------------------------+
+              | Policy / Approval       |
+              +------------+------------+
                            |
                            v
-                       Verify
+              +-------------------------+
+              | Stage E                 |
+              | Remediation / Verify    |
+              +-------------------------+
 ```
 
-## Temporal Activity Model
+## Current Temporal Activity Model
 
-Stage A and Stage B should be implemented as independently testable activities.
-
-Conceptually:
+The intended activity structure is:
 
 ```python
 @activity.defn
-def run_feature_engineering(input_path, output_path):
-    # Execute Stage A PySpark processing
+async def run_identity_mapping(raw_folder):
     ...
 
 @activity.defn
-def run_anomaly_detection(feature_path, output_path):
-    # Execute Stage B Isolation Forest processing
+async def run_stage_a(raw_folder, feature_folder):
+    ...
+
+@activity.defn
+async def run_stage_b(feature_folder, anomaly_folder):
     ...
 ```
 
-The workflow then coordinates them:
+The workflow coordinates them:
 
 ```python
 @workflow.defn
 class LogHawkPipeline:
 
     @workflow.run
-    async def run(self, input_path):
+    async def run(
+        self,
+        raw_folder,
+        feature_folder,
+        anomaly_folder,
+    ):
+
+        await workflow.execute_activity(
+            run_identity_mapping,
+            args=[raw_folder],
+            ...
+        )
 
         feature_path = await workflow.execute_activity(
-            run_feature_engineering,
-            args=[input_path],
+            run_stage_a,
+            args=[raw_folder, feature_folder],
             ...
         )
 
         anomaly_path = await workflow.execute_activity(
-            run_anomaly_detection,
-            args=[feature_path],
+            run_stage_b,
+            args=[feature_path, anomaly_folder],
             ...
         )
 
         return anomaly_path
 ```
 
-The exact Temporal implementation will evolve as LogHawk moves from local development to distributed execution.
+The exact workflow implementation will evolve as LogHawk moves from local development to distributed execution.
+
+### Temporal Reliability
+
+Activities should use:
+
+- retries;
+- timeouts;
+- idempotent processing where practical;
+- clear failure propagation;
+- durable workflow state.
+
+Identity Mapping must complete successfully before Stage A starts.
+
+Stage A must complete before Stage B starts.
+
+Stage B must complete before Stage C starts.
 
 ---
 
@@ -527,65 +878,116 @@ Therefore:
 
 ---
 
-# SeaweedFS S3 / MINIO S3 / AWS S3 as the Data Boundary
+# RustFS S3 / MINIO S3 / AWS S3 as the Data Boundary
 
-SeaweedFS provides the local S3-compatible object-storage layer for the development environment.
+RustFS provides the local S3-compatible object-storage layer for the current development environment.
 
 The object-storage boundary allows the processing stages to remain loosely coupled.
 
 ```text
-                    SeaweedFS S3 / MINIO S3 / AWS S3
-                         |
-        +----------------+----------------+
-        |                |                |
-        v                v                v
-       raw           features         anomalies
-        |                |                |
-        v                v                v
-     Stage A          Stage B          Stage C/D
+                         S3-Compatible Storage
+                         RustFS / MINIO / AWS
+                                |
+              +-----------------+-----------------+
+              |                 |                 |
+              v                 v                 v
+             raw            features          anomalies
+              |                 |                 |
+              v                 v                 v
+        Identity Map         Stage A           Stage B
+                                                   |
+                                                   v
+                                               Stage C/D
 ```
 
-Example layout:
+### Current folder convention
+
+For a processing date such as `2026-09-28`:
 
 ```text
-s3a://loghawk-data/
+s3://loghawk-data/
     |
     +-- raw/
-    |     +-- year=2026/
-    |           +-- month=09/
-    |                 +-- day=23/
+    |     +-- 2026-09-28/
+    |           +-- container_logs.json
+    |           +-- loghawk_sample_logs.json
+    |
+    +-- identitymapping/
+    |     +-- 2026-09-28/
+    |           +-- identitymapping_container_logs.json
+    |           +-- identitymapping_loghawk_sample_logs.json
     |
     +-- features/
-    |     +-- year=2026/
-    |           +-- month=09/
-    |                 +-- day=23/
+    |     +-- 2026-09-28/
+    |           +-- container_logs/
+    |           |     +-- *.parquet
+    |           |
+    |           +-- loghawk_sample_logs/
+    |                 +-- *.parquet
     |
     +-- anomalies/
-          +-- year=2026/
-                +-- month=09/
-                      +-- day=23/
+    |     +-- 2026-09-28/
+    |           +-- container_logs/
+    |           |     +-- isolation_forest_results.parquet
+    |           |
+    |           +-- loghawk_sample_logs/
+    |                 +-- isolation_forest_results.parquet
+    |
+    +-- incidents/
+    |     +-- 2026-09-28/
+    |
+    +-- models/
+          +-- 2026-09-28/
+                +-- isolation_forest_<inputfilename>.joblib
+                +-- isolation_scaler_<inputfilename>.joblib
 ```
 
-This provides a clear contract:
+### Stage-to-stage contracts
 
 ```text
-Stage A:
-raw → features
-
-Stage B:
-features → anomalies
-
-Stage C:
-anomalies → incidents
-
-Stage D:
-incidents + evidence → RCA
-
-Stage E:
-RCA + policy → remediation
+Stage 0 / Ingestion
+    raw/<date>/<inputfilename>
+        |
+        v
+Identity Mapping
+    identitymapping/<date>/identitymapping_<inputfilename>.json
+        |
+        v
+Stage A
+    features/<date>/<inputfilename>/
+        |
+        v
+Stage B
+    anomalies/<date>/<inputfilename>/
+        |
+        v
+Stage C
+    incidents/<date>/
+        |
+        v
+Stage D
+    RCA / evidence
+        |
+        v
+Stage E
+    remediation / verification
 ```
 
-This contract also makes each stage independently testable.
+### S3 URI convention
+
+Python filesystem operations use:
+
+```text
+s3://
+```
+
+Spark/Hadoop operations use:
+
+```text
+s3a://
+```
+
+This allows RustFS to remain the common object-storage boundary while respecting the filesystem implementation used by each processing engine.
 
 ---
 
@@ -600,7 +1002,7 @@ Data Sources
           n8n / OTel / APIs
                 |
                 v
-            SeaweedFS S3 / MINIO S3 / AWS S3
+            RustFS S3 / MINIO S3 / AWS S3
                 |
                 v
        +--------------------+
@@ -663,7 +1065,7 @@ Data Sources
 
 # System Responsibilities
 
--   **SeaweedFS S3 / MINIO S3 / AWS S3** — local S3-compatible or AWS cloud S3 object storage and durable data boundary between processing stages.
+-   **RustFS S3 / MINIO S3 / AWS S3** — local S3-compatible or AWS cloud S3 object storage and durable data boundary between processing stages.
 -   **LanceDB** — RAG retrieval store for embeddings, searchable knowledge chunks, incident evidence and associated metadata.
 -   **DuckDB** — structured analytical storage and conversation history, including chat sessions, messages, agent/tool history and incident/history records.
 -   **PySpark** — large-scale ingestion, parsing, normalization, aggregation and feature engineering.
@@ -828,7 +1230,7 @@ Logs/Metrics/Traces       NIST/CVE/ATT&CK          Runbooks/History
                            n8n / OpenTelemetry
                                  |
                                  v
-                          SeaweedFS S3 / MINIO S3 / AWS S3
+                          RustFS S3 / MINIO S3 / AWS S3
                                  |
                                  v
                       +---------------------+
@@ -1217,7 +1619,7 @@ Temporal
 |---|---|
 | Elasticsearch / Splunk / Files / JSON / CSV | Log sources |
 | OpenTelemetry | Future logs/metrics/traces integration |
-| SeaweedFS S3 / MINIO S3 / AWS S3 | Local S3-compatible or AWS cloud S3 object storage and stage-to-stage data boundary |
+| RustFS S3 / MINIO S3 / AWS S3 | Local S3-compatible or AWS cloud S3 object storage and stage-to-stage data boundary |
 | PySpark | Big-data ingestion, aggregation and feature engineering |
 | DuckDB / Parquet | Structured analytics, conversation history and operational history storage |
 | LanceDB | RAG retrieval: embeddings, searchable text, metadata and hybrid vector/keyword search |
@@ -1234,7 +1636,7 @@ Temporal
 
 # Recommended Project Structure
 
-The project should maintain separation between processing logic and workflow orchestration.
+The project maintains separation between processing logic, identity mapping, workflow orchestration, AI/RAG, and integrations.
 
 ```text
 loghawk/
@@ -1242,13 +1644,20 @@ loghawk/
 +-- src/
 |   +-- loghawk/
 |       |
+|       +-- config.py
+|       |
 |       +-- ingestion/
+|       |
+|       +-- identity_mapping/
+|       |   +-- identity_mapping.py
 |       |
 |       +-- feature_engineering/
 |       |   +-- pyspark_s3_feature_engineering.py
+|       |   +-- pyspark_s3_feature_engineering5.py
 |       |
 |       +-- anomaly_detection/
-|       |   +-- isolation_forest.py
+|       |   +-- scikit_s3_isolation_forest.py
+|       |   +-- scikit_s3_isolation_forest_folder.py
 |       |   +-- statistical.py
 |       |
 |       +-- incident/
@@ -1278,12 +1687,17 @@ loghawk/
 |
 +-- tests/
 |
++-- AGENTS.md
 +-- README.md
 ```
 
 The important architectural rule is:
 
 ```text
+identity_mapping/
+        |
+        +--> maps source fields to logical identity
+
 feature_engineering/
         |
         +--> contains Stage A processing logic
@@ -1292,73 +1706,144 @@ anomaly_detection/
         |
         +--> contains Stage B processing logic
 
+incident/
+        |
+        +--> contains Stage C correlation logic
+
+ai/ + rag/
+        |
+        +--> contains Stage D intelligence/RCA logic
+
 workflows/temporal/
         |
         +--> orchestrates Stage A, B, C, D and E
 ```
 
-Temporal should therefore **call** the processing components rather than duplicating their implementation.
+Temporal should **call** the processing components rather than duplicating their implementation.
+
+### Project instructions
+
+`AGENTS.md` contains the project-specific instructions used by Codex, including:
+
+- architecture decisions;
+- S3/S3A conventions;
+- Stage A and Stage B folder contracts;
+- coding guidelines;
+- testing expectations;
+- mandatory approval before file modifications.
 
 ---
+
+# Current Implementation Status
+
+As of the current development iteration, the detection foundation is being validated locally on Windows with RustFS-compatible S3 storage.
+
+Current processing model:
+
+```text
+Raw files
+   |
+   v
+Identity Mapping
+   |
+   v
+Per-file mappings
+   |
+   v
+Stage A / PySpark
+   |
+   v
+Per-input feature folders
+   |
+   v
+Stage B / Isolation Forest
+   |
+   v
+Per-input anomaly folders
+```
+
+Example:
+
+```text
+raw/2026-09-28/container_logs.json
+        |
+        +--> identitymapping/2026-09-28/
+        |       identitymapping_container_logs.json
+        |
+        +--> features/2026-09-28/container_logs/
+        |       *.parquet
+        |
+        +--> anomalies/2026-09-28/container_logs/
+                isolation_forest_results.parquet
+```
+
+The same pattern applies independently to every input file discovered in the processing-date folder.
 
 # Roadmap
 
 ## Phase 1 — Detection Foundation
 
--   [ ]  Define normalized event schema
--   [ ]  Parse and normalize logs
--   [ ]  Implement SeaweedFS S3 raw-log storage
--   [ ]  Implement 1-minute aggregation
--   [ ]  Implement anomaly feature extraction
--   [ ]  Build baseline datasets
--   [ ]  Implement statistical/EWMA detectors
--   [ ]  Implement Isolation Forest
--   [ ]  Persist feature datasets as Parquet
--   [ ]  Persist anomaly results
--   [ ]  Add anomaly API/dashboard
--   [ ]  Add synthetic anomalous-log test data
+-   [x] Define normalized feature contract
+-   [x] Implement raw-log storage boundary
+-   [x] Implement one-minute aggregation
+-   [x] Implement anomaly feature extraction
+-   [x] Implement Isolation Forest foundation
+-   [x] Persist feature datasets as Parquet
+-   [x] Persist anomaly results
+-   [ ] Add broader synthetic anomalous-log test data
+-   [ ] Add anomaly API/dashboard
 
-## Phase 2 — Stage A → Stage B Pipeline
+## Phase 2 — Folder-Based Stage A → Stage B Pipeline
 
--   [ ]  Finalize Stage A PySpark interface
--   [ ]  Finalize Stage A input/output data contract
--   [ ]  Finalize Stage B Isolation Forest interface
--   [ ]  Finalize Stage B input/output data contract
--   [ ]  Validate `raw → features → anomalies`
--   [ ]  Add stage-level logging
--   [ ]  Add stage-level error handling
--   [ ]  Add stage-level test datasets
--   [ ]  Validate SeaweedFS S3 data boundaries
+-   [x] Implement per-file Identity Mapping
+-   [x] Implement idempotent identity mapping generation
+-   [x] Implement folder-based Stage A
+-   [x] Implement per-input Stage A feature folders
+-   [x] Implement folder-based Stage B
+-   [x] Implement per-input Stage B anomaly folders
+-   [x] Preserve generic `entity_id`
+-   [x] Keep Python `s3://` and Spark `s3a://` conventions explicit
+-   [x] Validate raw → mapping → features → anomalies contract
+-   [ ] Add broader field-role mapping for source-independent timestamp/message/status fields
+-   [ ] Add schema fingerprint/cache to reduce repeated LLM mapping calls
+-   [ ] Add stage-level automated integration tests
 
 ## Phase 3 — Temporal Orchestration
 
--   [ ]  Introduce Temporal
--   [ ]  Create LogHawk Temporal Worker
--   [ ]  Implement Stage A Activity
--   [ ]  Implement Stage B Activity
--   [ ]  Create Stage A → Stage B workflow
--   [ ]  Add retries
--   [ ]  Add timeouts
--   [ ]  Add workflow failure handling
--   [ ]  Add workflow observability
--   [ ]  Add workflow audit metadata
+-   [x] Introduce Temporal
+-   [x] Create LogHawk Temporal Worker
+-   [x] Implement Stage A Activity
+-   [x] Implement Stage B Activity
+-   [ ] Implement Identity Mapping Activity
+-   [ ] Update workflow ordering to Identity Mapping → Stage A → Stage B
+-   [x] Add retries
+-   [x] Add activity timeouts
+-   [ ] Add workflow-level failure handling for the complete folder pipeline
+-   [ ] Add workflow observability
+-   [ ] Add workflow audit metadata
 
-Initial target:
+Current target:
 
 ```text
 Temporal Workflow
        |
        v
+Identity Mapping Activity
+       |
+       v
+identitymapping/<date>/
+       |
+       v
 Stage A Activity
        |
        v
-features/
+features/<date>/<inputfilename>/
        |
        v
 Stage B Activity
        |
        v
-anomalies/
+anomalies/<date>/<inputfilename>/
 ```
 
 ## Phase 4 — Incident Intelligence
@@ -1451,7 +1936,7 @@ anomalies/
                     +---------+
                          |
                          v
-                    SeaweedFS S3 / MINIO S3 / AWS S3
+                    RustFS S3 / MINIO S3 / AWS S3
                          |
                          v
                 +----------------+
@@ -1562,7 +2047,7 @@ anomalies
 incidents
 ```
 
-SeaweedFS S3 / MINIO S3 / AWS S3 provides the data boundary.
+RustFS S3 / MINIO S3 / AWS S3 provides the data boundary.
 
 ## 3\. AI does not directly control infrastructure
 
@@ -1591,7 +2076,7 @@ Windows
    |      |
    |   Gemma 2
    |
-   +--> SeaweedFS S3 / MINIO S3 / AWS S3
+   +--> RustFS S3 / MINIO S3 / AWS S3
    |
    +--> PySpark
    |
@@ -1656,7 +2141,7 @@ firsttime_setup_terminal_3.bat
 
 -   Apache Spark: https://spark.apache.org/
 -   scikit-learn: https://scikit-learn.org/
--   SeaweedFS: https://seaweedfs.com/
+-   RustFS: https://seaweedfs.com/
 -   LanceDB: https://lancedb.com/
 -   DuckDB: https://duckdb.org/
 
@@ -1675,6 +2160,6 @@ Please refer LICENSE.txt file for complete details on the license and terms and 
 About The Author
 --------------------
 
-Dilshad Mustafa is the creator and programmer of LogHawk AIOps suite of tools and Scabi framework and Cluster. He is a Senior Software Architect with 23 years of experience in Software and Information Technology industry. He is experienced in DevOps, Cybersecurity, SRE, SecOps and Software Architecture, Development and Maintenance & Support. He has broad experience across various industry domains, Digital Rights DRM, Banking & Finance, Energy & Utilities, Retail, Pharma, Healthcare.
+Dilshad Mustafa is the creator and programmer of LogHawk AIOps suite of tools and Scabi framework and Cluster. He is a Senior Software Architect with 22+ years of experience in Software and Information Technology industry. He is experienced in DevOps, Cybersecurity, SRE, SecOps and Software Architecture, Development and Maintenance & Support. He has broad experience across various industry domains, Digital Rights DRM, Banking & Finance, Energy & Utilities, Retail, Pharma, Healthcare.
 
 He completed his B.E. in Computer Science & Engineering from Annamalai University, India and completed his M.Sc. in Communication & Network Systems from Nanyang Technological University, Singapore and PG Program in Cybersecurity from Indian Institute of Technology, IIT Kanpur.
