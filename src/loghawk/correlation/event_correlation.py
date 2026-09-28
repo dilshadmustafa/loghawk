@@ -146,17 +146,39 @@ def prepare_anomalies(
     # Service
     # --------------------------------------------------------
 
-    if "service" not in df.columns:
+    service_values = pd.Series(
+        pd.NA,
+        index=df.index,
+        dtype="object",
+    )
+    service_source_columns = (
+        "service",
+        "application",
+        "app_name",
+        "application_id",
+        "entity_id",
+    )
 
+    for column in service_source_columns:
+        if column not in df.columns:
+            continue
+
+        candidate = (
+            df[column]
+            .astype("string")
+            .str.strip()
+            .replace("", pd.NA)
+        )
+        service_values = service_values.fillna(candidate)
+
+    if service_values.isna().all():
         print(
-            "WARNING: service column missing. "
+            "WARNING: no service or entity identity column has values. "
             "Using 'unknown-service'."
         )
 
-        df["service"] = "unknown-service"
-
     df["service"] = (
-        df["service"]
+        service_values
         .fillna("unknown-service")
         .astype(str)
     )
