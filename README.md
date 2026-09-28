@@ -2103,28 +2103,26 @@ AWS
 
 # Documentation
 
-### QUICKSTART LOGHAWK AIOPS
+### Quickstart LogHawk AIOps
 
-```plaintext
-First time setup:
-firsttime_setup_terminal_1.bat
-firsttime_setup_terminal_2.bat
-firsttime_setup_terminal_3.bat
-```
+**First-time setup**
 
-### `Start Temporal workflow:`
+- `firsttime_setup_terminal_1.bat`
+- `firsttime_setup_terminal_2.bat`
+- `firsttime_setup_terminal_3.bat`
 
-### `firsttime_start_workflow_terminal_1.bat`
+**Start Temporal workflow**
 
-### `firsttime_start_workflow_terminal_2.bat`
+- `firsttime_start_workflow_terminal_1.bat`
+- `firsttime_start_workflow_terminal_2.bat`
 
-### `Interactive chat assistant:`
+**Interactive chat assistant**
 
-### `firsttime_start_chat_assistant.bat`
+- `firsttime_start_chat_assistant.bat`
 
-### `Web UI to upload Runbooks, Documents, Troubleshooting Guides, etc:`
+**Web UI for uploading runbooks, documents, troubleshooting guides, etc.**
 
-### `firsttime_start_webUI_doc_upload.bat`
+- `firsttime_start_webUI_doc_upload.bat`
 
 ### LLM Provider References
 
