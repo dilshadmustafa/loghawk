@@ -369,7 +369,7 @@ def load_identity_mapping(
     mapping_path: str,
 ) -> dict[str, Any]:
     """
-    Read the LLM-generated identity mapping JSON from S3.
+    Read the complete identity and field mapping JSON from S3.
     """
 
     filesystem_path = s3a_to_s3(mapping_path)
@@ -403,9 +403,8 @@ def load_identity_mapping(
     #
     # {
     #   "source": {...},
-    #   "identity_mapping": {
-    #       ...
-    #   }
+    #   "identity_mapping": {...},
+    #   "field_mapping": {...}
     # }
     # --------------------------------------------------------
 
@@ -423,7 +422,7 @@ def load_identity_mapping(
             "'identity_mapping' must be a JSON object."
         )
 
-    return mapping
+    return mapping_document
 
 
 # ============================================================
@@ -497,6 +496,52 @@ def validate_identity_mapping(
     return valid_columns
 
 
+FIELD_ROLE_FALLBACKS = {
+    "timestamp_column": "timestamp",
+    "level_column": "level",
+    "message_column": "message",
+    "status_code_column": "status_code",
+    "exception_column": "exception",
+}
+
+
+def validate_field_mapping(
+    field_mapping: dict[str, Any] | None,
+    available_columns: list[str],
+) -> dict[str, str | None]:
+    """Resolve field roles against the source schema, including legacy names."""
+    if not isinstance(field_mapping, dict):
+        field_mapping = {}
+    available = set(available_columns)
+    resolved = {}
+
+    for role, fallback_column in FIELD_ROLE_FALLBACKS.items():
+        column = field_mapping.get(role)
+
+        if column is not None and (
+            not isinstance(column, str)
+            or column not in available
+        ):
+            print(
+                f"WARNING: Field mapping {role}='{column}' is not in "
+                "the source schema; checking the legacy field name."
+            )
+            column = None
+
+        if column is None and fallback_column in available:
+            column = fallback_column
+
+        resolved[role] = column
+
+    if resolved["timestamp_column"] is None:
+        raise ValueError(
+            "No valid timestamp field is mapped. "
+            f"Available columns: {sorted(available)}"
+        )
+
+    return resolved
+
+
 # ============================================================
 # Construct dynamic Spark schema
 # ============================================================
@@ -504,6 +549,7 @@ def validate_identity_mapping(
 def construct_schema(
     inferred_schema: StructType,
     identity_columns: list[str],
+    field_mapping: dict[str, str | None],
 ) -> StructType:
     """
     Construct a Spark schema dynamically from the actual raw
@@ -520,6 +566,13 @@ def construct_schema(
     """
 
     identity_set = set(identity_columns)
+    role_types = {
+        field_mapping["timestamp_column"]: StringType(),
+        field_mapping["level_column"]: StringType(),
+        field_mapping["message_column"]: StringType(),
+        field_mapping["exception_column"]: StringType(),
+        field_mapping["status_code_column"]: IntegerType(),
+    }
 
     fields = []
 
@@ -541,56 +594,11 @@ def construct_schema(
                 )
             )
 
-        # ----------------------------------------------------
-        # Standard LogHawk fields.
-        # ----------------------------------------------------
-
-        elif field_name == "timestamp":
-
+        elif field_name in role_types and role_types[field_name] is not None:
             fields.append(
                 StructField(
                     field_name,
-                    StringType(),
-                    True,
-                )
-            )
-
-        elif field_name == "level":
-
-            fields.append(
-                StructField(
-                    field_name,
-                    StringType(),
-                    True,
-                )
-            )
-
-        elif field_name == "message":
-
-            fields.append(
-                StructField(
-                    field_name,
-                    StringType(),
-                    True,
-                )
-            )
-
-        elif field_name == "exception":
-
-            fields.append(
-                StructField(
-                    field_name,
-                    StringType(),
-                    True,
-                )
-            )
-
-        elif field_name == "status_code":
-
-            fields.append(
-                StructField(
-                    field_name,
-                    IntegerType(),
+                    role_types[field_name],
                     True,
                 )
             )
@@ -670,7 +678,7 @@ def _run_single_file(
         identity_mapping_folder,
     )
 
-    mapping = load_identity_mapping(
+    mapping_document = load_identity_mapping(
         identity_mapping_path
     )
 
@@ -715,8 +723,13 @@ def _run_single_file(
     # ========================================================
 
     identity_columns = validate_identity_mapping(
-        mapping=mapping,
+        mapping=mapping_document["identity_mapping"],
         available_columns=available_columns,
+    )
+
+    field_mapping = validate_field_mapping(
+        mapping_document.get("field_mapping"),
+        available_columns,
     )
 
     print()
@@ -748,6 +761,7 @@ def _run_single_file(
     schema = construct_schema(
         inferred_schema=inferred_schema,
         identity_columns=identity_columns,
+        field_mapping=field_mapping,
     )
 
     # ========================================================
@@ -767,72 +781,52 @@ def _run_single_file(
     # Standardize common fields
     # ========================================================
 
-    if "timestamp" in logs.columns:
-        logs = logs.withColumn(
-            "event_time",
-            F.to_timestamp(
-                F.col("timestamp")
-            ),
-        )
-    else:
-        raise ValueError(
-            "Required field 'timestamp' was not found "
-            f"in raw input: {input_path}"
-        )
+    timestamp_source = field_mapping["timestamp_column"]
+    logs = logs.withColumn(
+        "event_time",
+        F.to_timestamp(F.col(timestamp_source)),
+    )
 
-    if "level" in logs.columns:
-        logs = logs.withColumn(
-            "level",
-            F.upper(
-                F.trim(
-                    F.col("level")
-                )
-            ),
-        )
-    else:
-        logs = logs.withColumn(
-            "level",
-            F.lit("UNKNOWN"),
-        )
+    level_source = field_mapping["level_column"]
+    level_value = (
+        F.col(level_source).cast("string")
+        if level_source
+        else F.lit("UNKNOWN")
+    )
+    logs = logs.withColumn(
+        "level",
+        F.upper(F.trim(F.coalesce(level_value, F.lit("UNKNOWN")))),
+    )
 
-    if "message" in logs.columns:
-        logs = logs.withColumn(
-            "message",
-            F.coalesce(
-                F.col("message"),
-                F.lit(""),
-            ),
-        )
-    else:
-        logs = logs.withColumn(
-            "message",
-            F.lit(""),
-        )
+    message_source = field_mapping["message_column"]
+    message_value = (
+        F.col(message_source).cast("string")
+        if message_source
+        else F.lit("")
+    )
+    logs = logs.withColumn(
+        "message",
+        F.coalesce(message_value, F.lit("")),
+    )
 
-    if "exception" in logs.columns:
-        logs = logs.withColumn(
-            "exception",
-            F.coalesce(
-                F.col("exception"),
-                F.lit(""),
-            ),
-        )
-    else:
-        logs = logs.withColumn(
-            "exception",
-            F.lit(""),
-        )
+    exception_source = field_mapping["exception_column"]
+    exception_value = (
+        F.col(exception_source).cast("string")
+        if exception_source
+        else F.lit("")
+    )
+    logs = logs.withColumn(
+        "exception",
+        F.coalesce(exception_value, F.lit("")),
+    )
 
-    if "status_code" in logs.columns:
-        logs = logs.withColumn(
-            "status_code",
-            F.col("status_code").cast("int"),
-        )
-    else:
-        logs = logs.withColumn(
-            "status_code",
-            F.lit(None).cast("int"),
-        )
+    status_source = field_mapping["status_code_column"]
+    status_value = (
+        F.col(status_source).cast("int")
+        if status_source
+        else F.lit(None).cast("int")
+    )
+    logs = logs.withColumn("status_code", status_value)
 
     # ========================================================
     # Normalize identity columns

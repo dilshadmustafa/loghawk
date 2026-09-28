@@ -78,7 +78,7 @@ class LogHawkPipeline:
 
         incident_output_path = (
             "s3://loghawk-data/"
-            "incidents/year=2026/month=09/day=23/"
+            "incidents/2026-09-28/"
             "correlated_incidents.parquet"
         )
 
