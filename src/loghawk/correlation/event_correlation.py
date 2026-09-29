@@ -28,7 +28,7 @@ import loghawk.config as config
 # Configuration
 # ============================================================
 
-DEFAULT_CORRELATION_WINDOW_MINUTES = 5
+DEFAULT_CORRELATION_WINDOW_MINUTES = config.LH_CORRELATION_WINDOW_MINUTES
 
 
 # ============================================================
@@ -276,7 +276,7 @@ def severity_weight(
 
 def create_temporal_groups(
     df: pd.DataFrame,
-    correlation_window_minutes: int = 5,
+    correlation_window_minutes: int = DEFAULT_CORRELATION_WINDOW_MINUTES,
 ) -> pd.DataFrame:
 
     df = df.copy()
@@ -324,7 +324,7 @@ def create_temporal_groups(
 
 def correlate_events(
     df: pd.DataFrame,
-    correlation_window_minutes: int = 5,
+    correlation_window_minutes: int = DEFAULT_CORRELATION_WINDOW_MINUTES,
 ) -> pd.DataFrame:
 
     df = prepare_anomalies(df)
@@ -489,7 +489,7 @@ def correlate_events(
 
 def attach_incident_ids(
     df: pd.DataFrame,
-    correlation_window_minutes: int = 5,
+    correlation_window_minutes: int = DEFAULT_CORRELATION_WINDOW_MINUTES,
 ) -> pd.DataFrame:
 
     df = prepare_anomalies(df)
@@ -535,7 +535,7 @@ def attach_incident_ids(
 def run(
     input_path: str,
     output_path: str,
-    correlation_window_minutes: int = 5,
+    correlation_window_minutes: int = DEFAULT_CORRELATION_WINDOW_MINUTES,
 ) -> str:
 
     print("=" * 70)
@@ -656,7 +656,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--window",
         type=int,
-        default=5,
+        default=DEFAULT_CORRELATION_WINDOW_MINUTES,
     )
 
     args = parser.parse_args()

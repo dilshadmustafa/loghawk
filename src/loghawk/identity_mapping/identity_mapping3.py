@@ -54,7 +54,9 @@ Model:
 import gzip
 import json
 import os
+import random
 import re
+from collections.abc import Iterable
 from typing import Any
 
 import requests
@@ -565,6 +567,109 @@ def read_sample_record(
 
 
 # ============================================================
+# Reservoir sampling
+# ============================================================
+
+def reservoir_sample_records(
+    records: Iterable[dict[str, Any]],
+    input_path: str,
+) -> list[dict[str, Any]]:
+    """Keep a bounded, deterministic random sample in one pass."""
+    sample_size = config.LH_IDENTITY_MAPPING_SAMPLE_SIZE
+    rng = random.Random(
+        f"{config.LH_IDENTITY_MAPPING_SAMPLE_SEED}:{input_path}"
+    )
+    sample: list[dict[str, Any]] = []
+    records_seen = 0
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+
+        records_seen += 1
+        if len(sample) < sample_size:
+            sample.append(record)
+            continue
+
+        slot = rng.randrange(records_seen)
+        if slot < sample_size:
+            sample[slot] = record
+
+    return sample
+
+
+def read_reservoir_sample_records(
+    fs: s3fs.S3FileSystem,
+    input_path: str,
+) -> list[dict[str, Any]]:
+    """Stream-sample JSONL records; support JSON objects and arrays too."""
+    print()
+    print(f"Reading reservoir sample from: {input_path}")
+
+    with open_s3_text_file(fs, input_path) as f:
+        first_line = next(
+            (line.strip() for line in f if line.strip()),
+            None,
+        )
+        if first_line is None:
+            raise ValueError(f"Input file is empty: {input_path}")
+
+        try:
+            first_record = json.loads(first_line)
+        except json.JSONDecodeError:
+            # Pretty-printed JSON object/array.
+            f.seek(0)
+            try:
+                document = json.load(f)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Could not parse JSON from: {input_path}\nError: {exc}"
+                ) from exc
+
+            records = (
+                [document]
+                if isinstance(document, dict)
+                else document if isinstance(document, list) else []
+            )
+            sample_rows = reservoir_sample_records(records, input_path)
+        else:
+            def iter_records():
+                initial_records = (
+                    first_record
+                    if isinstance(first_record, list)
+                    else [first_record]
+                )
+                yield from initial_records
+
+                for line_number, line in enumerate(f, start=2):
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            "Could not parse JSON record "
+                            f"at line {line_number} in {input_path}: {exc}"
+                        ) from exc
+                    yield from (
+                        record if isinstance(record, list) else [record]
+                    )
+
+            sample_rows = reservoir_sample_records(
+                iter_records(),
+                input_path,
+            )
+
+    if not sample_rows:
+        raise ValueError(
+            f"Could not find JSON object records in: {input_path}"
+        )
+
+    print(f"Sample rows retained: {len(sample_rows)}")
+    return sample_rows
+
+
+# ============================================================
 # Ollama communication
 # ============================================================
 
@@ -729,7 +834,7 @@ Do not include ```json fences.
 
 def build_identity_mapping_prompt(
     column_names: list[str],
-    sample_row: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
 ) -> str:
     """
     Build the prompt sent to Llama for identity discovery.
@@ -750,10 +855,10 @@ INPUT COLUMN NAMES
 {json.dumps(column_names, indent=2)}
 
 
-ONE REPRESENTATIVE INPUT ROW
+RANDOMLY SAMPLED INPUT ROWS
 ============================
 
-{json.dumps(sample_row, indent=2, default=str)}
+{json.dumps(sample_rows, indent=2, default=str)}
 
 
 TASK
@@ -906,7 +1011,7 @@ def build_identity_response_schema(
 
 def build_field_mapping_prompt(
     column_names: list[str],
-    sample_row: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
 ) -> str:
     """Ask Ollama to map source fields to LogHawk field roles."""
     return f"""
@@ -919,9 +1024,9 @@ INPUT COLUMN NAMES
 ==================
 {json.dumps(column_names, indent=2)}
 
-ONE REPRESENTATIVE INPUT ROW
+RANDOMLY SAMPLED INPUT ROWS
 ============================
-{json.dumps(sample_row, indent=2, default=str)}
+{json.dumps(sample_rows, indent=2, default=str)}
 
 Field roles:
 - timestamp_column: event timestamp
@@ -969,7 +1074,7 @@ def build_field_mapping_response_schema(
 def validate_identity_mapping(
     mapping: dict[str, Any],
     column_names: list[str],
-    sample_row: dict[str, Any] | None = None,
+    sample_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Validate the mapping returned by the LLM.
@@ -1082,7 +1187,7 @@ def validate_identity_mapping(
     # If the model's candidates were empty or invalid, use a ranked,
     # deterministic fallback from known entity field names.
     if not valid_priority_order:
-        sample_row = sample_row or {}
+        sample_rows = sample_rows or []
         fallback_column = next(
             (
                 column
@@ -1090,8 +1195,11 @@ def validate_identity_mapping(
                 if (
                     column in available_columns
                     and column not in volatile_columns
-                    and sample_row.get(column) is not None
-                    and str(sample_row.get(column)).strip() != ""
+                    and any(
+                        row.get(column) is not None
+                        and str(row.get(column)).strip() != ""
+                        for row in sample_rows
+                    )
                 )
             ),
             None,
@@ -1144,7 +1252,7 @@ def validate_identity_mapping(
 
 def generate_identity_mapping(
     column_names: list[str],
-    sample_row: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """
     Ask Ollama/Llama to determine the entity identity mapping.
@@ -1152,11 +1260,11 @@ def generate_identity_mapping(
 
     identity_prompt = build_identity_mapping_prompt(
         column_names=column_names,
-        sample_row=sample_row,
+        sample_rows=sample_rows,
     )
     field_prompt = build_field_mapping_prompt(
         column_names=column_names,
-        sample_row=sample_row,
+        sample_rows=sample_rows,
     )
 
     print()
@@ -1235,7 +1343,7 @@ def generate_identity_mapping(
             ),
         },
         column_names,
-        sample_row,
+        sample_rows,
     )
 
 
@@ -1248,7 +1356,7 @@ def save_identity_mapping_to_s3(
     output_path: str,
     raw_input_path: str,
     column_names: list[str],
-    sample_row: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
     fs: s3fs.S3FileSystem,
 ) -> None:
     """
@@ -1259,7 +1367,8 @@ def save_identity_mapping_to_s3(
         "source": {
             "raw_input_path": raw_input_path,
             "column_names": column_names,
-            "sample_row": sample_row,
+            "sample_row": sample_rows[0],
+            "sample_rows": sample_rows,
         },
 
         "identity_mapping": mapping["identity_mapping"],
@@ -1348,9 +1457,14 @@ def process_one_file(
     # Idempotency check
     # --------------------------------------------------------
 
-    if mapping_exists(
+    existing_mapping = mapping_exists(
         fs,
         identity_mapping_path,
+    )
+
+    if (
+        existing_mapping
+        and config.LH_IDENTITY_MAPPING_SKIP_EXISTING
     ):
 
         print()
@@ -1364,16 +1478,24 @@ def process_one_file(
 
         return identity_mapping_path
 
+    if existing_mapping:
+        print("Existing mapping found; regenerating it.")
+
     # --------------------------------------------------------
     # Read representative record
     # --------------------------------------------------------
 
-    sample_row = read_sample_record(
-        fs,
-        raw_input_path,
-    )
+    if config.LH_IDENTITY_MAPPING_SAMPLE_STRATEGY == "first":
+        sample_rows = [
+            read_sample_record(fs, raw_input_path)
+        ]
+    else:
+        sample_rows = read_reservoir_sample_records(
+            fs,
+            raw_input_path,
+        )
 
-    if not sample_row:
+    if not sample_rows:
 
         raise RuntimeError(
             f"No sample record found in: "
@@ -1381,7 +1503,11 @@ def process_one_file(
         )
 
     column_names = list(
-        sample_row.keys()
+        dict.fromkeys(
+            column
+            for row in sample_rows
+            for column in row
+        )
     )
 
     print()
@@ -1398,7 +1524,7 @@ def process_one_file(
 
     mapping = generate_identity_mapping(
         column_names=column_names,
-        sample_row=sample_row,
+        sample_rows=sample_rows,
     )
 
     # --------------------------------------------------------
@@ -1452,7 +1578,7 @@ def process_one_file(
         output_path=identity_mapping_path,
         raw_input_path=raw_input_path,
         column_names=column_names,
-        sample_row=sample_row,
+        sample_rows=sample_rows,
         fs=fs,
     )
 

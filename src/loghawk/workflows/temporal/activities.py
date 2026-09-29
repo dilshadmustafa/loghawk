@@ -119,7 +119,9 @@ async def run_stage_c(
     result = event_correlation.run(
         input_path,
         output_path,
-        correlation_window_minutes=5,
+        correlation_window_minutes=(
+            event_correlation.DEFAULT_CORRELATION_WINDOW_MINUTES
+        ),
     )
 
     activity.logger.info(

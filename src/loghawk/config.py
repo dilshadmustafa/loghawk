@@ -55,6 +55,44 @@ LH_LLM_MODEL = os.getenv(
     "gemma2:latest"
 )
 
+LH_CORRELATION_WINDOW_MINUTES = int(
+    os.getenv("LH_CORRELATION_WINDOW_MINUTES", "5")
+)
+if LH_CORRELATION_WINDOW_MINUTES < 1:
+    raise ValueError("LH_CORRELATION_WINDOW_MINUTES must be at least 1")
+
+LH_IDENTITY_MAPPING_SAMPLE_SIZE = int(
+    os.getenv("LH_IDENTITY_MAPPING_SAMPLE_SIZE", "10")
+)
+if LH_IDENTITY_MAPPING_SAMPLE_SIZE < 1:
+    raise ValueError("LH_IDENTITY_MAPPING_SAMPLE_SIZE must be at least 1")
+
+LH_IDENTITY_MAPPING_SAMPLE_SEED = int(
+    os.getenv("LH_IDENTITY_MAPPING_SAMPLE_SEED", "42")
+)
+
+LH_IDENTITY_MAPPING_SAMPLE_STRATEGY = os.getenv(
+    "LH_IDENTITY_MAPPING_SAMPLE_STRATEGY",
+    "reservoir",
+).strip().lower()
+if LH_IDENTITY_MAPPING_SAMPLE_STRATEGY not in {"reservoir", "first"}:
+    raise ValueError(
+        "LH_IDENTITY_MAPPING_SAMPLE_STRATEGY must be "
+        "'reservoir' or 'first'"
+    )
+
+_skip_existing = os.getenv(
+    "LH_IDENTITY_MAPPING_SKIP_EXISTING",
+    "true",
+).strip().lower()
+if _skip_existing not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+    raise ValueError(
+        "LH_IDENTITY_MAPPING_SKIP_EXISTING must be a boolean value"
+    )
+LH_IDENTITY_MAPPING_SKIP_EXISTING = _skip_existing in {
+    "true", "1", "yes", "on"
+}
+
 LH_LOG_DIR = Path(os.getenv("LH_LOG_DIR"))
 
 if not LH_LOG_DIR.is_absolute():
