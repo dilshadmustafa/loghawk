@@ -59,11 +59,13 @@ os.environ["JAVA_HOME"] = config.JAVA_HOME
 os.environ["HADOOP_HOME"] = config.HADOOP_HOME
 
 os.environ["PATH"] = (
-    str(Path(config.JAVA_HOME) / "bin")
-    + ";"
-    + str(Path(config.HADOOP_HOME) / "bin")
-    + ";"
-    + os.environ.get("PATH", "")
+    os.pathsep.join(
+        [
+            str(Path(config.JAVA_HOME) / "bin"),
+            str(Path(config.HADOOP_HOME) / "bin"),
+            os.environ.get("PATH", ""),
+        ]
+    )
 )
 
 os.environ["SPARK_LOCAL_HOSTNAME"] = "localhost"

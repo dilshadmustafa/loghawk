@@ -14,7 +14,7 @@ set AWS_ACCESS_KEY_ID=rustfsadmin
 set AWS_SECRET_ACCESS_KEY=rustfsadmin
 set AWS_DEFAULT_REGION=us-east-1
 aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
-aws --endpoint-url http://localhost:9000 s3 cp C:\loghawk_sample_logs.json s3://loghawk-data/raw/year=2026/month=09/day=23/sample_logs.json
+# aws --endpoint-url http://localhost:9000 s3 cp C:\loghawk_sample_logs.json s3://loghawk-data/somefolder/raw/
 aws --endpoint-url http://localhost:9000 s3 ls s3://loghawk-data
 
 # If you choose to use SeaweedFS S3 server instead of RustFS, you can use the following command to start it using Docker Compose:

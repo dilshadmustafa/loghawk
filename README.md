@@ -1695,24 +1695,82 @@ AWS
 
 ### Quickstart LogHawk AIOps
 
-**First-time setup**
+Run the setup scripts from the repository root, in order. Configure the local `.env` values described in [S3 Select and environment configuration](#s3-select-and-environment-configuration) before starting the pipeline. Install Python 3.12, Java 17, Docker, and AWS CLI first. Keep Ollama running with `llama3.2:3b` available for identity mapping.
 
-- `firsttime_setup_terminal_1.bat`
-- `firsttime_setup_terminal_2.bat`
-- `firsttime_setup_terminal_3.bat`
+#### Windows
 
-**Start Temporal workflow**
+Run the first two setup scripts and let them finish:
 
-- `firsttime_start_workflow_terminal_1.bat`
-- `firsttime_start_workflow_terminal_2.bat`
+```powershell
+.\firsttime_setup_terminal_1.bat
+.\firsttime_setup_terminal_2.bat
+```
 
-**Interactive chat assistant**
+In a separate terminal, start the Temporal server and leave it running:
 
-- `firsttime_start_chat_assistant.bat`
+```powershell
+.\firsttime_setup_terminal_3.bat
+```
 
-**Web UI for uploading runbooks, documents, troubleshooting guides, etc.**
+In another terminal, generate and upload the sample Train and Raw logs:
 
-- `firsttime_start_webUI_doc_upload.bat`
+```powershell
+.\generate_upload_testdata.bat
+```
+
+#### Linux and macOS
+
+Run the first two shell equivalents with Bash and let them finish:
+
+```sh
+bash firsttime_setup_terminal_1.sh
+bash firsttime_setup_terminal_2.sh
+```
+
+In a separate terminal, start the Temporal server and leave it running:
+
+```sh
+bash firsttime_setup_terminal_3.sh
+```
+
+In another terminal, generate and upload the sample Train and Raw logs:
+
+```sh
+bash generate_upload_testdata.sh
+```
+
+The setup scripts install the Python environment, start RustFS, create the `loghawk-data` bucket, and start Temporal. The test-data script uploads a normal training dataset and error-heavy detection data beneath the configured `LH_S3_BATCH_FOLDER`.
+
+With `LH_S3_BATCH_FOLDER=quickstart`, the generated inputs are:
+
+```text
+s3://loghawk-data/quickstart/train/payment-service_1.jsonl
+s3://loghawk-data/quickstart/raw/payment-service_1.jsonl
+```
+
+#### Start the Temporal workflow
+
+Keep the Temporal server running. In two separate terminals, run the worker first, then start the workflow:
+
+```text
+Windows worker:  firsttime_start_workflow_terminal_1.bat
+Linux/macOS:     bash firsttime_start_workflow_terminal_1.sh
+
+Windows starter: firsttime_start_workflow_terminal_2.bat
+Linux/macOS:     bash firsttime_start_workflow_terminal_2.sh
+```
+
+The Temporal UI is available at `http://localhost:8233`.
+
+#### Optional applications
+
+```text
+Interactive chat — Windows: firsttime_start_chat_assistant.bat
+                   Linux/macOS: bash firsttime_start_chat_assistant.sh
+
+Document upload — Windows: firsttime_start_webUI_doc_upload.bat
+                  Linux/macOS: bash firsttime_start_webUI_doc_upload.sh
+```
 
 ### LLM Provider References
 
