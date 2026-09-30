@@ -1695,51 +1695,27 @@ AWS
 
 ### Quickstart LogHawk AIOps
 
-Run the setup scripts from the repository root, in order. Configure the local `.env` values described in [S3 Select and environment configuration](#s3-select-and-environment-configuration) before starting the pipeline. Install Python 3.12, Java 17, Docker, and AWS CLI first. Keep Ollama running with `llama3.2:3b` available for identity mapping.
+Run the one-file setup from the repository root. Configure the local `.env` values described in [S3 Select and environment configuration](#s3-select-and-environment-configuration) first. Install Python 3.12, Java 17, Docker, and AWS CLI. Keep Ollama running with `llama3.2:3b` available for identity mapping.
 
 #### Windows
 
-Run the first two setup scripts and let them finish:
+Run:
 
 ```powershell
-.\firsttime_setup_terminal_1.bat
-.\firsttime_setup_terminal_2.bat
+.\firsttime_setup.bat
 ```
 
-In a separate terminal, start the Temporal server and leave it running:
-
-```powershell
-.\firsttime_setup_terminal_3.bat
-```
-
-In another terminal, generate and upload the sample Train and Raw logs:
-
-```powershell
-.\generate_upload_testdata.bat
-```
+The script installs dependencies, starts RustFS, creates the `loghawk-data` bucket, uploads sample Train and Raw logs, and starts Temporal in the background.
 
 #### Linux and macOS
 
-Run the first two shell equivalents with Bash and let them finish:
+Run:
 
 ```sh
-bash firsttime_setup_terminal_1.sh
-bash firsttime_setup_terminal_2.sh
+bash firsttime_setup.sh
 ```
 
-In a separate terminal, start the Temporal server and leave it running:
-
-```sh
-bash firsttime_setup_terminal_3.sh
-```
-
-In another terminal, generate and upload the sample Train and Raw logs:
-
-```sh
-bash generate_upload_testdata.sh
-```
-
-The setup scripts install the Python environment, start RustFS, create the `loghawk-data` bucket, and start Temporal. The test-data script uploads a normal training dataset and error-heavy detection data beneath the configured `LH_S3_BATCH_FOLDER`.
+The script installs dependencies, starts RustFS, creates the `loghawk-data` bucket, uploads sample Train and Raw logs, and starts Temporal in the background. The terminal-specific setup scripts remain available when you need to rerun an individual step.
 
 With `LH_S3_BATCH_FOLDER=quickstart`, the generated inputs are:
 
