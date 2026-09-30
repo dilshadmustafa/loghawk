@@ -2,25 +2,49 @@
 setlocal
 cd /d "%~dp0"
 
+echo.
+echo ============================================================
+echo Creating Python 3.12 virtual environment
+echo ============================================================
 py -3.12 -m venv venv312
 if errorlevel 1 goto :failed
 set "PYTHON=%~dp0venv312\Scripts\python.exe"
 
+echo.
+echo ============================================================
+echo Installing PySpark
+echo ============================================================
 "%PYTHON%" -m pip install --upgrade pip setuptools wheel
 if errorlevel 1 goto :failed
 "%PYTHON%" -m pip install pyspark==3.5.9
 if errorlevel 1 goto :failed
 "%PYTHON%" -c "from pyspark.sql import SparkSession; s=SparkSession.builder.master('local[*]').getOrCreate(); print('Spark:',s.version); print('Python:',__import__('sys').version); print('Java:',s.sparkContext._jvm.java.lang.System.getProperty('java.version')); print('Hadoop:',s.sparkContext._jvm.org.apache.hadoop.util.VersionInfo.getVersion()); s.stop()"
 if errorlevel 1 goto :failed
+echo.
+echo ============================================================
+echo Installing packages mentioned in requirements.txt
+echo ============================================================
 "%PYTHON%" -m pip install -r requirements.txt
 if errorlevel 1 goto :failed
 "%PYTHON%" -m pip install -e .
 if errorlevel 1 goto :failed
+echo.
+echo ============================================================
+echo Setting up DuckDB
+echo ============================================================
 "%PYTHON%" -m loghawk.admin.setup_duckdb
 if errorlevel 1 goto :failed
+echo.
+echo ============================================================
+echo Setting up LanceDB
+echo ============================================================
 "%PYTHON%" -m loghawk.admin.setup_lancedb
 if errorlevel 1 goto :failed
 
+echo.
+echo ============================================================
+echo Starting RustFS S3 server
+echo ============================================================
 if not exist "C:\rustfs\data" mkdir "C:\rustfs\data"
 if not exist "C:\rustfs\logs" mkdir "C:\rustfs\logs"
 docker container inspect loghawk-rustfs >nul 2>&1
@@ -34,12 +58,24 @@ if errorlevel 1 goto :failed
 set "AWS_ACCESS_KEY_ID=rustfsadmin"
 set "AWS_SECRET_ACCESS_KEY=rustfsadmin"
 set "AWS_DEFAULT_REGION=us-east-1"
+echo.
+echo ============================================================
+echo Creating the loghawk-data S3 bucket
+echo ============================================================
 aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
 if errorlevel 1 goto :failed
 
+echo.
+echo ============================================================
+echo Generating and uploading test data to S3
+echo ============================================================
 "%PYTHON%" "%~dp0src\loghawk\test\testdata.py"
 if errorlevel 1 goto :failed
 
+echo.
+echo ============================================================
+echo Starting Temporal server
+echo ============================================================
 docker-compose -f src\loghawk\admin\temporal-docker-compose.yml up -d
 if errorlevel 1 goto :failed
 
