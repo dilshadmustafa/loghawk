@@ -189,12 +189,23 @@ def materialize_s3_select_jsonl(
     )
 
     ended = False
+    selected_row_count = 0
+    pending = b""
     with open(output_path, "wb") as output_file:
         for event in response["Payload"]:
             if "Records" in event:
-                output_file.write(event["Records"]["Payload"])
+                payload = event["Records"]["Payload"]
+                output_file.write(payload)
+                lines = (pending + payload).split(b"\n")
+                selected_row_count += sum(
+                    1 for line in lines[:-1] if line.strip()
+                )
+                pending = lines[-1]
             elif "End" in event:
                 ended = True
+
+        if pending.strip():
+            selected_row_count += 1
 
         if not ended:
             raise RuntimeError(
@@ -210,6 +221,7 @@ def materialize_s3_select_jsonl(
             "S3 Select returned no records for "
             f"{input_path} using filter {config.LH_S3_SELECT_RECORD_FILTER!r}"
         )
+    print(f"Rows returned by S3 Select filter: {selected_row_count}")
     return Path(output_path).resolve().as_uri()
 
 

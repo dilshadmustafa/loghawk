@@ -112,75 +112,39 @@ The core LogHawk pipeline is divided into stages.
                                Remediation
 ```
 
-The initial implementation focuses on **Stage A and Stage B**.
+The current implementation covers Identity Mapping and Stages A–C, with Stage D diagnosis and Stage E remediation still evolving.
 
 ---
 
 # Stage A — Identity Mapping and Feature Engineering
 
-Stage A now uses a **folder-based, per-input-file processing convention**.
-
-Before feature engineering begins, a separate Identity Mapping activity enumerates the raw input folder and creates one identity-mapping JSON document for each raw input file.
-
-The processing contract is:
+The current pipeline separates **training data** from **detection data** beneath one configurable batch folder. The folder name can be a date such as `2026-09-28` or any other single folder name such as `somefolder`.
 
 ```text
-Raw input folder
-    |
-    +-- input-file-1.json
-    +-- input-file-2.json
-    +-- input-file-3.json
-    |
-    v
-Identity Mapping
-    |
-    +-- identitymapping_input-file-1.json
-    +-- identitymapping_input-file-2.json
-    +-- identitymapping_input-file-3.json
-    |
-    v
-Stage A
-    |
-    +-- process input-file-1 using its mapping
-    +-- process input-file-2 using its mapping
-    +-- process input-file-3 using its mapping
-    |
-    v
-Per-input Feature Datasets
+s3://<bucket>/<batch>/train/    Known-normal logs used to build group models
+s3://<bucket>/<batch>/raw/      Logs to be scored for anomalies
 ```
+
+Identity Mapping runs separately for each phase. Stage A reads all files in a phase, groups related filenames, combines each group, then writes one feature dataset per group.
 
 ### Identity Mapping
 
-Identity Mapping is a separate Temporal activity.
-
-For each raw file:
+Identity Mapping is a Temporal activity. It creates one mapping JSON per input file under that phase's mapping tree:
 
 ```text
-raw/<inputfilename>
-        |
-        v
-identitymapping/identitymapping_<inputfilename>.json
+s3://<bucket>/<batch>/identitymapping/<train|raw>/<group>/
+    identitymapping_<input-file-stem>.json
 ```
 
-Example:
-
-```text
-s3://loghawk-data/raw/2026-09-28/container_logs.json
-
-        |
-
-s3://loghawk-data/identitymapping/2026-09-28/
-    identitymapping_container_logs.json
-```
-
-The mapping contains the source information and the logical identity mapping:
+The mapping stores source details, identity roles, and field roles:
 
 ```json
 {
   "source": {
     "raw_input_path": "...",
     "column_names": ["..."],
-    "sample_row": {}
+    "sample_row": {},
+    "sample_rows": []
   },
   "identity_mapping": {
     "identity_columns": ["..."],
@@ -188,66 +152,53 @@ The mapping contains the source information and the logical identity mapping:
     "recommended_entity_column": "...",
     "fallback_entity_id": "unknown-entity",
     "reason": "..."
+  },
+  "field_mapping": {
+    "timestamp_column": "timestamp",
+    "level_column": "level",
+    "message_column": "message",
+    "status_code_column": "status_code",
+    "exception_column": "exception"
   }
 }
 ```
 
-The Identity Mapping activity is idempotent:
+Mappings use only actual source columns. Existing mappings are controlled by `LH_IDENTITY_MAPPING_SKIP_EXISTING`; `true` reuses an existing mapping and `false` regenerates it. Mapping generation must finish for every file before Stage A starts.
 
-- existing mappings are skipped;
-- successful mappings are not regenerated during a retry;
-- Stage A starts only after all required mappings have been generated successfully.
+Supported input extensions are `.json`, `.json.gz`, `.jsonl`, `.jsonl.gz`, `.log`, and `.log.gz`. Files whose names begin with `.` or `_` are skipped.
 
-The LLM is used to interpret source identity fields, but it must use only actual source columns and must not invent identity fields.
+### Source-file grouping
 
-### Stage A Folder Convention
+LogHawk removes the supported extension, then strips a trailing number only when it follows `_` or `-`. This groups file batches while preserving names that do not use a separator:
 
-Stage A enumerates:
+| Input names | Group |
+|---|---|
+| `elasticsearch_db_1.log`, `elasticsearch_db_2.log` | `elasticsearch_db` |
+| `elasticsearch-1.log`, `elasticsearch-2.log` | `elasticsearch` |
+| `splunk1.log`, `splunk2.log` | `splunk1`, `splunk2` separately |
 
-```text
-s3://loghawk-data/raw/2026-09-28/
-```
+Each file keeps its own mapping. Stage A combines the normalized rows of every file in a group before producing that group's feature dataset.
 
-For every raw file it finds the corresponding mapping and produces a separate feature dataset.
-
-Example:
+### Stage A output and processing
 
 ```text
-s3://loghawk-data/raw/2026-09-28/
-    |
-    +-- container_logs.json
-    |
-    +-- loghawk_sample_logs.json
+s3://<bucket>/<batch>/features/train/<group>/*.parquet
+s3://<bucket>/<batch>/features/raw/<group>/*.parquet
 ```
 
-becomes:
+Stage A loads and validates each file's mapping, normalizes the mapped timestamp, level, message, status-code, and exception fields, builds generic `entity_id`, and aggregates by entity and one-minute window. It writes one Parquet dataset per source group and phase.
+
+Feature columns include:
 
 ```text
-s3://loghawk-data/features/2026-09-28/
-    |
-    +-- container_logs/
-    |     +-- *.parquet
-    |
-    +-- loghawk_sample_logs/
-          +-- *.parquet
+total_log_count, info_count, warning_count, error_count,
+error_rate, warning_rate, http_4xx_count, http_5xx_count,
+http_5xx_rate, timeout_count, timeout_rate,
+connection_error_count, authentication_failure_count,
+unique_exception_count, unique_error_message_count
 ```
 
-The complete contract is:
-
-```text
-raw/
-  container_logs.json
-        |
-        +--> identitymapping_container_logs.json
-        |
-        +--> features/container_logs/
-
-  loghawk_sample_logs.json
-        |
-        +--> identitymapping_loghawk_sample_logs.json
-        |
-        +--> features/loghawk_sample_logs/
-```
+Identity priority comes from the mapping; `service` is not assumed to be universal. Missing identity values use `unknown-entity`.
 
 ### S3 Protocol Convention
 
@@ -263,315 +214,57 @@ Apache Spark / Hadoop
         +--> s3a://
 ```
 
-For example:
+For example, Python can enumerate an input folder with `s3://<bucket>/<batch>/raw/`, while Spark reads the file through the equivalent `s3a://<bucket>/<batch>/raw/<file>` URI. Convert S3 paths before passing them to Spark; do not pass `s3://` directly to Spark.
 
-```python
-# Python / fsspec
-s3://loghawk-data/raw/2026-09-28/
+### Stage A processing
 
-# Spark
-s3a://loghawk-data/raw/2026-09-28/container_logs.json
-```
+Stage A reads every supported file in the selected phase, looks up that file's phase-specific mapping, normalizes mapped fields, builds generic `entity_id`, groups files by normalized source group, then aggregates by entity and one-minute window. The output is one Parquet dataset per group under `features/<phase>/<group>/`.
 
-An `s3://` URI must not be passed directly to Spark when the configured Hadoop filesystem is `s3a`.
+S3 Select is optional and can reduce input rows before identity mapping and feature engineering. See [S3 Select and environment configuration](#s3-select-and-environment-configuration) for its flags, filter syntax, supported input formats, and row-count logging.
 
-This separation is an important implementation detail of the current local RustFS setup.
-
-### Stage A Processing
-
-For each raw file, Stage A:
-
-1. loads the corresponding identity mapping;
-2. infers the source schema;
-3. validates the identity mapping;
-4. constructs the processing schema;
-5. normalizes fields;
-6. creates `entity_id`;
-7. aggregates events into one-minute windows;
-8. generates numerical features;
-9. writes the feature dataset to the input-specific output folder.
-
-### Example Features
-
-Logs are aggregated into time windows, initially using a one-minute window.
+Stage A feature columns include:
 
 ```text
-total_log_count
-info_count
-warning_count
-error_count
-error_rate
-warning_rate
-
-http_4xx_count
-http_5xx_count
-http_5xx_rate
-
-timeout_count
-timeout_rate
-connection_error_count
-authentication_failure_count
-
-unique_exception_count
-unique_error_message_count
+total_log_count, info_count, warning_count, error_count,
+error_rate, warning_rate, http_4xx_count, http_5xx_count,
+http_5xx_rate, timeout_count, timeout_rate,
+connection_error_count, authentication_failure_count,
+unique_exception_count, unique_error_message_count
 ```
-
-### Entity Identity
-
-Stage A does not assume that `service` is the universal identity.
-
-The identity mapping can identify logical entities such as:
-
-```text
-application
-service
-container
-pod
-host
-database
-device
-```
-
-The resulting generic field is:
-
-```text
-entity_id
-```
-
-The identity mapping's `priority_order` determines which identity field is preferred.
-
-Fallback:
-
-```text
-unknown-entity
-```
-
-### Future Field-Role Mapping
-
-The current mapping primarily determines entity identity.
-
-A future enhancement will allow the same mapping document to identify source-specific field roles:
-
-```json
-{
-  "identity_mapping": {
-    "identity_columns": ["application_id"],
-    "priority_order": ["application_id"],
-    "recommended_entity_column": "application_id"
-  },
-  "field_mapping": {
-    "timestamp_column": "event_time",
-    "level_column": "severity",
-    "message_column": "msg",
-    "status_code_column": "http_status",
-    "exception_column": "exception"
-  }
-}
-```
-
-This will make Stage A more completely source-independent.
-
-### Stage A Responsibility
-
-Stage A is responsible for:
-
-- source-file processing;
-- schema inference and normalization;
-- timestamp normalization;
-- identity/entity construction;
-- severity normalization;
-- time-window aggregation;
-- numerical feature generation;
-- writing per-input Parquet feature datasets.
-
-Stage A should **not** perform LLM-based RCA or remediation.
 
 ---
 
-# Stage B — Anomaly Detection
+# Stage B — Train and Detect
 
-Stage B follows **exactly the same folder-based convention as Stage A**.
-
-It enumerates the per-input feature folders generated by Stage A and processes each folder independently.
-
-Example input:
+Stage B has two distinct phases, selected through configuration. Train reads features made from `train/`, fits one Isolation Forest and scaler per source group, and saves those artifacts. Detect reads features made from `raw/`, loads the corresponding saved artifacts, scores the windows, and writes anomaly results. Detection data is not used to fit the model.
 
 ```text
-s3://loghawk-data/features/2026-09-28/
-    |
-    +-- container_logs/
-    |     +-- *.parquet
-    |
-    +-- loghawk_sample_logs/
-          +-- *.parquet
+features/train/<group>/ -> train model -> models/<group>/
+features/raw/<group>/   -> load model -> anomalies/raw/<group>/
 ```
 
-Stage B produces:
+Model artifacts are:
 
 ```text
-s3://loghawk-data/anomalies/2026-09-28/
-    |
-    +-- container_logs/
-    |     +-- isolation_forest_results.parquet
-    |
-    +-- loghawk_sample_logs/
-          +-- isolation_forest_results.parquet
+<batch>/models/<group>/isolation_forest.joblib
+<batch>/models/<group>/scaler.joblib
 ```
 
-### Per-input Stage B Contract
-
-For every Stage A input folder:
+Anomaly output is:
 
 ```text
-features/<inputfilename>/
-        |
-        v
-Stage B
-        |
-        +--> optional identity mapping validation
-        |
-        +--> clean features
-        |
-        +--> select normal baseline
-        |
-        +--> train Isolation Forest
-        |
-        +--> score every feature window
-        |
-        +--> calculate severity
-        |
-        +--> generate explanation
-        |
-        v
-anomalies/<inputfilename>/isolation_forest_results.parquet
+<batch>/anomalies/raw/<group>/isolation_forest_results.parquet
 ```
 
-### Identity Mapping in Stage B
+The initial detector is scikit-learn Isolation Forest using the Stage B numerical feature set. Results preserve timestamp, generic entity metadata, available source metadata, anomaly score, `is_anomaly`, severity, and reason. A deterministic burst rule also marks a window anomalous when either `error_count >= 10` and `error_rate >= 0.5`, or `http_5xx_count >= 10` and `http_5xx_rate >= 0.5`.
 
-Stage B can locate the corresponding mapping:
+Stage C consumes the Detect anomaly outputs and writes correlated incidents to:
 
 ```text
-s3://loghawk-data/identitymapping/2026-09-28/
-    identitymapping_<inputfilename>.json
+<batch>/incidents/correlated_incidents.parquet
 ```
 
-The mapping is optional for Stage B.
-
-Stage A has already created `entity_id`, so Stage B does not reconstruct identity.
-
-When a mapping exists, Stage B can load it and validate that the recommended entity column is consistent with the Stage A feature dataset.
-
-This keeps identity construction in Stage A and prevents duplicate identity logic.
-
-### Isolation Forest
-
-The initial ML detector is **scikit-learn Isolation Forest**.
-
-For each input feature dataset Stage B:
-
-1. loads the complete Parquet feature dataset;
-2. cleans numerical features;
-3. sorts by timestamp;
-4. selects the earliest portion as the normal baseline;
-5. scales the ML features with `StandardScaler`;
-6. trains Isolation Forest;
-7. calculates anomaly scores;
-8. marks anomalous feature windows;
-9. assigns operational severity;
-10. generates a human-readable reason;
-11. writes the anomaly result for that input.
-
-### Stage B Feature Columns
-
-```text
-total_log_count
-info_count
-warning_count
-error_count
-http_4xx_count
-http_5xx_count
-timeout_count
-connection_error_count
-authentication_failure_count
-unique_exception_count
-unique_error_message_count
-error_rate
-warning_rate
-http_5xx_rate
-timeout_rate
-```
-
-### Stage B Metadata
-
-Stage B preserves generic entity and identity metadata where available:
-
-```text
-timestamp
-entity_id
-service
-application_id
-app_name
-container_name
-pod_name
-namespace
-hostname
-host
-database
-device
-```
-
-### Stage B Output
-
-Each input file gets its own anomaly dataset:
-
-```text
-s3://loghawk-data/anomalies/2026-09-28/<inputfilename>/
-    isolation_forest_results.parquet
-```
-
-The anomaly result contains fields such as:
-
-```text
-timestamp
-entity_id
-anomaly_score
-is_anomaly
-severity
-reason
-```
-
-plus the Stage A feature and identity metadata.
-
-### Per-input Model Artifacts
-
-The current folder-based implementation also keeps Isolation Forest artifacts separate per input dataset:
-
-```text
-s3://loghawk-data/models/2026-09-28/
-    isolation_forest_container_logs.joblib
-    isolation_scaler_container_logs.joblib
-
-    isolation_forest_loghawk_sample_logs.joblib
-    isolation_scaler_loghawk_sample_logs.joblib
-```
-
-This prevents one input dataset from overwriting another dataset's model.
-
-### Stage B Responsibility
-
-Stage B is responsible for:
-
-- reading per-input feature datasets;
-- baseline selection;
-- statistical/baseline detection;
-- Isolation Forest;
-- anomaly scoring;
-- anomaly flags;
-- severity;
-- evidence/reason generation;
-- persisting per-input anomaly results.
-
-Stage B remains independent from the LLM layer.
+`LH_CORRELATION_WINDOW_MINUTES` configures the incident correlation window.
 
 ---
 
@@ -596,8 +289,8 @@ Temporal orchestrates them using the durable S3-compatible data contract.
                             |
                             v
                   +------------------+
-                  | Per-input        |
-                  | Feature Folders  |
+                  | Grouped Features |
+                  | Train and Raw    |
                   +------------------+
                             |
                             v
@@ -605,30 +298,19 @@ Temporal orchestrates them using the durable S3-compatible data contract.
                             |
                             v
                   +------------------+
-                  | Per-input        |
-                  | Anomaly Folders  |
+                  | Train models or |
+                  | Raw anomalies   |
                   +------------------+
                             |
                             v
                          Stage C
 ```
 
-The data contract is:
+The durable contracts are phase-specific:
 
 ```text
-raw/<inputfilename>
-        |
-        v
-identitymapping/identitymapping_<inputfilename>.json
-        |
-        v
-features/<inputfilename>/
-        |
-        v
-anomalies/<inputfilename>/
-        |
-        v
-incidents/
+Train: train/ -> identitymapping/train/ -> features/train/ -> models/<group>/
+Detect: raw/  -> identitymapping/raw/   -> features/raw/   -> anomalies/raw/<group>/ -> incidents/
 ```
 
 Temporal does not replace PySpark or scikit-learn.
@@ -661,7 +343,7 @@ This provides a clean separation between **workflow orchestration** and **data-p
 
 Temporal is the primary workflow orchestration layer for the LogHawk core AIOps pipeline.
 
-The current workflow evolves around the folder-based processing model:
+The current Temporal workflow uses the folder-based Train/Detect processing model:
 
 ```text
                     LogHawk Pipeline
@@ -683,7 +365,7 @@ The current workflow evolves around the folder-based processing model:
               +------------+------------+
                            |
                            v
-              features/<inputfilename>/
+              features/<phase>/<group>/
                            |
                            v
               +-------------------------+
@@ -693,7 +375,7 @@ The current workflow evolves around the folder-based processing model:
               +------------+------------+
                            |
                            v
-              anomalies/<inputfilename>/
+              anomalies/raw/<group>/
                            |
                            v
               +-------------------------+
@@ -721,58 +403,16 @@ The current workflow evolves around the folder-based processing model:
 
 ## Current Temporal Activity Model
 
-The intended activity structure is:
+The `LogHawkTrainDetectPipeline` workflow uses `LH_TRAIN_PHASE` and `LH_DETECT_PHASE` to select work. When both are enabled, it completes Train before Detect. Train runs identity mapping and Stage A over `train/`, then fits and saves one model and scaler per source group. Detect runs identity mapping and Stage A over `raw/`, loads each group's saved artifacts, scores the feature windows, then runs Stage C. Detect-only requires trained model artifacts to exist for every group.
 
-```python
-@activity.defn
-async def run_identity_mapping(raw_folder):
-    ...
+Run the worker and workflow starter from the repository root:
 
-@activity.defn
-async def run_stage_a(raw_folder, feature_folder):
-    ...
-
-@activity.defn
-async def run_stage_b(feature_folder, anomaly_folder):
-    ...
+```powershell
+python src\loghawk\workflows\temporal\worker.py
+python src\loghawk\workflows\temporal\start_pipeline.py
 ```
 
-The workflow coordinates them:
-
-```python
-@workflow.defn
-class LogHawkPipeline:
-
-    @workflow.run
-    async def run(
-        self,
-        raw_folder,
-        feature_folder,
-        anomaly_folder,
-    ):
-
-        await workflow.execute_activity(
-            run_identity_mapping,
-            args=[raw_folder],
-            ...
-        )
-
-        feature_path = await workflow.execute_activity(
-            run_stage_a,
-            args=[raw_folder, feature_folder],
-            ...
-        )
-
-        anomaly_path = await workflow.execute_activity(
-            run_stage_b,
-            args=[feature_path, anomaly_folder],
-            ...
-        )
-
-        return anomaly_path
-```
-
-The exact workflow implementation will evolve as LogHawk moves from local development to distributed execution.
+Restart the worker after changing workflow or activity code so the running process loads the new modules. Configuration changes in `.env` take effect when the process that reads them is restarted.
 
 ### Temporal Reliability
 
@@ -902,75 +542,32 @@ The object-storage boundary allows the processing stages to remain loosely coupl
 
 ### Current folder convention
 
-For a processing date such as `2026-09-28`:
+`<batch>` is one configurable folder component; it may be a date such as `2026-09-28` or a name such as `somefolder`. Training and detection logs are kept separate. Source groups are derived by removing the supported extension and stripping a trailing number only when preceded by `_` or `-`.
 
 ```text
-s3://loghawk-data/
-    |
-    +-- raw/
-    |     +-- 2026-09-28/
-    |           +-- container_logs.json
-    |           +-- loghawk_sample_logs.json
-    |
+s3://<bucket>/<batch>/
+    +-- train/<training log files>
+    +-- raw/<logs to detect>
     +-- identitymapping/
-    |     +-- 2026-09-28/
-    |           +-- identitymapping_container_logs.json
-    |           +-- identitymapping_loghawk_sample_logs.json
-    |
+    |   +-- train/<group>/identitymapping_<input-stem>.json
+    |   +-- raw/<group>/identitymapping_<input-stem>.json
     +-- features/
-    |     +-- 2026-09-28/
-    |           +-- container_logs/
-    |           |     +-- *.parquet
-    |           |
-    |           +-- loghawk_sample_logs/
-    |                 +-- *.parquet
-    |
-    +-- anomalies/
-    |     +-- 2026-09-28/
-    |           +-- container_logs/
-    |           |     +-- isolation_forest_results.parquet
-    |           |
-    |           +-- loghawk_sample_logs/
-    |                 +-- isolation_forest_results.parquet
-    |
-    +-- incidents/
-    |     +-- 2026-09-28/
-    |
-    +-- models/
-          +-- 2026-09-28/
-                +-- isolation_forest_<inputfilename>.joblib
-                +-- isolation_scaler_<inputfilename>.joblib
+    |   +-- train/<group>/*.parquet
+    |   +-- raw/<group>/*.parquet
+    +-- models/<group>/
+    |   +-- isolation_forest.joblib
+    |   +-- scaler.joblib
+    +-- anomalies/raw/<group>/isolation_forest_results.parquet
+    +-- incidents/correlated_incidents.parquet
 ```
+
+For example, `elasticsearch_db_1.log` and `elasticsearch_db_2.log` belong to group `elasticsearch_db`; `elasticsearch-1.log` belongs to `elasticsearch`; `splunk1.log` remains a distinct group. Each input file has its own identity mapping, while Stage A combines files in the same group before writing features.
 
 ### Stage-to-stage contracts
 
 ```text
-Stage 0 / Ingestion
-    raw/<date>/<inputfilename>
-        |
-        v
-Identity Mapping
-    identitymapping/<date>/identitymapping_<inputfilename>.json
-        |
-        v
-Stage A
-    features/<date>/<inputfilename>/
-        |
-        v
-Stage B
-    anomalies/<date>/<inputfilename>/
-        |
-        v
-Stage C
-    incidents/<date>/
-        |
-        v
-Stage D
-    RCA / evidence
-        |
-        v
-Stage E
-    remediation / verification
+Train: <batch>/train/ -> identitymapping/train/ -> features/train/ -> models/
+Detect: <batch>/raw/  -> identitymapping/raw/   -> features/raw/   -> anomalies/raw/ -> incidents/
 ```
 
 ### S3 URI convention
@@ -988,6 +585,48 @@ s3a://
 ```
 
 This allows RustFS to remain the common object-storage boundary while respecting the filesystem implementation used by each processing engine.
+
+### S3 Select and environment configuration
+
+Configuration is loaded from the repository-root `.env` file by `src/loghawk/config.py`. These variables control the current Train/Detect and S3 Select behavior:
+
+| Variable | Purpose | Values/default |
+|---|---|---|
+| `LH_S3_BUCKET` | S3 bucket | Defaults to `loghawk-data` |
+| `LH_S3_BATCH_FOLDER` | One batch folder beneath the bucket | Defaults to `2026-09-28`; any single folder name is allowed |
+| `LH_S3_ENDPOINT` | RustFS S3 endpoint | Defaults to `http://localhost:9000` |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | S3 credentials and region | Set these for the local or deployed environment |
+| `LH_TRAIN_PHASE` | Run mapping, Stage A, and model training on `<batch>/train/` | `true` / `false`, default `false` |
+| `LH_DETECT_PHASE` | Run mapping, Stage A, detection, and Stage C on `<batch>/raw/` | `true` / `false`, default `false` |
+| `LH_IDENTITY_MAPPING_SKIP_EXISTING` | Reuse an existing per-file mapping | `true` / `false`, default `true` |
+| `LH_IDENTITY_MAPPING_SAMPLE_STRATEGY` | Mapping sample selection | `reservoir` or `first`, default `reservoir` |
+| `LH_IDENTITY_MAPPING_SAMPLE_SIZE` | Rows retained for mapping | Positive integer, default `10` |
+| `LH_IDENTITY_MAPPING_SAMPLE_SEED` | Reproducible reservoir sample seed | Integer, default `42` |
+| `LH_S3_SELECT_SUPPORTED` | Declare S3 Select supported by the store | `true` / `false`, default `false` |
+| `LH_S3_SELECT_USE_TRAIN_PHASE` | Enable S3 Select for Train input | `true` / `false`, default `false` |
+| `LH_S3_SELECT_USE_DETECT_PHASE` | Enable S3 Select for Detect input | `true` / `false`, default `false` |
+| `LH_S3_SELECT_RECORD_FILTER` | Log levels to include | Default `WARN,ERROR`; `ALL` includes all levels |
+| `LH_CORRELATION_WINDOW_MINUTES` | Stage C correlation window | Positive integer, default `5` |
+
+Example `.env` settings (keep real credentials local and do not commit secrets):
+
+```ini
+LH_S3_BUCKET=loghawk-data
+LH_S3_BATCH_FOLDER=somefolder
+LH_TRAIN_PHASE=true
+LH_DETECT_PHASE=true
+LH_S3_SELECT_SUPPORTED=true
+LH_S3_SELECT_USE_TRAIN_PHASE=false
+LH_S3_SELECT_USE_DETECT_PHASE=true
+LH_S3_SELECT_RECORD_FILTER=WARN,ERROR
+LH_IDENTITY_MAPPING_SAMPLE_STRATEGY=reservoir
+LH_IDENTITY_MAPPING_SAMPLE_SIZE=10
+LH_IDENTITY_MAPPING_SAMPLE_SEED=42
+LH_IDENTITY_MAPPING_SKIP_EXISTING=true
+LH_CORRELATION_WINDOW_MINUTES=5
+```
+
+S3 Select is used only when `LH_S3_SELECT_SUPPORTED=true` and the matching phase use flag is also true, for supported uncompressed JSON/JSONL inputs. The record filter is applied during Identity Mapping and Stage A. `WARN` also matches `WARNING`; `ALL` disables the severity filter. If both phase flags are true, Train runs before Detect. At least one phase flag must be true. Train-only fits models; Detect-only requires saved models. Row counts report records returned by the active S3 Select stream; they do not trigger an extra count read.
 
 ---
 
@@ -1649,19 +1288,17 @@ loghawk/
 |       +-- ingestion/
 |       |
 |       +-- identity_mapping/
-|       |   +-- identity_mapping.py
+|       |   +-- identity_mapping5.py
 |       |
 |       +-- feature_engineering/
-|       |   +-- pyspark_s3_feature_engineering.py
-|       |   +-- pyspark_s3_feature_engineering5.py
+|       |   +-- pyspark_s3_feature_engineering7.py
 |       |
 |       +-- anomaly_detection/
-|       |   +-- scikit_s3_isolation_forest.py
-|       |   +-- scikit_s3_isolation_forest_folder.py
+|       |   +-- scikit_s3_isolation_forest5.py
 |       |   +-- statistical.py
 |       |
-|       +-- incident/
-|       |   +-- correlation.py
+|       +-- correlation/
+|       |   +-- event_correlation.py
 |       |
 |       +-- rag/
 |       |   +-- retrieval.py
@@ -1674,6 +1311,8 @@ loghawk/
 |       |   +-- temporal/
 |       |       +-- workflows.py
 |       |       +-- activities.py
+|       |       +-- worker.py
+|       |       +-- start_pipeline.py
 |       |
 |       +-- integrations/
 |           +-- n8n/
@@ -1738,46 +1377,7 @@ Temporal should **call** the processing components rather than duplicating their
 
 As of the current development iteration, the detection foundation is being validated locally on Windows with RustFS-compatible S3 storage.
 
-Current processing model:
-
-```text
-Raw files
-   |
-   v
-Identity Mapping
-   |
-   v
-Per-file mappings
-   |
-   v
-Stage A / PySpark
-   |
-   v
-Per-input feature folders
-   |
-   v
-Stage B / Isolation Forest
-   |
-   v
-Per-input anomaly folders
-```
-
-Example:
-
-```text
-raw/2026-09-28/container_logs.json
-        |
-        +--> identitymapping/2026-09-28/
-        |       identitymapping_container_logs.json
-        |
-        +--> features/2026-09-28/container_logs/
-        |       *.parquet
-        |
-        +--> anomalies/2026-09-28/container_logs/
-                isolation_forest_results.parquet
-```
-
-The same pattern applies independently to every input file discovered in the processing-date folder.
+Current processing uses a configurable batch folder with separate `train/` and `raw/` inputs. Identity mapping and Stage A run for each enabled phase, grouping related filenames before writing features. Stage B trains per-group artifacts from Train features and reuses them to detect anomalies in Raw features. Stage C correlates detected anomalies. S3 Select can filter eligible JSON/JSONL records before mapping and feature engineering.
 
 # Roadmap
 
@@ -1798,13 +1398,13 @@ The same pattern applies independently to every input file discovered in the pro
 -   [x] Implement per-file Identity Mapping
 -   [x] Implement idempotent identity mapping generation
 -   [x] Implement folder-based Stage A
--   [x] Implement per-input Stage A feature folders
+-   [x] Write grouped Stage A feature datasets per phase
 -   [x] Implement folder-based Stage B
--   [x] Implement per-input Stage B anomaly folders
+-   [x] Write grouped Stage B anomaly datasets
 -   [x] Preserve generic `entity_id`
 -   [x] Keep Python `s3://` and Spark `s3a://` conventions explicit
 -   [x] Validate raw → mapping → features → anomalies contract
--   [ ] Add broader field-role mapping for source-independent timestamp/message/status fields
+-   [x] Add field-role mapping for timestamp/message/status/exception fields
 -   [ ] Add schema fingerprint/cache to reduce repeated LLM mapping calls
 -   [ ] Add stage-level automated integration tests
 
@@ -1814,36 +1414,20 @@ The same pattern applies independently to every input file discovered in the pro
 -   [x] Create LogHawk Temporal Worker
 -   [x] Implement Stage A Activity
 -   [x] Implement Stage B Activity
--   [ ] Implement Identity Mapping Activity
--   [ ] Update workflow ordering to Identity Mapping → Stage A → Stage B
+-   [x] Implement Identity Mapping Activity
+-   [x] Order Identity Mapping → Stage A → Stage B
+-   [x] Add Train and Detect phase selection
 -   [x] Add retries
 -   [x] Add activity timeouts
 -   [ ] Add workflow-level failure handling for the complete folder pipeline
 -   [ ] Add workflow observability
 -   [ ] Add workflow audit metadata
 
-Current target:
+Current phase flow:
 
 ```text
-Temporal Workflow
-       |
-       v
-Identity Mapping Activity
-       |
-       v
-identitymapping/<date>/
-       |
-       v
-Stage A Activity
-       |
-       v
-features/<date>/<inputfilename>/
-       |
-       v
-Stage B Activity
-       |
-       v
-anomalies/<date>/<inputfilename>/
+Train: train/ -> identitymapping/train/ -> features/train/ -> models/
+Detect: raw/  -> identitymapping/raw/   -> features/raw/   -> anomalies/raw/ -> incidents/
 ```
 
 ## Phase 4 — Incident Intelligence

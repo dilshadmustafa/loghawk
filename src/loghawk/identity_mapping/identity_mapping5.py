@@ -251,7 +251,15 @@ def read_s3_select_reservoir_sample_records(
     level_column: str | None = None,
 ) -> list[dict[str, Any]]:
     print(f"Reading reservoir sample through S3 Select from: {input_path}")
-    records = iter_s3_select_records(input_path, level_column)
+    selected_row_count = 0
+
+    def counted_records():
+        nonlocal selected_row_count
+        for record in iter_s3_select_records(input_path, level_column):
+            selected_row_count += 1
+            yield record
+
+    records = counted_records()
     if config.LH_IDENTITY_MAPPING_SAMPLE_STRATEGY == "first":
         sample_rows = []
         for record in records:
@@ -264,6 +272,7 @@ def read_s3_select_reservoir_sample_records(
             "S3 Select returned no JSON records for "
             f"{input_path} using filter {config.LH_S3_SELECT_RECORD_FILTER!r}"
         )
+    print(f"Rows returned by S3 Select filter: {selected_row_count}")
     print(f"S3 Select sample rows retained: {len(sample_rows)}")
     return sample_rows
 
