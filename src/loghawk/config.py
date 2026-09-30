@@ -162,10 +162,33 @@ LH_S3_SELECT_SUPPORTED = _env_bool(
     "LH_S3_SELECT_SUPPORTED",
     "false",
 )
+# Keep the legacy setting available for the existing v4/v6 modules.
 LH_S3_SELECT_USE = _env_bool(
     "LH_S3_SELECT_USE",
     "false",
 )
+LH_S3_SELECT_USE_TRAIN_PHASE = _env_bool(
+    "LH_S3_SELECT_USE_TRAIN_PHASE",
+    "false",
+)
+LH_S3_SELECT_USE_DETECT_PHASE = _env_bool(
+    "LH_S3_SELECT_USE_DETECT_PHASE",
+    "false",
+)
+
+LH_S3_BATCH_FOLDER = os.getenv(
+    "LH_S3_BATCH_FOLDER",
+    "2026-09-28",
+).strip().strip("/")
+if not LH_S3_BATCH_FOLDER or "/" in LH_S3_BATCH_FOLDER or "\\" in LH_S3_BATCH_FOLDER:
+    raise ValueError("LH_S3_BATCH_FOLDER must be one non-empty folder name")
+
+LH_TRAIN_PHASE = _env_bool("LH_TRAIN_PHASE", "false")
+LH_DETECT_PHASE = _env_bool("LH_DETECT_PHASE", "false")
+if not LH_TRAIN_PHASE and not LH_DETECT_PHASE:
+    raise ValueError(
+        "At least one of LH_TRAIN_PHASE or LH_DETECT_PHASE must be true"
+    )
 
 LH_S3_SELECT_RECORD_FILTER_LIST = (
     []

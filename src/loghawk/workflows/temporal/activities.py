@@ -8,12 +8,12 @@ async def run_identity_mapping(raw_folder: str) -> str:
         f"Starting identity mapping for raw folder: {raw_folder}"
     )
 
-    from loghawk.identity_mapping import identity_mapping4
+    from loghawk.identity_mapping import identity_mapping5
 
     activity.logger.info(
-        f"Identity mapping module: {identity_mapping4.__file__}"
+        f"Identity mapping module: {identity_mapping5.__file__}"
     )
-    mapping_paths = identity_mapping4.generate_identity_mappings(
+    mapping_paths = identity_mapping5.generate_identity_mappings(
         raw_folder
     )
     activity.logger.info(
@@ -38,15 +38,15 @@ async def run_stage_a(
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering6
+        pyspark_s3_feature_engineering7
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering6.__file__}"
+        f"{pyspark_s3_feature_engineering7.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering6.run(
+    result = pyspark_s3_feature_engineering7.run(
         input_path,
         output_path,
     )
@@ -56,6 +56,36 @@ async def run_stage_a(
     )
 
     return result
+
+
+@activity.defn
+async def run_stage_b_train(feature_root: str, model_root: str) -> str:
+    """Train and persist grouped Isolation Forest model artifacts."""
+    from loghawk.anomaly_detection import scikit_s3_isolation_forest5
+
+    activity.logger.info(
+        f"Training Stage B models: {feature_root} -> {model_root}; "
+        f"module={scikit_s3_isolation_forest5.__file__}"
+    )
+    return scikit_s3_isolation_forest5.train(feature_root, model_root)
+
+
+@activity.defn
+async def run_stage_b_detect(
+    feature_root: str,
+    anomaly_root: str,
+    model_root: str,
+) -> str:
+    """Load trained artifacts and detect anomalies in grouped raw features."""
+    from loghawk.anomaly_detection import scikit_s3_isolation_forest5
+
+    activity.logger.info(
+        f"Detecting Stage B anomalies: {feature_root} -> {anomaly_root}; "
+        f"models={model_root}; module={scikit_s3_isolation_forest5.__file__}"
+    )
+    return scikit_s3_isolation_forest5.detect(
+        feature_root, anomaly_root, model_root,
+    )
 
 
 @activity.defn

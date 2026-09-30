@@ -1,9 +1,12 @@
 import asyncio
+from uuid import uuid4
 
 from temporalio.client import Client
 
+import loghawk.config as config
+
 from loghawk.workflows.temporal.workflows import (
-    LogHawkPipeline,
+    LogHawkTrainDetectPipeline,
 )
 
 
@@ -13,14 +16,20 @@ async def main():
         "localhost:7233"
     )
 
-    workflow_id = "loghawk-pipeline-2026-09-23"
+    batch_root = (
+        f"s3://{config.LH_S3_BUCKET}/"
+        f"{config.LH_S3_BATCH_FOLDER}"
+    )
+    workflow_id = (
+        f"loghawk-{config.LH_S3_BATCH_FOLDER}-{uuid4().hex[:10]}"
+    )
 
     result = await client.execute_workflow(
-        LogHawkPipeline.run,
+        LogHawkTrainDetectPipeline.run,
         args=[
-            "s3a://loghawk-data/raw/2026-09-28/",
-            "s3a://loghawk-data/features/2026-09-28/",
-            "s3://loghawk-data/anomalies/2026-09-28/",
+            batch_root,
+            config.LH_TRAIN_PHASE,
+            config.LH_DETECT_PHASE,
         ],
         id=workflow_id,
         task_queue="loghawk-pipeline",
@@ -30,7 +39,7 @@ async def main():
     print("=" * 70)
     print("LogHawk Pipeline Completed")
     print("=" * 70)
-    print(f"Anomaly output: {result}")
+    print(f"Pipeline result: {result}")
     print("=" * 70)
 
 
