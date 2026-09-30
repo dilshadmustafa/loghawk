@@ -61,6 +61,16 @@ LH_CORRELATION_WINDOW_MINUTES = int(
 if LH_CORRELATION_WINDOW_MINUTES < 1:
     raise ValueError("LH_CORRELATION_WINDOW_MINUTES must be at least 1")
 
+LH_TEMPORAL_ADDRESS = os.getenv(
+    "LH_TEMPORAL_ADDRESS",
+    "localhost:7233",
+)
+
+LH_OLLAMA_URL = os.getenv(
+    "LH_OLLAMA_URL",
+    "http://localhost:11434/api/chat",
+)
+
 LH_IDENTITY_MAPPING_SAMPLE_SIZE = int(
     os.getenv("LH_IDENTITY_MAPPING_SAMPLE_SIZE", "10")
 )

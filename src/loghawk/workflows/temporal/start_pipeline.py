@@ -13,7 +13,7 @@ from loghawk.workflows.temporal.workflows import (
 async def main():
 
     client = await Client.connect(
-        "localhost:7233"
+        config.LH_TEMPORAL_ADDRESS
     )
 
     batch_root = (

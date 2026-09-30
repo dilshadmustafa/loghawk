@@ -72,10 +72,9 @@ import loghawk.config as config
 # Configuration
 # ============================================================
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
+OLLAMA_URL = config.LH_OLLAMA_URL
 
-OLLAMA_MODEL = "llama3.2:3b"
-#OLLAMA_MODEL = "qwen3.5:4b"
+OLLAMA_MODEL = config.LH_LLM_MODEL
 
 
 OLLAMA_TIMEOUT = 300

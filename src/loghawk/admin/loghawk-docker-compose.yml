@@ -1,0 +1,127 @@
+name: loghawk
+
+x-loghawk-app: &loghawk-app
+  image: loghawk:local
+  build:
+    context: .
+    dockerfile_inline: |
+      FROM python:3.12-slim
+      RUN apt-get update \
+          && apt-get install -y --no-install-recommends ca-certificates git openjdk-17-jre-headless \
+          && rm -rf /var/lib/apt/lists/* \
+          && JAVA_DIR="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")" \
+          && ln -s "$JAVA_DIR" /opt/java
+      ARG LOGHAWK_REPO_URL=https://github.com/dilshadmustafa/loghawk.git
+      RUN git clone --depth 1 --branch main "$LOGHAWK_REPO_URL" /app
+      WORKDIR /app
+      ENV JAVA_HOME=/opt/java
+      ENV HADOOP_HOME=/opt/java
+      RUN python -m venv /opt/venv \
+          && /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+          && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+          && /opt/venv/bin/pip install --no-cache-dir -e .
+      ENV PATH="/opt/venv/bin:$PATH"
+  env_file:
+    - ../../../.env
+  environment:
+    JAVA_HOME: /opt/java
+    HADOOP_HOME: /opt/java
+    LH_TEMPORAL_ADDRESS: temporal:7233
+    LH_S3_ENDPOINT: http://rustfs:9000
+    LH_OLLAMA_URL: http://host.docker.internal:11434/api/chat
+    LH_DUCKDB_FILE_PATH: /var/lib/loghawk/duckdb/my_database.duckdb
+    LH_LANCEDB_FILE_PATH: /var/lib/loghawk/lancedb
+  volumes:
+    - duckdb-data:/var/lib/loghawk/duckdb
+    - lancedb-data:/var/lib/loghawk/lancedb
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  temporal:
+    image: temporalio/temporal:latest
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal-data:/home/temporal
+    command: server start-dev --ip 0.0.0.0 --db-filename /home/temporal/temporal.db
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs-data:/data
+      - rustfs-logs:/logs
+
+  rustfs-init:
+    image: amazon/aws-cli:2
+    env_file:
+      - ../../../.env
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export AWS_ACCESS_KEY_ID="$${AWS_ACCESS_KEY_ID:-rustfsadmin}"
+        export AWS_SECRET_ACCESS_KEY="$${AWS_SECRET_ACCESS_KEY:-rustfsadmin}"
+        bucket="$${LH_S3_BUCKET:-loghawk-data}"
+
+        until aws --endpoint-url http://rustfs:9000 s3api list-buckets >/dev/null 2>&1; do
+          echo "Waiting for RustFS..."
+          sleep 2
+        done
+
+        if aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket "$$bucket" >/dev/null 2>&1; then
+          echo "S3 bucket already exists: $$bucket"
+        else
+          echo "Creating S3 bucket: $$bucket"
+          aws --endpoint-url http://rustfs:9000 s3 mb "s3://$$bucket"
+        fi
+    depends_on:
+      - rustfs
+    restart: "no"
+
+  loghawk-setup:
+    <<: *loghawk-app
+    depends_on:
+      rustfs-init:
+        condition: service_completed_successfully
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python -m loghawk.admin.setup_duckdb
+        python -m loghawk.admin.setup_lancedb
+        python src/loghawk/test/testdata.py
+
+  loghawk-worker:
+    <<: *loghawk-app
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+      loghawk-setup:
+        condition: service_completed_successfully
+    command: ["python", "-m", "loghawk.workflows.temporal.worker"]
+
+  loghawk-pipeline:
+    <<: *loghawk-app
+    profiles:
+      - manual
+    depends_on:
+      temporal:
+        condition: service_started
+      rustfs-init:
+        condition: service_completed_successfully
+    command: ["python", "-m", "loghawk.workflows.temporal.start_pipeline"]
+
+volumes:
+  duckdb-data:
+  lancedb-data:
+  rustfs-data:
+  rustfs-logs:
+  temporal-data:

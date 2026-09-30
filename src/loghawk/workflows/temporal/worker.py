@@ -1,5 +1,6 @@
 import asyncio
 
+import loghawk.config as config
 from temporalio.client import Client
 from temporalio.worker import Worker
 
@@ -25,7 +26,7 @@ async def main():
     # ---------------------------------------------------------
 
     client = await Client.connect(
-        "localhost:7233"
+        config.LH_TEMPORAL_ADDRESS
     )
 
     # ---------------------------------------------------------
@@ -52,7 +53,7 @@ async def main():
     print("=" * 70)
     print("LogHawk Temporal Worker")
     print("=" * 70)
-    print("Temporal server : localhost:7233")
+    print(f"Temporal server : {config.LH_TEMPORAL_ADDRESS}")
     print("Task queue      : loghawk-pipeline")
     print("Workflows       : LogHawkPipeline, LogHawkTrainDetectPipeline")
     print(
