@@ -13,7 +13,8 @@ license = { file = "LICENSE.txt" }
 dependencies = [
     "python-dotenv",
     "duckdb",
-    "lancedb"
+    "lancedb",
+    "boto3"
 ]
 
 [tool.setuptools.packages.find]

@@ -8,12 +8,12 @@ async def run_identity_mapping(raw_folder: str) -> str:
         f"Starting identity mapping for raw folder: {raw_folder}"
     )
 
-    from loghawk.identity_mapping import identity_mapping3
+    from loghawk.identity_mapping import identity_mapping4
 
     activity.logger.info(
-        f"Identity mapping module: {identity_mapping3.__file__}"
+        f"Identity mapping module: {identity_mapping4.__file__}"
     )
-    mapping_paths = identity_mapping3.generate_identity_mappings(
+    mapping_paths = identity_mapping4.generate_identity_mappings(
         raw_folder
     )
     activity.logger.info(
@@ -38,15 +38,15 @@ async def run_stage_a(
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering5
+        pyspark_s3_feature_engineering6
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering5.__file__}"
+        f"{pyspark_s3_feature_engineering6.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering5.run(
+    result = pyspark_s3_feature_engineering6.run(
         input_path,
         output_path,
     )

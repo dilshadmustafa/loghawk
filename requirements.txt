@@ -23,7 +23,7 @@ pyspark==3.5.9
 #synapseml==1.1.3
 s3fs
 temporalio
-
+boto3
 
 
 

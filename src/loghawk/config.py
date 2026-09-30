@@ -151,7 +151,31 @@ LH_S3_SELECT_RECORD_FILTER = os.getenv(
     "WARN,ERROR"
 )
 
-LH_S3_SELECT_RECORD_FILTER_LIST = [x.strip() for x in LH_S3_SELECT_RECORD_FILTER.split(",")]
+def _env_bool(name: str, default: str) -> bool:
+    value = os.getenv(name, default).strip().lower()
+    if value not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+        raise ValueError(f"{name} must be a boolean value")
+    return value in {"true", "1", "yes", "on"}
+
+
+LH_S3_SELECT_SUPPORTED = _env_bool(
+    "LH_S3_SELECT_SUPPORTED",
+    "false",
+)
+LH_S3_SELECT_USE = _env_bool(
+    "LH_S3_SELECT_USE",
+    "false",
+)
+
+LH_S3_SELECT_RECORD_FILTER_LIST = (
+    []
+    if LH_S3_SELECT_RECORD_FILTER.strip().upper() == "ALL"
+    else [
+        value.strip().upper()
+        for value in LH_S3_SELECT_RECORD_FILTER.split(",")
+        if value.strip()
+    ]
+)
 
 JAVA_HOME = os.getenv(
     "JAVA_HOME",
