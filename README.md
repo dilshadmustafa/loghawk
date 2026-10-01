@@ -1720,8 +1720,8 @@ The script installs dependencies, starts RustFS, creates the `loghawk-data` buck
 With `LH_S3_BATCH_FOLDER=quickstart`, the generated inputs are:
 
 ```text
-s3://loghawk-data/quickstart/train/payment-service_1.jsonl
-s3://loghawk-data/quickstart/raw/payment-service_1.jsonl
+s3://loghawk-data/quickstart/train/elasticsearch-1.log
+s3://loghawk-data/quickstart/raw/elasticsearch-1.log
 ```
 
 #### Start the Temporal workflow
