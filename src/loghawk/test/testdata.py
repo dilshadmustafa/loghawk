@@ -93,11 +93,11 @@ s3 = boto3.client(
 batch = config.LH_S3_BATCH_FOLDER.strip("/")
 objects = [
     (
-        f"{batch}/train/payment-service_1.jsonl",
+        f"{batch}/train/elasticsearch-1.log",
         train_rows,
     ),
     (
-        f"{batch}/raw/payment-service_1.jsonl",
+        f"{batch}/raw/elasticsearch-1.log",
         raw_rows,
     ),
 ]
