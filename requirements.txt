@@ -24,6 +24,7 @@ pyspark==3.5.9
 s3fs
 temporalio
 boto3
+scikit-learn
 
 
 

@@ -14,7 +14,8 @@ dependencies = [
     "python-dotenv",
     "duckdb",
     "lancedb",
-    "boto3"
+    "boto3",
+    "scikit-learn"
 ]
 
 [tool.setuptools.packages.find]

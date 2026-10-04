@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import platform
 from dotenv import load_dotenv
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -60,6 +61,13 @@ LH_CORRELATION_WINDOW_MINUTES = int(
 )
 if LH_CORRELATION_WINDOW_MINUTES < 1:
     raise ValueError("LH_CORRELATION_WINDOW_MINUTES must be at least 1")
+
+LH_ANOMALY_BACKEND = os.getenv(
+    "LH_ANOMALY_BACKEND",
+    "sklearn",
+).strip().lower()
+if LH_ANOMALY_BACKEND not in {"sklearn", "cuml"}:
+    raise ValueError("LH_ANOMALY_BACKEND must be 'sklearn' or 'cuml'")
 
 LH_TEMPORAL_ADDRESS = os.getenv(
     "LH_TEMPORAL_ADDRESS",
@@ -210,15 +218,31 @@ LH_S3_SELECT_RECORD_FILTER_LIST = (
     ]
 )
 
-JAVA_HOME = os.getenv(
-    "JAVA_HOME",
-    r"C:\jdk-17"
-)
+_SYSTEM_TO_OS_FAMILY = {
+    "Windows": "WINDOWS",
+    "Linux": "LINUX",
+    "Darwin": "MAC",
+}
 
-HADOOP_HOME = os.getenv(
-    "HADOOP_HOME",
-    r"C:\hadoop"
-)
+try:
+    LH_OS_FAMILY = _SYSTEM_TO_OS_FAMILY[platform.system()]
+except KeyError as exc:
+    raise RuntimeError(
+        f"Unsupported operating system: {platform.system()}"
+    ) from exc
+
+LH_JAVA_HOME_WINDOWS = os.getenv(
+    "JAVA_HOME_WINDOWS",
+    r"C:\jdk-17",
+).strip()
+
+LH_HADOOP_HOME_WINDOWS = os.getenv(
+    "HADOOP_HOME_WINDOWS",
+    r"C:\hadoop",
+).strip()
+
+# Shared Linux/Mac Java path, read from the .env variable JAVA_HOME.
+LH_JAVA_HOME = os.getenv("JAVA_HOME", "").strip()
 
 
 
