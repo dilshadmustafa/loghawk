@@ -2,6 +2,20 @@
 setlocal
 cd /d "%~dp0"
 
+if not exist "%USERPROFILE%\tmp" mkdir "%USERPROFILE%\tmp"
+set "TMPDIR=%USERPROFILE%\tmp"
+set "TMP=%USERPROFILE%\tmp"
+set "TEMP=%USERPROFILE%\tmp"
+set "PIP_NO_CACHE_DIR=1"
+set "PIP_TIMEOUT=120"
+set "PIP_RETRIES=10"
+set "PIP_RESUME_RETRIES=20"
+
+if not defined SKIP_RUSTFS_SETUP set "SKIP_RUSTFS_SETUP=false"
+if not defined SKIP_TEMPORAL_SETUP set "SKIP_TEMPORAL_SETUP=false"
+if not defined SKIP_DUCKDB_SETUP set "SKIP_DUCKDB_SETUP=false"
+if not defined SKIP_LANCEDB_SETUP set "SKIP_LANCEDB_SETUP=false"
+
 echo.
 echo ============================================================
 echo Creating Python 3.12 virtual environment
@@ -32,15 +46,26 @@ echo.
 echo ============================================================
 echo Setting up DuckDB
 echo ============================================================
-"%PYTHON%" -m loghawk.admin.setup_duckdb
-if errorlevel 1 goto :failed
+if /I "%SKIP_DUCKDB_SETUP%"=="true" (
+    echo Skipping DuckDB setup.
+) else (
+    "%PYTHON%" -m loghawk.admin.setup_duckdb
+    if errorlevel 1 goto :failed
+)
 echo.
 echo ============================================================
 echo Setting up LanceDB
 echo ============================================================
-"%PYTHON%" -m loghawk.admin.setup_lancedb
-if errorlevel 1 goto :failed
+if /I "%SKIP_LANCEDB_SETUP%"=="true" (
+    echo Skipping LanceDB setup.
+) else (
+    "%PYTHON%" -m loghawk.admin.setup_lancedb
+    if errorlevel 1 goto :failed
+)
 
+if /I "%SKIP_RUSTFS_SETUP%"=="true" (
+    echo Skipping RustFS startup, bucket setup, and test-data upload.
+) else (
 echo.
 echo ============================================================
 echo Starting RustFS S3 server
@@ -71,13 +96,18 @@ echo Generating and uploading test data to S3
 echo ============================================================
 "%PYTHON%" "%~dp0src\loghawk\test\testdata.py"
 if errorlevel 1 goto :failed
+)
 
+if /I "%SKIP_TEMPORAL_SETUP%"=="true" (
+    echo Skipping Temporal server startup.
+) else (
 echo.
 echo ============================================================
 echo Starting Temporal server
 echo ============================================================
 docker-compose -f src\loghawk\admin\temporal-docker-compose.yml up -d
 if errorlevel 1 goto :failed
+)
 
 echo Setup complete.
 echo RustFS console: http://localhost:9001

@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+mkdir -p "$HOME/tmp"
+export TMPDIR="$HOME/tmp"
+export TMP="$HOME/tmp"
+export TEMP="$HOME/tmp"
+export PIP_NO_CACHE_DIR=1
+export PIP_TIMEOUT=120
+export PIP_RETRIES=10
+export PIP_RESUME_RETRIES=20
+
 SKIP_RUSTFS_SETUP="${SKIP_RUSTFS_SETUP:-false}"
 SKIP_TEMPORAL_SETUP="${SKIP_TEMPORAL_SETUP:-false}"
 SKIP_DUCKDB_SETUP="${SKIP_DUCKDB_SETUP:-false}"
@@ -92,7 +101,7 @@ esac
 if command -v conda >/dev/null 2>&1; then
     CONDA_BASE="$(conda info --base)"
 else
-    INSTALLER="$(mktemp)"
+    INSTALLER="$(mktemp --suffix=.sh)"
     trap 'rm -f "$INSTALLER"' EXIT
     curl -fsSL \
         "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${ARCH}.sh" \

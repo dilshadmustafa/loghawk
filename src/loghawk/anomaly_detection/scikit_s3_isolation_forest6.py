@@ -1,4 +1,4 @@
-# separate train and raw paths, and generate identity mapping for each file in the raw path.
+# anomaly detector interface, cuML support, and scikit-learn compatibility
 """
 LogHawk Stage B - Folder-Based Isolation Forest Anomaly Detection
 

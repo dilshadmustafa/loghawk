@@ -1,4 +1,4 @@
-# separate train and raw paths, and generate identity mapping for each file in the raw path.
+# OS family-specific configuration.
 """
 LogHawk - Generic PySpark Feature Engineering
 
