@@ -122,11 +122,11 @@ echo "============================================================"
 if conda env list | awk '{print $1}' | grep -Fxq "$RAPIDS_ENV_NAME"; then
     conda install --yes --name "$RAPIDS_ENV_NAME" \
         --channel rapidsai --channel conda-forge \
-        "python=3.12" "cuda-version=$RAPIDS_CUDA_VERSION" cuml
+        "python=3.12" "cuda-version=$RAPIDS_CUDA_VERSION" cuml nvforest
 else
     conda create --yes --name "$RAPIDS_ENV_NAME" \
         --channel rapidsai --channel conda-forge \
-        "python=3.12" "cuda-version=$RAPIDS_CUDA_VERSION" cuml
+        "python=3.12" "cuda-version=$RAPIDS_CUDA_VERSION" cuml nvforest
 fi
 
 conda activate "$RAPIDS_ENV_NAME"
@@ -136,7 +136,7 @@ echo "============================================================"
 echo "Verifying Python 3.12 and cuML GPU access"
 echo "============================================================"
 python --version
-python -c 'import cupy, cuml; print("cuML:", cuml.__version__); print("GPU:", cupy.cuda.runtime.getDeviceProperties(0)["name"].decode())'
+python -c 'import cupy, cuml, nvforest, treelite; from importlib.metadata import version; print("cuML:", cuml.__version__); print("nvForest:", version("nvforest")); print("Treelite:", treelite.__version__); print("GPU:", cupy.cuda.runtime.getDeviceProperties(0)["name"].decode())'
 
 echo
 echo "============================================================"

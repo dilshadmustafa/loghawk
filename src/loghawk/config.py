@@ -69,6 +69,19 @@ LH_ANOMALY_BACKEND = os.getenv(
 if LH_ANOMALY_BACKEND not in {"sklearn", "cuml"}:
     raise ValueError("LH_ANOMALY_BACKEND must be 'sklearn' or 'cuml'")
 
+LH_ANOMALY_ALGORITHM = os.getenv(
+    "LH_ANOMALY_ALGORITHM", "isolation_forest"
+).strip().lower()
+if LH_ANOMALY_ALGORITHM not in {"isolation_forest"}:
+    raise ValueError("LH_ANOMALY_ALGORITHM must currently be 'isolation_forest'")
+
+LH_ANOMALY_DEVICE = os.getenv(
+    "LH_ANOMALY_DEVICE",
+    "gpu" if LH_ANOMALY_BACKEND == "cuml" else "cpu",
+).strip().lower()
+if LH_ANOMALY_DEVICE not in {"cpu", "gpu"}:
+    raise ValueError("LH_ANOMALY_DEVICE must be 'cpu' or 'gpu'")
+
 LH_TEMPORAL_ADDRESS = os.getenv(
     "LH_TEMPORAL_ADDRESS",
     "localhost:7233",
