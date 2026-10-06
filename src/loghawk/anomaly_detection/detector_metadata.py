@@ -30,6 +30,7 @@ class DetectorMetadata:
     trained_at_utc: str = ""
     capabilities: dict[str, Any] | None = None
     algorithm: str = "sklearn-isolationforest"
+    calibration_path: str | None = None
 
     def __post_init__(self) -> None:
         if not self.trained_at_utc:
@@ -71,6 +72,7 @@ class DetectorMetadata:
                 "algorithm",
                 value.get("detector_type", "sklearn-isolationforest"),
             ),
+            calibration_path=value.get("calibration_path"),
         )
         if value.get("n_features") != metadata.n_features:
             raise ValueError("Detector metadata feature count does not match its columns.")

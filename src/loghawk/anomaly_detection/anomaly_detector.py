@@ -50,12 +50,20 @@ class AnomalyDetector(ABC):
 
 
 def create_anomaly_detector(
-    backend: str | None = None, algorithm: str | None = None
+    backend: str | None = None,
+    algorithm: str | None = None,
+    device: str | None = None,
 ) -> AnomalyDetector:
-    """Create only the selected backend, keeping cuML optional on CPU hosts."""
+    """Create the selected detector and validate its execution device."""
     selected_algorithm = (algorithm or config.LH_ANOMALY_ALGORITHM).strip().lower()
-    selected = (backend or config.LH_ANOMALY_BACKEND).strip().lower()
-    device = config.LH_ANOMALY_DEVICE
+    if backend is None and algorithm is not None:
+        selected, inferred_device = config.anomaly_algorithm_backend_device(
+            selected_algorithm
+        )
+    else:
+        selected = (backend or config.LH_ANOMALY_BACKEND).strip().lower()
+        inferred_device = config.LH_ANOMALY_DEVICE
+    selected_device = (device or inferred_device).strip().lower()
     if selected == "sklearn":
         if selected_algorithm != "sklearn-isolationforest":
             raise ValueError(
@@ -66,7 +74,7 @@ def create_anomaly_detector(
         )
 
         detector = SklearnAnomalyDetector()
-        _validate_capabilities(detector, device)
+        _validate_capabilities(detector, selected_device)
         return detector
     if selected == "cuml":
         if selected_algorithm != "cuml-isolationforest":
@@ -84,7 +92,7 @@ def create_anomaly_detector(
             ) from exc
 
         detector = CuMLAnomalyDetector()
-        _validate_capabilities(detector, device)
+        _validate_capabilities(detector, selected_device)
         return detector
     if selected == "pyod":
         if not selected_algorithm.startswith("pyod-"):
@@ -99,7 +107,7 @@ def create_anomaly_detector(
                 "'python -m pip install pyod'."
             ) from exc
         detector = PyODAnomalyDetector(selected_algorithm)
-        _validate_capabilities(detector, device)
+        _validate_capabilities(detector, selected_device)
         return detector
     raise ValueError(
         f"Unsupported anomaly detector backend: {selected!r}. "

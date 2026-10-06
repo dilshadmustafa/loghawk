@@ -66,14 +66,49 @@ LH_ANOMALY_BACKEND = os.getenv(
     "LH_ANOMALY_BACKEND",
     "sklearn",
 ).strip().lower()
-if LH_ANOMALY_BACKEND not in {"sklearn", "cuml", "pyod"}:
+if (
+    LH_ANOMALY_BACKEND not in {"sklearn", "cuml", "pyod"}
+    and not os.getenv("LH_ANOMALY_ALGORITHMS", "").strip()
+):
     raise ValueError("LH_ANOMALY_BACKEND must be 'sklearn', 'cuml', or 'pyod'")
+
+_ANOMALY_ALGORITHM_RUNTIME = {
+    "sklearn-isolationforest": ("sklearn", "cpu"),
+    "cuml-isolationforest": ("cuml", "gpu"),
+    "pyod-isolationforest": ("pyod", "cpu"),
+    "pyod-copod": ("pyod", "cpu"),
+    "pyod-ecod": ("pyod", "cpu"),
+    "pyod-hbos": ("pyod", "cpu"),
+    "pyod-knn": ("pyod", "cpu"),
+    "pyod-lof": ("pyod", "cpu"),
+    "pyod-ocsvm": ("pyod", "cpu"),
+    "pyod-pca": ("pyod", "cpu"),
+}
+_raw_anomaly_algorithms = os.getenv("LH_ANOMALY_ALGORITHMS", "").strip()
+if _raw_anomaly_algorithms:
+    LH_ANOMALY_ALGORITHMS = tuple(
+        item.strip().lower() for item in _raw_anomaly_algorithms.split(",")
+    )
+    if any(not item for item in LH_ANOMALY_ALGORITHMS):
+        raise ValueError("LH_ANOMALY_ALGORITHMS contains an empty item")
+    if len(set(LH_ANOMALY_ALGORITHMS)) != len(LH_ANOMALY_ALGORITHMS):
+        raise ValueError("LH_ANOMALY_ALGORITHMS contains duplicate IDs")
+    unknown_algorithms = sorted(
+        set(LH_ANOMALY_ALGORITHMS) - set(_ANOMALY_ALGORITHM_RUNTIME)
+    )
+    if unknown_algorithms:
+        raise ValueError(
+            "Unsupported LH_ANOMALY_ALGORITHMS ID(s): "
+            + ", ".join(unknown_algorithms)
+        )
+else:
+    LH_ANOMALY_ALGORITHMS = ()
 
 _DEFAULT_ANOMALY_ALGORITHM = {
     "sklearn": "sklearn-isolationforest",
     "cuml": "cuml-isolationforest",
     "pyod": "pyod-copod",
-}[LH_ANOMALY_BACKEND]
+}.get(LH_ANOMALY_BACKEND, "sklearn-isolationforest")
 LH_ANOMALY_ALGORITHM = os.getenv(
     "LH_ANOMALY_ALGORITHM", _DEFAULT_ANOMALY_ALGORITHM
 ).strip().lower()
@@ -91,7 +126,10 @@ _ALGORITHMS_BY_BACKEND = {
         "pyod-pca",
     },
 }
-if LH_ANOMALY_ALGORITHM not in _ALGORITHMS_BY_BACKEND[LH_ANOMALY_BACKEND]:
+if (
+    not LH_ANOMALY_ALGORITHMS
+    and LH_ANOMALY_ALGORITHM not in _ALGORITHMS_BY_BACKEND[LH_ANOMALY_BACKEND]
+):
     valid_algorithms = ", ".join(
         sorted(_ALGORITHMS_BY_BACKEND[LH_ANOMALY_BACKEND])
     )
@@ -104,14 +142,30 @@ LH_ANOMALY_DEVICE = os.getenv(
     "LH_ANOMALY_DEVICE",
     "gpu" if LH_ANOMALY_BACKEND == "cuml" else "cpu",
 ).strip().lower()
-if LH_ANOMALY_DEVICE not in {"cpu", "gpu"}:
-    raise ValueError("LH_ANOMALY_DEVICE must be 'cpu' or 'gpu'")
-if (LH_ANOMALY_BACKEND == "pyod" and LH_ANOMALY_DEVICE != "cpu"):
-    raise ValueError("The configured PyOD detectors currently support CPU only")
-if (LH_ANOMALY_BACKEND == "sklearn" and LH_ANOMALY_DEVICE != "cpu"):
-    raise ValueError("The sklearn backend currently supports CPU only")
-if (LH_ANOMALY_BACKEND == "cuml" and LH_ANOMALY_DEVICE != "gpu"):
-    raise ValueError("The cuml backend currently supports GPU only")
+if not LH_ANOMALY_ALGORITHMS:
+    if LH_ANOMALY_DEVICE not in {"cpu", "gpu"}:
+        raise ValueError("LH_ANOMALY_DEVICE must be 'cpu' or 'gpu'")
+    if (LH_ANOMALY_BACKEND == "pyod" and LH_ANOMALY_DEVICE != "cpu"):
+        raise ValueError("The configured PyOD detectors currently support CPU only")
+    if (LH_ANOMALY_BACKEND == "sklearn" and LH_ANOMALY_DEVICE != "cpu"):
+        raise ValueError("The sklearn backend currently supports CPU only")
+    if (LH_ANOMALY_BACKEND == "cuml" and LH_ANOMALY_DEVICE != "gpu"):
+        raise ValueError("The cuml backend currently supports GPU only")
+
+LH_EFFECTIVE_ANOMALY_ALGORITHMS = (
+    LH_ANOMALY_ALGORITHMS or (LH_ANOMALY_ALGORITHM,)
+)
+LH_ENSEMBLE_THRESHOLD = float(os.getenv("LH_ENSEMBLE_THRESHOLD", "0.95"))
+if not 0.0 < LH_ENSEMBLE_THRESHOLD < 1.0:
+    raise ValueError("LH_ENSEMBLE_THRESHOLD must be between 0 and 1")
+
+
+def anomaly_algorithm_backend_device(algorithm_id: str) -> tuple[str, str]:
+    """Return the backend and expected device encoded by an algorithm ID."""
+    try:
+        return _ANOMALY_ALGORITHM_RUNTIME[algorithm_id.strip().lower()]
+    except (AttributeError, KeyError) as exc:
+        raise ValueError(f"Unsupported anomaly algorithm ID: {algorithm_id!r}") from exc
 
 LH_TEMPORAL_ADDRESS = os.getenv(
     "LH_TEMPORAL_ADDRESS",

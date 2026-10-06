@@ -17,6 +17,8 @@ SKIP_RUSTFS_SETUP="${SKIP_RUSTFS_SETUP:-false}"
 SKIP_TEMPORAL_SETUP="${SKIP_TEMPORAL_SETUP:-false}"
 SKIP_DUCKDB_SETUP="${SKIP_DUCKDB_SETUP:-false}"
 SKIP_LANCEDB_SETUP="${SKIP_LANCEDB_SETUP:-false}"
+MINIFORGE_PREFIX="${MINIFORGE_PREFIX:-$HOME/miniforge3}"
+CONDA_ENV_NAME="venv312"
 
 as_bool() {
     case "${1,,}" in
@@ -31,8 +33,8 @@ SKIP_TEMPORAL_SETUP="$(as_bool "$SKIP_TEMPORAL_SETUP")"
 SKIP_DUCKDB_SETUP="$(as_bool "$SKIP_DUCKDB_SETUP")"
 SKIP_LANCEDB_SETUP="$(as_bool "$SKIP_LANCEDB_SETUP")"
 
-command -v python3.12 >/dev/null || {
-    echo "Python 3.12 is required."
+command -v curl >/dev/null || {
+    echo "curl is required to install Miniforge."
     exit 1
 }
 command -v java >/dev/null || {
@@ -56,6 +58,73 @@ if [[ "$SKIP_TEMPORAL_SETUP" == false ]]; then
     }
 fi
 
+if command -v conda >/dev/null 2>&1; then
+    CONDA_BASE="$(conda info --base)"
+elif [[ -f "$MINIFORGE_PREFIX/etc/profile.d/conda.sh" ]]; then
+    CONDA_BASE="$MINIFORGE_PREFIX"
+else
+    OS="$(uname -s)"
+    ARCH="$(uname -m)"
+
+    case "$OS" in
+        Linux)
+            case "$ARCH" in
+                x86_64|aarch64) ;;
+                *)
+                    echo "Unsupported Linux architecture for Miniforge: $ARCH" >&2
+                    exit 1
+                    ;;
+            esac
+            INSTALLER_NAME="Miniforge3-Linux-${ARCH}.sh"
+            ;;
+        Darwin)
+            case "$ARCH" in
+                arm64) INSTALLER_NAME="Miniforge3-MacOSX-arm64.sh" ;;
+                x86_64) INSTALLER_NAME="Miniforge3-MacOSX-x86_64.sh" ;;
+                *)
+                    echo "Unsupported macOS architecture for Miniforge: $ARCH" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            echo "Unsupported operating system for Miniforge: $OS" >&2
+            exit 1
+            ;;
+    esac
+
+    echo
+    echo "============================================================"
+    echo "Installing Miniforge / Conda if needed"
+    echo "============================================================"
+    INSTALLER="$(mktemp --suffix=.sh)"
+    trap 'rm -f "$INSTALLER"' EXIT
+    curl -fsSL \
+        "https://github.com/conda-forge/miniforge/releases/latest/download/${INSTALLER_NAME}" \
+        -o "$INSTALLER"
+    bash "$INSTALLER" -b -p "$MINIFORGE_PREFIX"
+    rm -f "$INSTALLER"
+    trap - EXIT
+    CONDA_BASE="$MINIFORGE_PREFIX"
+fi
+
+# shellcheck disable=SC1091
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+echo
+echo "============================================================"
+echo "Creating Python 3.12 Conda environment: $CONDA_ENV_NAME"
+echo "============================================================"
+if conda env list | awk 'NR > 2 {print $1}' | grep -Fxq "$CONDA_ENV_NAME"; then
+    conda install --yes --name "$CONDA_ENV_NAME" \
+        --channel conda-forge python=3.12
+else
+    conda create --yes --name "$CONDA_ENV_NAME" \
+        --channel conda-forge python=3.12
+fi
+conda activate "$CONDA_ENV_NAME"
+python -c 'import sys; print("Python:", sys.version); assert sys.version_info[:2] == (3, 12), "Python 3.12 is required"'
+
 if [[ -z "${JAVA_HOME:-}" ]]; then
     if [[ "$(uname -s)" == "Darwin" ]]; then
         JAVA_HOME="$(/usr/libexec/java_home -v 17)"
@@ -69,11 +138,8 @@ export HADOOP_HOME="${HADOOP_HOME:-$JAVA_HOME}"
 
 echo
 echo "============================================================"
-echo "Creating Python 3.12 virtual environment"
+echo "Using Python 3.12 Conda environment"
 echo "============================================================"
-python3.12 -m venv venv312
-# shellcheck disable=SC1091
-source venv312/bin/activate
 echo
 echo "============================================================"
 echo "Installing PySpark"
@@ -155,3 +221,7 @@ echo "Setup complete."
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"
 echo "Start the worker and workflow using the firsttime_start_workflow scripts."
+conda deactivate
+echo "Activate the environment in a new terminal with:"
+echo "  source \"$CONDA_BASE/etc/profile.d/conda.sh\""
+echo "  conda activate $CONDA_ENV_NAME"

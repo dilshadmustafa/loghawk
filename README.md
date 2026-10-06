@@ -242,19 +242,27 @@ unique_exception_count, unique_error_message_count
 
 # Stage B — Train and Detect
 
-Stage B has two distinct phases, selected through configuration. Train reads features made from `train/`, fits one Isolation Forest and scaler per source group, and saves those artifacts. Detect reads features made from `raw/`, loads the corresponding saved artifacts, scores the windows, and writes anomaly results. Detection data is not used to fit the model.
+Stage B has two distinct phases, selected through configuration. Train reads features made from `train/` and saves a separate detector bundle for every configured algorithm and source group. Detect reads features made from `raw/`, loads the matching bundles, scores the windows, and writes anomaly results. Detection data is not used to fit detector models or score calibration.
 
 ```text
 features/train/<group>/ -> train model -> models/<group>/
 features/raw/<group>/   -> load model -> anomalies/raw/<group>/
 ```
 
-Model artifacts are:
+When one algorithm is selected, its model set contains one detector and uses that detector's native anomaly decision. With multiple algorithms, Stage B calibrates each model's training scores to percentiles, takes their equal-weight mean, and applies `LH_ENSEMBLE_THRESHOLD`.
+
+Model artifacts are stored separately by algorithm:
 
 ```text
-<batch>/models/<group>/isolation_forest.joblib
-<batch>/models/<group>/scaler.joblib
+<batch>/models/<group>/model_set.json
+<batch>/models/<group>/algorithms/<algorithm-id>/detector/model.joblib  # sklearn/PyOD
+<batch>/models/<group>/algorithms/<algorithm-id>/detector/model.tl      # cuML
+<batch>/models/<group>/algorithms/<algorithm-id>/scaler/scaler.npz
+<batch>/models/<group>/algorithms/<algorithm-id>/metadata.json
+<batch>/models/<group>/algorithms/<algorithm-id>/calibration/scores.npz  # ensembles only
 ```
+
+Set `LH_ANOMALY_ALGORITHMS` to a comma-separated list to select multiple algorithms, for example `sklearn-isolationforest,pyod-copod`. An empty value uses the legacy single-detector settings `LH_ANOMALY_BACKEND`, `LH_ANOMALY_ALGORITHM`, and `LH_ANOMALY_DEVICE`. Each algorithm prefix determines its backend and expected device.
 
 Anomaly output is:
 
@@ -262,7 +270,7 @@ Anomaly output is:
 <batch>/anomalies/raw/<group>/anomaly_results.parquet
 ```
 
-The initial detector is scikit-learn Isolation Forest using the Stage B numerical feature set. Results preserve timestamp, generic entity metadata, available source metadata, anomaly score, `is_anomaly`, severity, and reason. A deterministic burst rule also marks a window anomalous when either `error_count >= 10` and `error_rate >= 0.5`, or `http_5xx_count >= 10` and `http_5xx_rate >= 0.5`.
+Stage B results preserve timestamp, generic entity metadata, available source metadata, `anomaly_score`, `is_anomaly`, severity, and reason. Ensemble results also include `detector_algorithms` and one normalized score column per selected detector. A deterministic burst rule also marks a window anomalous when either `error_count >= 10` and `error_rate >= 0.5`, or `http_5xx_count >= 10` and `http_5xx_rate >= 0.5`.
 
 Stage C consumes the Detect anomaly outputs and writes correlated incidents to:
 
@@ -561,8 +569,12 @@ s3://<bucket>/<batch>/
     |   +-- train/<group>/*.parquet
     |   +-- raw/<group>/*.parquet
     +-- models/<group>/
-    |   +-- isolation_forest.joblib
-    |   +-- scaler.joblib
+    |   +-- model_set.json
+    |   +-- algorithms/<algorithm-id>/detector/model.joblib  # sklearn/PyOD
+    |   +-- algorithms/<algorithm-id>/detector/model.tl      # cuML
+    |   +-- algorithms/<algorithm-id>/scaler/scaler.npz
+    |   +-- algorithms/<algorithm-id>/metadata.json
+    |   +-- algorithms/<algorithm-id>/calibration/scores.npz  # ensembles only
     +-- anomalies/raw/<group>/anomaly_results.parquet
     +-- incidents/correlated_incidents.parquet
 ```

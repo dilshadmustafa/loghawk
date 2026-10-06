@@ -2,6 +2,7 @@
 
 import json
 
+import loghawk.config as config
 from loghawk.anomaly_detection.detector_metadata import DetectorMetadata
 
 
@@ -24,6 +25,27 @@ class ModelRegistry:
             "root": root,
             "detector": root + "detector/" + detector_name,
             "scaler": root + "scaler/scaler.npz",
+            "metadata": root + "metadata.json",
+        }
+
+    def model_set_path(self, group: str) -> str:
+        return self.model_root + group + "/model_set.json"
+
+    def paths_for_algorithm(self, group: str, algorithm: str) -> dict[str, str]:
+        backend, _device = config.anomaly_algorithm_backend_device(algorithm)
+        root = (
+            self.model_root
+            + group
+            + "/algorithms/"
+            + algorithm
+            + "/"
+        )
+        artifact = "model.tl" if backend == "cuml" else "model.joblib"
+        return {
+            "root": root,
+            "detector": root + "detector/" + artifact,
+            "scaler": root + "scaler/scaler.npz",
+            "calibration": root + "calibration/scores.npz",
             "metadata": root + "metadata.json",
         }
 
