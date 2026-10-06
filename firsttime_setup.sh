@@ -149,6 +149,21 @@ python -m pip install pyspark==3.5.9
 python -c 'from pyspark.sql import SparkSession; s=SparkSession.builder.master("local[*]").getOrCreate(); print("Spark:",s.version); print("Python:",__import__("sys").version); print("Java:",s.sparkContext._jvm.java.lang.System.getProperty("java.version")); print("Hadoop:",s.sparkContext._jvm.org.apache.hadoop.util.VersionInfo.getVersion()); s.stop()'
 echo
 echo "============================================================"
+echo "PyTorch - Explicit install"
+echo "============================================================"
+OS="$(uname -s)"
+if [[ "$OS" == "Linux" ]]; then
+    echo "Installing PyTorch with CUDA 13.0 support"
+    python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+elif [[ "$OS" == "Darwin" ]]; then
+    echo "Installing standard PyTorch for macOS"
+    python -m pip install torch torchvision
+else
+    echo "Unsupported operating system for PyTorch: $OS" >&2
+    exit 1
+fi
+echo
+echo "============================================================"
 echo "Installing packages mentioned in requirements.txt"
 echo "============================================================"
 python -m pip install -r requirements.txt

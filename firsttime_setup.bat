@@ -36,6 +36,12 @@ if errorlevel 1 goto :failed
 if errorlevel 1 goto :failed
 echo.
 echo ============================================================
+echo PyTorch - Explicit install - Installing PyTorch with CUDA 13.0 support
+echo ============================================================
+"%PYTHON%" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+if errorlevel 1 goto :failed
+echo.
+echo ============================================================
 echo Installing packages mentioned in requirements.txt
 echo ============================================================
 "%PYTHON%" -m pip install -r requirements.txt
