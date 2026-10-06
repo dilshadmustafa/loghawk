@@ -13,7 +13,7 @@ from loghawk.anomaly_detection.detector_capabilities import SKLEARN_CAPABILITIES
 
 class SklearnAnomalyDetector(AnomalyDetector):
     backend = "sklearn"
-    algorithm = "isolation_forest"
+    algorithm = "sklearn-isolationforest"
     capabilities = SKLEARN_CAPABILITIES
 
     def __init__(self):

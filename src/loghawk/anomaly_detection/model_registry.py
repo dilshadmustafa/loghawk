@@ -11,9 +11,15 @@ class ModelRegistry:
     def __init__(self, model_root: str):
         self.model_root = model_root.rstrip("/") + "/"
 
-    def paths_for_group(self, group: str, backend: str) -> dict[str, str]:
+    def paths_for_group(
+        self, group: str, backend: str, algorithm: str = "sklearn-isolationforest"
+    ) -> dict[str, str]:
         root = self.model_root + group + "/"
-        detector_name = "isolation_forest.tl" if backend == "cuml" else "isolation_forest.joblib"
+        if backend == "cuml":
+            detector_name = "isolation_forest.tl"
+        else:
+            artifact_name = algorithm if backend == "pyod" else "isolation_forest"
+            detector_name = artifact_name + ".joblib"
         return {
             "root": root,
             "detector": root + "detector/" + detector_name,

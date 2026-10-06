@@ -66,14 +66,39 @@ LH_ANOMALY_BACKEND = os.getenv(
     "LH_ANOMALY_BACKEND",
     "sklearn",
 ).strip().lower()
-if LH_ANOMALY_BACKEND not in {"sklearn", "cuml"}:
-    raise ValueError("LH_ANOMALY_BACKEND must be 'sklearn' or 'cuml'")
+if LH_ANOMALY_BACKEND not in {"sklearn", "cuml", "pyod"}:
+    raise ValueError("LH_ANOMALY_BACKEND must be 'sklearn', 'cuml', or 'pyod'")
 
+_DEFAULT_ANOMALY_ALGORITHM = {
+    "sklearn": "sklearn-isolationforest",
+    "cuml": "cuml-isolationforest",
+    "pyod": "pyod-copod",
+}[LH_ANOMALY_BACKEND]
 LH_ANOMALY_ALGORITHM = os.getenv(
-    "LH_ANOMALY_ALGORITHM", "isolation_forest"
+    "LH_ANOMALY_ALGORITHM", _DEFAULT_ANOMALY_ALGORITHM
 ).strip().lower()
-if LH_ANOMALY_ALGORITHM not in {"isolation_forest"}:
-    raise ValueError("LH_ANOMALY_ALGORITHM must currently be 'isolation_forest'")
+_ALGORITHMS_BY_BACKEND = {
+    "sklearn": {"sklearn-isolationforest"},
+    "cuml": {"cuml-isolationforest"},
+    "pyod": {
+        "pyod-isolationforest",
+        "pyod-copod",
+        "pyod-ecod",
+        "pyod-hbos",
+        "pyod-knn",
+        "pyod-lof",
+        "pyod-ocsvm",
+        "pyod-pca",
+    },
+}
+if LH_ANOMALY_ALGORITHM not in _ALGORITHMS_BY_BACKEND[LH_ANOMALY_BACKEND]:
+    valid_algorithms = ", ".join(
+        sorted(_ALGORITHMS_BY_BACKEND[LH_ANOMALY_BACKEND])
+    )
+    raise ValueError(
+        f"LH_ANOMALY_ALGORITHM must be one of {valid_algorithms} "
+        f"when LH_ANOMALY_BACKEND={LH_ANOMALY_BACKEND!r}"
+    )
 
 LH_ANOMALY_DEVICE = os.getenv(
     "LH_ANOMALY_DEVICE",
@@ -81,6 +106,12 @@ LH_ANOMALY_DEVICE = os.getenv(
 ).strip().lower()
 if LH_ANOMALY_DEVICE not in {"cpu", "gpu"}:
     raise ValueError("LH_ANOMALY_DEVICE must be 'cpu' or 'gpu'")
+if (LH_ANOMALY_BACKEND == "pyod" and LH_ANOMALY_DEVICE != "cpu"):
+    raise ValueError("The configured PyOD detectors currently support CPU only")
+if (LH_ANOMALY_BACKEND == "sklearn" and LH_ANOMALY_DEVICE != "cpu"):
+    raise ValueError("The sklearn backend currently supports CPU only")
+if (LH_ANOMALY_BACKEND == "cuml" and LH_ANOMALY_DEVICE != "gpu"):
+    raise ValueError("The cuml backend currently supports GPU only")
 
 LH_TEMPORAL_ADDRESS = os.getenv(
     "LH_TEMPORAL_ADDRESS",

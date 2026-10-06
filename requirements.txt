@@ -25,6 +25,7 @@ s3fs
 temporalio
 boto3
 scikit-learn
+pyod
 
 
 

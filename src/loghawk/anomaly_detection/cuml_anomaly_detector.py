@@ -13,7 +13,7 @@ from loghawk.anomaly_detection.detector_capabilities import CUML_CAPABILITIES
 
 class CuMLAnomalyDetector(AnomalyDetector):
     backend = "cuml"
-    algorithm = "isolation_forest"
+    algorithm = "cuml-isolationforest"
     capabilities = CUML_CAPABILITIES
 
     def __init__(self):

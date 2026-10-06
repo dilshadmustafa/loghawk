@@ -259,7 +259,7 @@ Model artifacts are:
 Anomaly output is:
 
 ```text
-<batch>/anomalies/raw/<group>/isolation_forest_results.parquet
+<batch>/anomalies/raw/<group>/anomaly_results.parquet
 ```
 
 The initial detector is scikit-learn Isolation Forest using the Stage B numerical feature set. Results preserve timestamp, generic entity metadata, available source metadata, anomaly score, `is_anomaly`, severity, and reason. A deterministic burst rule also marks a window anomalous when either `error_count >= 10` and `error_rate >= 0.5`, or `http_5xx_count >= 10` and `http_5xx_rate >= 0.5`.
@@ -563,7 +563,7 @@ s3://<bucket>/<batch>/
     +-- models/<group>/
     |   +-- isolation_forest.joblib
     |   +-- scaler.joblib
-    +-- anomalies/raw/<group>/isolation_forest_results.parquet
+    +-- anomalies/raw/<group>/anomaly_results.parquet
     +-- incidents/correlated_incidents.parquet
 ```
 

@@ -26,15 +26,15 @@ class DetectorMetadata:
     backend_metadata: dict[str, Any]
     versions: dict[str, str | None]
     artifact_schema_version: int = ARTIFACT_SCHEMA_VERSION
-    detector_type: str = "isolation_forest"
+    detector_type: str = "sklearn-isolationforest"
     trained_at_utc: str = ""
     capabilities: dict[str, Any] | None = None
-    algorithm: str = "isolation_forest"
+    algorithm: str = "sklearn-isolationforest"
 
     def __post_init__(self) -> None:
         if not self.trained_at_utc:
             self.trained_at_utc = datetime.now(timezone.utc).isoformat()
-        if self.backend not in {"cuml", "sklearn"}:
+        if self.backend not in {"cuml", "sklearn", "pyod"}:
             raise ValueError(f"Unsupported detector backend: {self.backend!r}")
         if not self.feature_columns:
             raise ValueError("Detector metadata must include feature columns.")
@@ -64,10 +64,13 @@ class DetectorMetadata:
             backend_metadata=dict(value.get("backend_metadata", {})),
             versions=dict(value.get("versions", {})),
             artifact_schema_version=value["artifact_schema_version"],
-            detector_type=value.get("detector_type", "isolation_forest"),
+            detector_type=value.get("detector_type", "sklearn-isolationforest"),
             trained_at_utc=value.get("trained_at_utc", ""),
             capabilities=value.get("capabilities"),
-            algorithm=value.get("algorithm", value.get("detector_type", "isolation_forest")),
+            algorithm=value.get(
+                "algorithm",
+                value.get("detector_type", "sklearn-isolationforest"),
+            ),
         )
         if value.get("n_features") != metadata.n_features:
             raise ValueError("Detector metadata feature count does not match its columns.")

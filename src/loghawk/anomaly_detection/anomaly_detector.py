@@ -13,7 +13,7 @@ class AnomalyDetector(ABC):
     """Common interface for LogHawk anomaly detection backends."""
 
     backend: str
-    algorithm: str = "isolation_forest"
+    algorithm: str = ""
     capabilities: DetectorCapabilities
 
     @abstractmethod
@@ -54,11 +54,13 @@ def create_anomaly_detector(
 ) -> AnomalyDetector:
     """Create only the selected backend, keeping cuML optional on CPU hosts."""
     selected_algorithm = (algorithm or config.LH_ANOMALY_ALGORITHM).strip().lower()
-    if selected_algorithm != "isolation_forest":
-        raise ValueError(f"Unsupported anomaly algorithm: {selected_algorithm!r}")
     selected = (backend or config.LH_ANOMALY_BACKEND).strip().lower()
     device = config.LH_ANOMALY_DEVICE
     if selected == "sklearn":
+        if selected_algorithm != "sklearn-isolationforest":
+            raise ValueError(
+                "The sklearn backend only supports sklearn-isolationforest"
+            )
         from loghawk.anomaly_detection.sklearn_anomaly_detector import (
             SklearnAnomalyDetector,
         )
@@ -67,6 +69,10 @@ def create_anomaly_detector(
         _validate_capabilities(detector, device)
         return detector
     if selected == "cuml":
+        if selected_algorithm != "cuml-isolationforest":
+            raise ValueError(
+                "The cuML backend only supports cuml-isolationforest"
+            )
         try:
             from loghawk.anomaly_detection.cuml_anomaly_detector import (
                 CuMLAnomalyDetector,
@@ -80,9 +86,24 @@ def create_anomaly_detector(
         detector = CuMLAnomalyDetector()
         _validate_capabilities(detector, device)
         return detector
+    if selected == "pyod":
+        if not selected_algorithm.startswith("pyod-"):
+            raise ValueError("PyOD algorithm names must start with 'pyod-'")
+        try:
+            from loghawk.anomaly_detection.pyod_anomaly_detector import (
+                PyODAnomalyDetector,
+            )
+        except ImportError as exc:
+            raise RuntimeError(
+                "The pyod backend requires PyOD. Install it with "
+                "'python -m pip install pyod'."
+            ) from exc
+        detector = PyODAnomalyDetector(selected_algorithm)
+        _validate_capabilities(detector, device)
+        return detector
     raise ValueError(
         f"Unsupported anomaly detector backend: {selected!r}. "
-        "Choose 'sklearn' or 'cuml'."
+        "Choose 'sklearn', 'cuml', or 'pyod'."
     )
 
 

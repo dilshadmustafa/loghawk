@@ -15,7 +15,8 @@ dependencies = [
     "duckdb",
     "lancedb",
     "boto3",
-    "scikit-learn"
+    "scikit-learn",
+    "pyod"
 ]
 
 [tool.setuptools.packages.find]
