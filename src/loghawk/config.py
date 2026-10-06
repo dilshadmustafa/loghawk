@@ -83,6 +83,8 @@ _ANOMALY_ALGORITHM_RUNTIME = {
     "pyod-lof": ("pyod", "cpu"),
     "pyod-ocsvm": ("pyod", "cpu"),
     "pyod-pca": ("pyod", "cpu"),
+    "pyod-autoencoder": ("pyod", "cpu"),
+    "pyod-autoencoder-gpu": ("pyod", "gpu"),
 }
 _raw_anomaly_algorithms = os.getenv("LH_ANOMALY_ALGORITHMS", "").strip()
 if _raw_anomaly_algorithms:
@@ -124,6 +126,8 @@ _ALGORITHMS_BY_BACKEND = {
         "pyod-lof",
         "pyod-ocsvm",
         "pyod-pca",
+        "pyod-autoencoder",
+        "pyod-autoencoder-gpu",
     },
 }
 if (
@@ -140,17 +144,27 @@ if (
 
 LH_ANOMALY_DEVICE = os.getenv(
     "LH_ANOMALY_DEVICE",
-    "gpu" if LH_ANOMALY_BACKEND == "cuml" else "cpu",
+    _ANOMALY_ALGORITHM_RUNTIME.get(
+        LH_ANOMALY_ALGORITHM,
+        ("", "cpu"),
+    )[1],
 ).strip().lower()
 if not LH_ANOMALY_ALGORITHMS:
     if LH_ANOMALY_DEVICE not in {"cpu", "gpu"}:
         raise ValueError("LH_ANOMALY_DEVICE must be 'cpu' or 'gpu'")
-    if (LH_ANOMALY_BACKEND == "pyod" and LH_ANOMALY_DEVICE != "cpu"):
-        raise ValueError("The configured PyOD detectors currently support CPU only")
-    if (LH_ANOMALY_BACKEND == "sklearn" and LH_ANOMALY_DEVICE != "cpu"):
-        raise ValueError("The sklearn backend currently supports CPU only")
-    if (LH_ANOMALY_BACKEND == "cuml" and LH_ANOMALY_DEVICE != "gpu"):
-        raise ValueError("The cuml backend currently supports GPU only")
+    expected_backend, expected_device = _ANOMALY_ALGORITHM_RUNTIME[
+        LH_ANOMALY_ALGORITHM
+    ]
+    if LH_ANOMALY_BACKEND != expected_backend:
+        raise ValueError(
+            f"LH_ANOMALY_ALGORITHM={LH_ANOMALY_ALGORITHM!r} requires "
+            f"LH_ANOMALY_BACKEND={expected_backend!r}"
+        )
+    if LH_ANOMALY_DEVICE != expected_device:
+        raise ValueError(
+            f"LH_ANOMALY_ALGORITHM={LH_ANOMALY_ALGORITHM!r} requires "
+            f"LH_ANOMALY_DEVICE={expected_device!r}"
+        )
 
 LH_EFFECTIVE_ANOMALY_ALGORITHMS = (
     LH_ANOMALY_ALGORITHMS or (LH_ANOMALY_ALGORITHM,)

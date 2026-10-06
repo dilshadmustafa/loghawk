@@ -6,6 +6,7 @@ pdfplumber
 
 lancedb
 sentence-transformers
+torch>=2.0
 huggingface_hub[hf_xet]
 pydantic #check if already by lancedb
 

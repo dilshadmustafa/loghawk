@@ -106,7 +106,10 @@ def create_anomaly_detector(
                 "The pyod backend requires PyOD. Install it with "
                 "'python -m pip install pyod'."
             ) from exc
-        detector = PyODAnomalyDetector(selected_algorithm)
+        detector = PyODAnomalyDetector(
+            selected_algorithm,
+            device=selected_device,
+        )
         _validate_capabilities(detector, selected_device)
         return detector
     raise ValueError(
