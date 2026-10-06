@@ -244,7 +244,7 @@ from temporalio.common import RetryPolicy
 
 not `workflow.RetryPolicy`.
 
-Current activities include `run_stage_a(input_path, output_path)` and `run_stage_b(input_path, output_path)`. Next activity should be `run_identity_mapping(raw_folder)`, followed by Stage A. Identity mapping must finish before Stage A starts.
+The Temporal pipeline uses `run_identity_mapping(raw_folder)`, then Stage A, Stage B Train/Detect, and Stage C. Identity mapping must finish before Stage A starts.
 
 Activities should be retryable and idempotent where practical. Use positional args when the activity signature expects positional parameters.
 

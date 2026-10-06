@@ -7,14 +7,12 @@ from temporalio.worker import Worker
 from loghawk.workflows.temporal.activities import (
     run_identity_mapping,
     run_stage_a,
-    run_stage_b,
     run_stage_b_train,
     run_stage_b_detect,
     run_stage_c,
 )
 
 from loghawk.workflows.temporal.workflows import (
-    LogHawkPipeline,
     LogHawkTrainDetectPipeline,
 )
 
@@ -37,13 +35,11 @@ async def main():
         client,
         task_queue="loghawk-pipeline",
         workflows=[
-            LogHawkPipeline,
             LogHawkTrainDetectPipeline,
         ],
         activities=[
             run_identity_mapping,
             run_stage_a,
-            run_stage_b,
             run_stage_b_train,
             run_stage_b_detect,
             run_stage_c,
@@ -55,10 +51,10 @@ async def main():
     print("=" * 70)
     print(f"Temporal server : {config.LH_TEMPORAL_ADDRESS}")
     print("Task queue      : loghawk-pipeline")
-    print("Workflows       : LogHawkPipeline, LogHawkTrainDetectPipeline")
+    print("Workflows       : LogHawkTrainDetectPipeline")
     print(
         "Activities      : run_identity_mapping, run_stage_a, "
-        "run_stage_b, run_stage_b_train, run_stage_b_detect, run_stage_c"
+        "run_stage_b_train, run_stage_b_detect, run_stage_c"
     )
     print("=" * 70)
 

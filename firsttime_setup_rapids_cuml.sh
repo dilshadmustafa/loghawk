@@ -239,6 +239,7 @@ conda deactivate
 echo
 echo "NVIDIA GPU setup complete."
 echo "Activate the environment in each new terminal with:"
+echo "  source \"$MINIFORGE_PREFIX/etc/profile.d/conda.sh\""
 echo "  conda activate $RAPIDS_ENV_NAME"
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"
