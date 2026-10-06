@@ -249,7 +249,7 @@ features/train/<group>/ -> train model -> models/<group>/
 features/raw/<group>/   -> load model -> anomalies/raw/<group>/
 ```
 
-When one algorithm is selected, its model set contains one detector and uses that detector's native anomaly decision. With multiple algorithms, Stage B calibrates each model's training scores to percentiles, takes their equal-weight mean, and applies `LH_ENSEMBLE_THRESHOLD`.
+Each source group has a model set, and each selected algorithm has its own detector, scaler, and metadata. With one algorithm, Stage B uses its native anomaly decision and does not save ensemble calibration scores. With multiple algorithms, Stage B calibrates each detector's training scores to percentiles, takes their equal-weight mean, and marks a window anomalous when the combined score meets `LH_ENSEMBLE_THRESHOLD`.
 
 Model artifacts are stored separately by algorithm:
 
@@ -262,7 +262,24 @@ Model artifacts are stored separately by algorithm:
 <batch>/models/<group>/algorithms/<algorithm-id>/calibration/scores.npz  # ensembles only
 ```
 
-Set `LH_ANOMALY_ALGORITHMS` to a comma-separated list to select multiple algorithms, for example `sklearn-isolationforest,pyod-copod`. An empty value uses the legacy single-detector settings `LH_ANOMALY_BACKEND`, `LH_ANOMALY_ALGORITHM`, and `LH_ANOMALY_DEVICE`. Each algorithm prefix determines its backend and expected device.
+Set `LH_ANOMALY_ALGORITHMS` to a comma-separated list to choose one or more detectors. Supported IDs and execution devices are:
+
+| Algorithm ID | Backend | Device |
+|---|---|---|
+| `sklearn-isolationforest` | scikit-learn | CPU |
+| `cuml-isolationforest` | cuML | GPU |
+| `pyod-isolationforest`, `pyod-copod`, `pyod-ecod`, `pyod-hbos`, `pyod-knn`, `pyod-lof`, `pyod-ocsvm`, `pyod-pca` | PyOD | CPU |
+| `pyod-autoencoder` | PyOD/PyTorch | CPU |
+| `pyod-autoencoder-gpu` | PyOD/PyTorch | CUDA GPU |
+
+For example:
+
+```ini
+LH_ANOMALY_ALGORITHMS=sklearn-isolationforest,pyod-copod
+LH_ENSEMBLE_THRESHOLD=0.95
+```
+
+The algorithm ID determines its backend and device. When `LH_ANOMALY_ALGORITHMS` is empty, single-detector mode uses `LH_ANOMALY_BACKEND`, `LH_ANOMALY_ALGORITHM`, and `LH_ANOMALY_DEVICE`.
 
 Anomaly output is:
 
@@ -417,7 +434,7 @@ The current Temporal workflow uses the folder-based Train/Detect processing mode
 
 ## Current Temporal Activity Model
 
-The `LogHawkTrainDetectPipeline` workflow uses `LH_TRAIN_PHASE` and `LH_DETECT_PHASE` to select work. When both are enabled, it completes Train before Detect. Train runs identity mapping and Stage A over `train/`, then fits and saves one model and scaler per source group. Detect runs identity mapping and Stage A over `raw/`, loads each group's saved artifacts, scores the feature windows, then runs Stage C. Detect-only requires trained model artifacts to exist for every group.
+The `LogHawkTrainDetectPipeline` workflow uses `LH_TRAIN_PHASE` and `LH_DETECT_PHASE` to select work. When both are enabled, it completes Train before Detect. Train runs identity mapping and Stage A over `train/`, then fits and saves a detector bundle per selected algorithm and source group. Detect runs identity mapping and Stage A over `raw/`, loads each group's model set, scores the feature windows, then runs Stage C. Detect-only requires trained artifacts for every group and selected algorithm.
 
 Run the worker and workflow starter from the repository root:
 
@@ -1707,9 +1724,13 @@ AWS
 
 ### Quickstart LogHawk AIOps
 
-Run the one-file setup from the repository root. Configure the local `.env` values described in [S3 Select and environment configuration](#s3-select-and-environment-configuration) first. Install Python 3.12, Java 17, Docker, and AWS CLI. Keep Ollama running with `llama3.2:3b` available for identity mapping.
+Configure the repository-root `.env` first. Set the S3 endpoint, bucket, batch folder, and phase flags as described in [S3 Select and environment configuration](#s3-select-and-environment-configuration). Keep Ollama available with the configured model for Identity Mapping.
+
+The setup scripts install application dependencies and can start RustFS and Temporal, create the bucket, and generate/upload sample data. Their `SKIP_*` flags skip those service/setup actions; they do not skip Python environment or package installation.
 
 #### Windows
+
+Install Python 3.12, Java 17, Docker Desktop, and AWS CLI. Close LogHawk Python processes before rerunning setup so they do not hold files in `venv312`.
 
 Run:
 
@@ -1717,9 +1738,23 @@ Run:
 .\firsttime_setup.bat
 ```
 
-The script installs dependencies, starts RustFS, creates the `loghawk-data` bucket, uploads sample Train and Raw logs, and starts Temporal in the background.
+The script creates `venv312`, installs PySpark and the CUDA 13.0 PyTorch build, installs `requirements.txt`, and by default starts RustFS and Temporal, creates the `loghawk-data` bucket, and uploads sample Train and Raw logs. CUDA-enabled PyTorch can still run CPU operations when no supported GPU is available; CUDA operations require a compatible NVIDIA GPU and driver.
+
+To rerun setup while RustFS, Temporal, DuckDB, and LanceDB are already set up, run these commands in PowerShell:
+
+```powershell
+$env:SKIP_RUSTFS_SETUP = "true"
+$env:SKIP_TEMPORAL_SETUP = "true"
+$env:SKIP_DUCKDB_SETUP = "true"
+$env:SKIP_LANCEDB_SETUP = "true"
+.\firsttime_setup.bat
+```
+
+`SKIP_RUSTFS_SETUP=true` also skips bucket creation and sample-data generation/upload.
 
 #### Linux and macOS
+
+Install Java 17, Docker, and AWS CLI. `firsttime_setup.sh` installs Miniforge if needed and creates the Python 3.12 Conda environment named `venv312`. Keep Ollama reachable from the environment running LogHawk.
 
 Run:
 
@@ -1727,7 +1762,48 @@ Run:
 bash firsttime_setup.sh
 ```
 
-The script installs dependencies, starts RustFS, creates the `loghawk-data` bucket, uploads sample Train and Raw logs, and starts Temporal in the background. The terminal-specific setup scripts remain available when you need to rerun an individual step.
+On Linux, the script explicitly installs the CUDA 13.0 PyTorch build; on macOS, it installs standard PyTorch. By default it also starts RustFS and Temporal, creates the `loghawk-data` bucket, and uploads sample Train and Raw logs.
+
+To rerun setup while RustFS, Temporal, DuckDB, and LanceDB are already set up, run:
+
+```sh
+SKIP_RUSTFS_SETUP=true \
+SKIP_TEMPORAL_SETUP=true \
+SKIP_DUCKDB_SETUP=true \
+SKIP_LANCEDB_SETUP=true \
+bash firsttime_setup.sh
+```
+
+These flags skip service/setup actions, but the script still creates or updates the Conda environment and installs packages. `SKIP_RUSTFS_SETUP=true` also skips bucket creation and sample-data generation/upload.
+
+#### NVIDIA GPU setup with RAPIDS cuML
+
+Use `firsttime_setup_rapids_cuml.sh` inside Ubuntu on WSL2 or a supported Linux host with NVIDIA GPU access. It checks `nvidia-smi` and Java 17, installs Miniforge if needed, creates or updates the `loghawk-rapids` Conda environment with Python 3.12, cuML, and nvForest, installs the project requirements, verifies GPU access, and configures `LH_ANOMALY_BACKEND=cuml`.
+
+Run from the repository root:
+
+```sh
+bash firsttime_setup_rapids_cuml.sh
+```
+
+The script uses CUDA 13.2 by default. It also supports `SKIP_RUSTFS_SETUP`, `SKIP_TEMPORAL_SETUP`, `SKIP_DUCKDB_SETUP`, and `SKIP_LANCEDB_SETUP`; setting all four to `true` skips those setup actions and RustFS test-data upload while still installing the RAPIDS environment and Python packages:
+
+```sh
+SKIP_RUSTFS_SETUP=true \
+SKIP_TEMPORAL_SETUP=true \
+SKIP_DUCKDB_SETUP=true \
+SKIP_LANCEDB_SETUP=true \
+bash firsttime_setup_rapids_cuml.sh
+```
+
+In each new terminal, activate the environment with:
+
+```sh
+source "$HOME/miniforge3/etc/profile.d/conda.sh"
+conda activate loghawk-rapids
+```
+
+The script sets `LH_ANOMALY_BACKEND=cuml`, but a non-empty `LH_ANOMALY_ALGORITHMS` list takes precedence. To select cuML in that mode, include `cuml-isolationforest` in the list. Otherwise, clear the list and configure the single-detector settings for cuML.
 
 With `LH_S3_BATCH_FOLDER=quickstart`, the generated inputs are:
 
