@@ -93,8 +93,15 @@ echo.
 echo ============================================================
 echo Creating the loghawk-data S3 bucket
 echo ============================================================
-aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
+call :wait_for_rustfs
 if errorlevel 1 goto :failed
+aws --endpoint-url http://localhost:9000 s3api head-bucket --bucket loghawk-data >nul 2>&1
+if errorlevel 1 (
+    aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
+    if errorlevel 1 goto :failed
+) else (
+    echo Bucket loghawk-data already exists.
+)
 
 echo.
 echo ============================================================
@@ -123,4 +130,19 @@ exit /b 0
 
 :failed
 echo Setup failed. Review the error above.
+exit /b 1
+
+:wait_for_rustfs
+set "RUSTFS_ATTEMPT=0"
+:wait_for_rustfs_retry
+aws --endpoint-url http://localhost:9000 s3api list-buckets >nul 2>&1
+if not errorlevel 1 exit /b 0
+set /a RUSTFS_ATTEMPT+=1
+if %RUSTFS_ATTEMPT% GEQ 30 goto :wait_for_rustfs_timeout
+timeout /t 2 /nobreak >nul
+goto :wait_for_rustfs_retry
+
+:wait_for_rustfs_timeout
+echo RustFS did not become ready within 60 seconds.
+docker logs --tail 50 loghawk-rustfs
 exit /b 1

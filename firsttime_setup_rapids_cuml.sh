@@ -44,6 +44,21 @@ require_command() {
     }
 }
 
+wait_for_rustfs() {
+    local attempt
+    echo "Waiting for RustFS S3 API (up to 60 seconds)..."
+    for ((attempt = 1; attempt <= 30; attempt++)); do
+        if aws --endpoint-url http://localhost:9000 \
+            s3api list-buckets >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    echo "RustFS did not become ready within 60 seconds." >&2
+    docker logs --tail 50 loghawk-rustfs >&2 || true
+    return 1
+}
+
 echo
 echo "============================================================"
 echo "Checking WSL/Linux and NVIDIA GPU prerequisites"
@@ -101,7 +116,7 @@ esac
 if command -v conda >/dev/null 2>&1; then
     CONDA_BASE="$(conda info --base)"
 else
-    INSTALLER="$(mktemp --suffix=.sh)"
+    INSTALLER="$(mktemp "${TMPDIR:-/tmp}/loghawk-miniforge.XXXXXX")"
     trap 'rm -f "$INSTALLER"' EXIT
     curl -fsSL \
         "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${ARCH}.sh" \
@@ -203,7 +218,13 @@ if [[ "$SKIP_RUSTFS_SETUP" == false ]]; then
     echo "============================================================"
     echo "Creating the loghawk-data S3 bucket"
     echo "============================================================"
-    aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
+    wait_for_rustfs
+    if aws --endpoint-url http://localhost:9000 \
+        s3api head-bucket --bucket loghawk-data >/dev/null 2>&1; then
+        echo "Bucket loghawk-data already exists."
+    else
+        aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
+    fi
 
     echo
     echo "============================================================"

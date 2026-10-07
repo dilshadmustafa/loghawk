@@ -21,11 +21,26 @@ MINIFORGE_PREFIX="${MINIFORGE_PREFIX:-$HOME/miniforge3}"
 CONDA_ENV_NAME="venv312"
 
 as_bool() {
-    case "${1,,}" in
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
         true|1|yes|on) echo true ;;
         false|0|no|off) echo false ;;
         *) echo "Invalid boolean value: $1 (use true or false)." >&2; exit 2 ;;
     esac
+}
+
+wait_for_rustfs() {
+    local attempt
+    echo "Waiting for RustFS S3 API (up to 60 seconds)..."
+    for ((attempt = 1; attempt <= 30; attempt++)); do
+        if aws --endpoint-url http://localhost:9000 \
+            s3api list-buckets >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    echo "RustFS did not become ready within 60 seconds." >&2
+    docker logs --tail 50 loghawk-rustfs >&2 || true
+    return 1
 }
 
 SKIP_RUSTFS_SETUP="$(as_bool "$SKIP_RUSTFS_SETUP")"
@@ -97,7 +112,7 @@ else
     echo "============================================================"
     echo "Installing Miniforge / Conda if needed"
     echo "============================================================"
-    INSTALLER="$(mktemp --suffix=.sh)"
+    INSTALLER="$(mktemp "${TMPDIR:-/tmp}/loghawk-miniforge.XXXXXX")"
     trap 'rm -f "$INSTALLER"' EXIT
     curl -fsSL \
         "https://github.com/conda-forge/miniforge/releases/latest/download/${INSTALLER_NAME}" \
@@ -211,7 +226,13 @@ if [[ "$SKIP_RUSTFS_SETUP" == false ]]; then
     echo "============================================================"
     echo "Creating the loghawk-data S3 bucket"
     echo "============================================================"
-    aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
+    wait_for_rustfs
+    if aws --endpoint-url http://localhost:9000 \
+        s3api head-bucket --bucket loghawk-data >/dev/null 2>&1; then
+        echo "Bucket loghawk-data already exists."
+    else
+        aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
+    fi
 
     echo
     echo "============================================================"
