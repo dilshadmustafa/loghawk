@@ -1778,7 +1778,7 @@ These flags skip service/setup actions, but the script still creates or updates 
 
 #### NVIDIA GPU setup with RAPIDS cuML
 
-Use `firsttime_setup_rapids_cuml.sh` inside Ubuntu on WSL2 or a supported Linux host with NVIDIA GPU access. It checks `nvidia-smi` and Java 17, installs Miniforge if needed, creates or updates the `loghawk-rapids` Conda environment with Python 3.12, cuML, and nvForest, installs the project requirements, verifies GPU access, and configures `LH_ANOMALY_BACKEND=cuml`.
+Use `firsttime_setup_rapids_cuml.sh` inside Ubuntu on WSL2 or a supported Linux host with NVIDIA GPU access. It checks `nvidia-smi` and Java 17, installs Miniforge if needed, creates or updates the `loghawk-rapids` Conda environment with Python 3.12, cuML, and nvForest, explicitly installs PyTorch with CUDA 13.2 support, installs the project requirements, and verifies GPU access. It does not change `.env`.
 
 Run from the repository root:
 
@@ -1786,7 +1786,7 @@ Run from the repository root:
 bash firsttime_setup_rapids_cuml.sh
 ```
 
-The script uses CUDA 13.2 by default. It also supports `SKIP_RUSTFS_SETUP`, `SKIP_TEMPORAL_SETUP`, `SKIP_DUCKDB_SETUP`, and `SKIP_LANCEDB_SETUP`; setting all four to `true` skips those setup actions and RustFS test-data upload while still installing the RAPIDS environment and Python packages:
+The script uses CUDA 13.2 for both RAPIDS and PyTorch. Use an NVIDIA driver that supports CUDA 13.2; NVIDIA lists 595.45.04 as the CUDA 13.2 driver version. It also supports `SKIP_RUSTFS_SETUP`, `SKIP_TEMPORAL_SETUP`, `SKIP_DUCKDB_SETUP`, and `SKIP_LANCEDB_SETUP`; setting all four to `true` skips those setup actions and RustFS test-data upload while still installing the RAPIDS environment and Python packages:
 
 ```sh
 SKIP_RUSTFS_SETUP=true \
@@ -1803,7 +1803,7 @@ source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate loghawk-rapids
 ```
 
-The script sets `LH_ANOMALY_BACKEND=cuml`, but a non-empty `LH_ANOMALY_ALGORITHMS` list takes precedence. To select cuML in that mode, include `cuml-isolationforest` in the list. Otherwise, clear the list and configure the single-detector settings for cuML.
+Configure detector selection in `.env`. For single-detector cuML mode, set `LH_ANOMALY_ALGORITHMS=` and configure `LH_ANOMALY_BACKEND=cuml`, `LH_ANOMALY_ALGORITHM=cuml-isolationforest`, and `LH_ANOMALY_DEVICE=gpu`. When `LH_ANOMALY_ALGORITHMS` is non-empty, that list takes precedence; include `cuml-isolationforest` to use cuML.
 
 With `LH_S3_BATCH_FOLDER=quickstart`, the generated inputs are:
 

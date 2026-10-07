@@ -140,9 +140,16 @@ python -c 'import cupy, cuml, nvforest, treelite; from importlib.metadata import
 
 echo
 echo "============================================================"
+python -m pip install --upgrade pip setuptools wheel
+echo
+echo "============================================================"
+echo "PyTorch - Explicit install - Installing PyTorch with CUDA 13.2 support"
+echo "============================================================"
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
+echo
+echo "============================================================"
 echo "Installing packages mentioned in requirements.txt"
 echo "============================================================"
-python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 python -m pip install -e .
 
@@ -170,23 +177,6 @@ if [[ "$SKIP_LANCEDB_SETUP" == false ]]; then
     python -m loghawk.admin.setup_lancedb
 else
     echo "Skipping LanceDB setup."
-fi
-
-echo
-echo "============================================================"
-echo "Configuring LogHawk to use the cuML backend"
-echo "============================================================"
-if [[ -f .env ]]; then
-    if grep -qE '^[[:space:]]*LH_ANOMALY_BACKEND=' .env; then
-        sed -i -E \
-            's/^[[:space:]]*LH_ANOMALY_BACKEND=.*/LH_ANOMALY_BACKEND=cuml/' \
-            .env
-    else
-        printf '\nLH_ANOMALY_BACKEND=cuml\n' >> .env
-    fi
-else
-    echo "Cannot find .env in $ROOT_DIR; create it and set LH_ANOMALY_BACKEND=cuml."
-    exit 1
 fi
 
 if [[ "$SKIP_RUSTFS_SETUP" == false ]]; then
