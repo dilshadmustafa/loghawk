@@ -12,7 +12,7 @@ docker run -d -p 9000:9000 -p 9001:9001 -v "%cd%\data:/data" -v "%cd%\logs:/logs
 # Default keys are assigned below for testing purposes only. You can also use the following commands to set up the S3 bucket and upload sample logs to it:
 set AWS_ACCESS_KEY_ID=rustfsadmin
 set AWS_SECRET_ACCESS_KEY=rustfsadmin
-set AWS_DEFAULT_REGION=us-east-1
+if not defined AWS_DEFAULT_REGION set AWS_DEFAULT_REGION=us-east-1
 aws --endpoint-url http://localhost:9000 s3 mb s3://loghawk-data
 # aws --endpoint-url http://localhost:9000 s3 cp C:\loghawk_sample_logs.json s3://loghawk-data/somefolder/raw/
 aws --endpoint-url http://localhost:9000 s3 ls s3://loghawk-data

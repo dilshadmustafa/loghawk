@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import platform
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -312,9 +313,10 @@ LH_S3_SECRET_ACCESS_KEY= os.getenv(
     "rustfsadmin"
 )
 
-LH_S3_REGION= os.getenv(
-    "AWS_REGION",
-    "us-east-1"
+LH_S3_REGION = (
+    os.getenv("AWS_REGION", "").strip()
+    or os.getenv("AWS_DEFAULT_REGION", "").strip()
+    or "us-east-1"
 )
 
 LH_S3_SELECT_RECORD_FILTER = os.getenv(
@@ -347,6 +349,43 @@ LH_S3_SELECT_USE_DETECT_PHASE = _env_bool(
     "false",
 )
 
+LH_EXTERNAL_DATA_USE = _env_bool("LH_EXTERNAL_DATA_USE", "false")
+LH_EXTERNAL_S3SELECT_SUPPORT = _env_bool(
+    "LH_EXTERNAL_S3SELECT_SUPPORT", "false"
+)
+
+
+def _parse_csv_setting(name: str) -> list[str]:
+    return [value.strip() for value in os.getenv(name, "").split(",") if value.strip()]
+
+
+def _parse_s3_folder_setting(name: str) -> list[str]:
+    folders = _parse_csv_setting(name)
+    normalized = []
+    for folder in folders:
+        parsed = urlparse(folder)
+        if parsed.scheme != "s3" or not parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError(f"{name} entries must be s3://bucket[/prefix/] URLs: {folder}")
+        normalized.append(folder.rstrip("/") + "/")
+    return normalized
+
+
+LH_EXTERNAL_DATA_TRAIN = _parse_s3_folder_setting("LH_EXTERNAL_DATA_TRAIN")
+LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN = _parse_csv_setting(
+    "LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN"
+)
+LH_EXTERNAL_DATA_RAW = _parse_s3_folder_setting("LH_EXTERNAL_DATA_RAW")
+LH_EXTERNAL_S3BUCKET_REGIONS_RAW = _parse_csv_setting(
+    "LH_EXTERNAL_S3BUCKET_REGIONS_RAW"
+)
+LH_EXTERNAL_S3_ENDPOINT = os.getenv("LH_EXTERNAL_S3_ENDPOINT", "").strip()
+LH_EXTERNAL_S3_ACCESS_KEY_ID = os.getenv(
+    "LH_EXTERNAL_S3_ACCESS_KEY_ID", ""
+).strip()
+LH_EXTERNAL_S3_SECRET_ACCESS_KEY = os.getenv(
+    "LH_EXTERNAL_S3_SECRET_ACCESS_KEY", ""
+).strip()
+
 LH_S3_BATCH_FOLDER = os.getenv(
     "LH_S3_BATCH_FOLDER",
     "2026-09-28",
@@ -359,6 +398,68 @@ LH_DETECT_PHASE = _env_bool("LH_DETECT_PHASE", "false")
 if not LH_TRAIN_PHASE and not LH_DETECT_PHASE:
     raise ValueError(
         "At least one of LH_TRAIN_PHASE or LH_DETECT_PHASE must be true"
+    )
+
+
+def _validate_external_sources(
+    phase: str,
+    enabled: bool,
+    folders: list[str],
+    regions: list[str],
+) -> None:
+    if not LH_EXTERNAL_DATA_USE or not enabled:
+        return
+    if not folders:
+        raise ValueError(
+            f"LH_EXTERNAL_DATA_USE is enabled and {phase} is enabled, "
+            f"so LH_EXTERNAL_DATA_{phase} must contain at least one S3 URL"
+        )
+    if len(folders) != len(regions):
+        raise ValueError(
+            f"LH_EXTERNAL_DATA_{phase} and "
+            f"LH_EXTERNAL_S3BUCKET_REGIONS_{phase} must contain the same "
+            f"number of comma-separated entries ({len(folders)} URLs, "
+            f"{len(regions)} regions)"
+        )
+
+
+def _validate_unique_external_bucket_regions() -> None:
+    if not LH_EXTERNAL_DATA_USE:
+        return
+    bucket_regions: dict[str, str] = {}
+    phase_sources = (
+        (LH_EXTERNAL_DATA_TRAIN, LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN),
+        (LH_EXTERNAL_DATA_RAW, LH_EXTERNAL_S3BUCKET_REGIONS_RAW),
+    )
+    for folders, regions in phase_sources:
+        for folder, region in zip(folders, regions):
+            bucket = urlparse(folder).netloc
+            if bucket == LH_S3_BUCKET:
+                raise ValueError(
+                    "External input bucket names must differ from "
+                    "LH_S3_BUCKET because Spark uses per-bucket endpoint "
+                    "settings for sources and RustFS output."
+                )
+            previous = bucket_regions.setdefault(bucket, region)
+            if previous != region:
+                raise ValueError(
+                    f"External bucket {bucket!r} has conflicting regions: "
+                    f"{previous!r} and {region!r}"
+                )
+_validate_external_sources(
+    "TRAIN", LH_TRAIN_PHASE,
+    LH_EXTERNAL_DATA_TRAIN, LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN,
+)
+_validate_external_sources(
+    "RAW", LH_DETECT_PHASE,
+    LH_EXTERNAL_DATA_RAW, LH_EXTERNAL_S3BUCKET_REGIONS_RAW,
+)
+_validate_unique_external_bucket_regions()
+
+if bool(LH_EXTERNAL_S3_ACCESS_KEY_ID) != bool(LH_EXTERNAL_S3_SECRET_ACCESS_KEY):
+    raise ValueError(
+        "Set both LH_EXTERNAL_S3_ACCESS_KEY_ID and "
+        "LH_EXTERNAL_S3_SECRET_ACCESS_KEY, or leave both blank."
     )
 
 LH_S3_SELECT_RECORD_FILTER_LIST = (

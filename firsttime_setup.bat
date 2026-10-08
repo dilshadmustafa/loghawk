@@ -102,7 +102,7 @@ if errorlevel 1 goto :failed
 
 set "AWS_ACCESS_KEY_ID=rustfsadmin"
 set "AWS_SECRET_ACCESS_KEY=rustfsadmin"
-set "AWS_DEFAULT_REGION=us-east-1"
+if not defined AWS_DEFAULT_REGION set "AWS_DEFAULT_REGION=us-east-1"
 echo.
 echo ============================================================
 echo Creating the loghawk-data S3 bucket

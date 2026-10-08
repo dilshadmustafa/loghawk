@@ -2,30 +2,38 @@ from temporalio import activity
 
 
 @activity.defn
-async def run_identity_mapping(raw_folder: str) -> str:
+async def run_identity_mapping(
+    sources: list[dict[str, str]],
+    mapping_root: str,
+    phase: str,
+    external: bool,
+) -> str:
     """Generate or verify identity mappings for every raw file."""
     activity.logger.info(
-        f"Starting identity mapping for raw folder: {raw_folder}"
+        f"Starting identity mapping for {phase} sources: {sources}"
     )
 
-    from loghawk.identity_mapping import identity_mapping6
+    from loghawk.identity_mapping import identity_mapping7
 
     activity.logger.info(
-        f"Identity mapping module: {identity_mapping6.__file__}"
+        f"Identity mapping module: {identity_mapping7.__file__}"
     )
-    mapping_paths = identity_mapping6.generate_identity_mappings(
-        raw_folder
+    mapping_paths = identity_mapping7.generate_identity_mappings(
+        sources, mapping_root, phase, external
     )
     activity.logger.info(
         f"Identity mapping completed for {len(mapping_paths)} raw file(s)"
     )
-    return raw_folder
+    return mapping_root
 
 
 @activity.defn
 async def run_stage_a(
-    input_path: str,
+    sources: list[dict[str, str]],
     output_path: str,
+    mapping_root: str,
+    phase: str,
+    external: bool,
 ) -> str:
     """
     Temporal Activity for LogHawk Stage A.
@@ -34,21 +42,24 @@ async def run_stage_a(
     """
 
     activity.logger.info(
-        f"Starting Stage A: {input_path} -> {output_path}"
+        f"Starting Stage A ({phase}): {sources} -> {output_path}"
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering8
+        pyspark_s3_feature_engineering9
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering8.__file__}"
+        f"{pyspark_s3_feature_engineering9.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering8.run(
-        input_path,
+    result = pyspark_s3_feature_engineering9.run(
+        sources,
         output_path,
+        mapping_root,
+        phase,
+        external,
     )
 
     activity.logger.info(

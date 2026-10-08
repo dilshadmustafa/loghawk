@@ -30,6 +30,21 @@ async def main():
             batch_root,
             config.LH_TRAIN_PHASE,
             config.LH_DETECT_PHASE,
+            config.LH_EXTERNAL_DATA_USE,
+            [
+                {"url": url, "region": region}
+                for url, region in zip(
+                    config.LH_EXTERNAL_DATA_TRAIN,
+                    config.LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN,
+                )
+            ],
+            [
+                {"url": url, "region": region}
+                for url, region in zip(
+                    config.LH_EXTERNAL_DATA_RAW,
+                    config.LH_EXTERNAL_S3BUCKET_REGIONS_RAW,
+                )
+            ],
         ],
         id=workflow_id,
         task_queue="loghawk-pipeline",
