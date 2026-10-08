@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv",
     "duckdb",
     "lancedb",
+    "litellm",
     "boto3",
     "scikit-learn",
     "pyod"

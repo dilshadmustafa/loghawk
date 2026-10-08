@@ -28,7 +28,8 @@ x-loghawk-app: &loghawk-app
     HADOOP_HOME: /opt/java
     LH_TEMPORAL_ADDRESS: temporal:7233
     LH_S3_ENDPOINT: http://rustfs:9000
-    LH_OLLAMA_URL: http://host.docker.internal:11434/api/chat
+    LH_LLM_BASE_URL: http://host.docker.internal:11434
+    LH_EMBEDDING_BASE_URL: http://host.docker.internal:11434
     LH_DUCKDB_FILE_PATH: /var/lib/loghawk/duckdb/my_database.duckdb
     LH_LANCEDB_FILE_PATH: /var/lib/loghawk/lancedb
   volumes:
@@ -95,7 +96,7 @@ services:
       - -ec
       - |
         python -m loghawk.admin.setup_duckdb
-        python -m loghawk.admin.setup_lancedb
+        python -m loghawk.admin.setup_lancedb2
         python src/loghawk/test/testdata.py
 
   loghawk-worker:

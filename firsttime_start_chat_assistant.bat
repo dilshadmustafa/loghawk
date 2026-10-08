@@ -1,6 +1,10 @@
-# Make sure to run firsttime_setup_<...>.bat files before running this script to set up the environment and install dependencies.
-# optional: run the following command in separate terminal
-# replace with current file name
-# chat assistant
-python .\src\loghawk\chat_assistant\chat_assistant4.py
+@echo off
+setlocal
+cd /d "%~dp0"
 
+if not exist "venv312\Scripts\python.exe" (
+    echo Run firsttime_setup.bat before starting the chat assistant.
+    exit /b 1
+)
+
+venv312\Scripts\python.exe src\loghawk\chat_assistant\chat_assistant5.py

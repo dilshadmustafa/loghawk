@@ -1,6 +1,6 @@
 # separate train and raw paths, and generate identity mapping for each file in the raw path.
 """
-LogHawk - Folder-level Ollama-based schema identity mapping
+LogHawk - Folder-level provider-neutral schema identity mapping
 
 Purpose
 -------
@@ -26,7 +26,7 @@ Identity mappings:
         identitymapping_app2.json
         identitymapping_nginx.json
 
-The identity mapping is generated using Ollama/Llama 3.2:3b.
+The identity mapping is generated through LogHawk's LiteLLM-backed client.
 
 The activity is designed to be:
 
@@ -40,15 +40,10 @@ If a mapping JSON already exists for a raw file, that file is skipped.
 Requirements
 ------------
 
-    pip install requests s3fs
+    pip install litellm s3fs
 
-Ollama:
-
-    ollama serve
-
-Model:
-
-    ollama pull llama3.2:3b
+Configure the provider, model, endpoint, and credentials with LogHawk's
+environment settings.
 """
 
 import gzip
@@ -61,23 +56,19 @@ from collections.abc import Iterable
 from typing import Any
 
 import boto3
-import requests
 import s3fs
 from botocore.config import Config as BotoConfig
 
 import loghawk.config as config
+from loghawk.llm import get_llm_client
 
 
 # ============================================================
 # Configuration
 # ============================================================
 
-OLLAMA_URL = f"{config.LH_LLM_BASE_URL.rstrip('/')}/api/chat"
-
-OLLAMA_MODEL = config.LH_LLM_MODEL
-
-
-OLLAMA_TIMEOUT = 300
+LLM_MODEL = config.LH_LLM_MODEL
+LLM_CLIENT = get_llm_client()
 
 FALLBACK_ENTITY_ID = "unknown-entity"
 
@@ -802,16 +793,16 @@ def read_reservoir_sample_records(
 
 
 # ============================================================
-# Ollama communication
+# LLM communication
 # ============================================================
 
-def chat_with_ollama(
+def chat_with_llm(
     prompt: str,
     system_prompt: str | None = None,
     format_schema: dict[str, Any] | None = None,
 ) -> str:
     """
-    Send a prompt to Ollama and return the model response.
+    Send a prompt through the configured provider and return its response.
     """
 
     if system_prompt is None:
@@ -883,80 +874,26 @@ Do not include Markdown.
 Do not include ```json fences.
 """
 
-    payload = {
-        "model": OLLAMA_MODEL,
-
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-
-        "stream": False,
-
-        "format": format_schema or "json",
-
-        "options": {
-            "temperature": 0.1,
-        },
-    }
-
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
     try:
-
-        response = requests.post(
-            OLLAMA_URL,
-            json=payload,
-            timeout=OLLAMA_TIMEOUT,
+        content, response = LLM_CLIENT.complete_with_response(
+            messages,
+            response_schema=format_schema,
+            temperature=0.1,
         )
-
-        print("Ollama HTTP response:", response)
-        print("Ollama raw response body:")
-        print(response.text)
-
-        response.raise_for_status()
-
-    except requests.exceptions.ConnectionError as exc:
-
+    except Exception as exc:
         raise RuntimeError(
-            "Could not connect to Ollama.\n"
-            "Make sure Ollama is running with:\n"
-            "    ollama serve"
+            f"Configured LLM provider {config.LH_LLM_PROVIDER!r} "
+            f"failed to generate a response: {exc}"
         ) from exc
 
-    except requests.exceptions.Timeout as exc:
-
-        raise RuntimeError(
-            f"Ollama request timed out after "
-            f"{OLLAMA_TIMEOUT} seconds."
-        ) from exc
-
-    except requests.exceptions.RequestException as exc:
-
-        raise RuntimeError(
-            f"Ollama request failed: {exc}"
-        ) from exc
-
-    result = response.json()
-
-    if "message" not in result:
-
-        raise RuntimeError(
-            f"Unexpected Ollama response:\n{result}"
-        )
-
-    content = result["message"].get("content")
-
-    if not content:
-
-        raise RuntimeError(
-            f"Ollama returned an empty response:\n{result}"
-        )
-
+    print("LiteLLM normalized response object:")
+    print(response)
+    print("LiteLLM response content:")
+    print(content)
     return content
 
 
@@ -1100,7 +1037,7 @@ If no suitable identity column exists:
 def build_identity_response_schema(
     column_names: list[str],
 ) -> dict[str, Any]:
-    """Restrict identity fields in Ollama's response to source columns."""
+    """Restrict identity fields in the model response to source columns."""
     column_schema = {
         "type": "string",
         "enum": column_names,
@@ -1145,7 +1082,7 @@ def build_field_mapping_prompt(
     column_names: list[str],
     sample_rows: list[dict[str, Any]],
 ) -> str:
-    """Ask Ollama to map source fields to LogHawk field roles."""
+    """Ask the configured model to map source fields to LogHawk field roles."""
     return f"""
 Analyze this log source and map its columns to the requested field roles.
 
@@ -1387,7 +1324,7 @@ def generate_identity_mapping(
     sample_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """
-    Ask Ollama/Llama to determine the entity identity mapping.
+    Ask the configured LLM provider to determine the entity identity mapping.
     """
 
     identity_prompt = build_identity_mapping_prompt(
@@ -1401,20 +1338,21 @@ def generate_identity_mapping(
 
     print()
     print("=" * 70)
-    print("Sending schema to Ollama")
+    print("Sending schema to configured LLM provider")
     print("=" * 70)
 
-    print(f"Model: {OLLAMA_MODEL}")
+    print(f"Provider: {config.LH_LLM_PROVIDER}")
+    print(f"Model: {LLM_MODEL}")
     print(f"Columns: {len(column_names)}")
 
-    identity_response = chat_with_ollama(
+    identity_response = chat_with_llm(
         identity_prompt,
         format_schema=build_identity_response_schema(column_names),
     )
 
     print()
     print("=" * 70)
-    print("Ollama identity mapping response")
+    print("LLM identity mapping response")
     print("=" * 70)
 
     print(identity_response)
@@ -1423,13 +1361,13 @@ def generate_identity_mapping(
         identity_mapping = json.loads(identity_response)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            "Ollama did not return valid identity-mapping JSON.\n\n"
+            "The configured LLM did not return valid identity-mapping JSON.\n\n"
             f"Raw response:\n{identity_response}"
         ) from exc
 
     print()
-    print("Requesting field-role mapping from Ollama")
-    field_response = chat_with_ollama(
+    print("Requesting field-role mapping from configured LLM provider")
+    field_response = chat_with_llm(
         field_prompt,
         system_prompt=(
             "You are a log schema field-role mapper. Map input columns only "
@@ -1442,7 +1380,7 @@ def generate_identity_mapping(
 
     print()
     print("=" * 70)
-    print("Ollama field mapping response")
+    print("LLM field mapping response")
     print("=" * 70)
     print(field_response)
 
@@ -1450,17 +1388,17 @@ def generate_identity_mapping(
         field_mapping = json.loads(field_response)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            "Ollama did not return valid field-mapping JSON.\n\n"
+            "The configured LLM did not return valid field-mapping JSON.\n\n"
             f"Raw response:\n{field_response}"
         ) from exc
 
     if not isinstance(identity_mapping, dict):
         raise RuntimeError(
-            "Ollama identity-mapping response must be a JSON object."
+            "LLM identity-mapping response must be a JSON object."
         )
     if not isinstance(field_mapping, dict):
         raise RuntimeError(
-            "Ollama field-mapping response must be a JSON object."
+            "LLM field-mapping response must be a JSON object."
         )
 
     return validate_identity_mapping(
@@ -1605,7 +1543,7 @@ def process_one_file(
         )
 
         print(
-            "Skipping Ollama call."
+            "Skipping LLM provider call."
         )
 
         return identity_mapping_path

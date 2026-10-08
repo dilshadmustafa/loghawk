@@ -13,5 +13,5 @@ python -c "from pyspark.sql import SparkSession; s=SparkSession.builder.master('
 pip install -r requirements.txt
 python -m pip install -e .
 python -m loghawk.admin.setup_duckdb
-python -m loghawk.admin.setup_lancedb
+python -m loghawk.admin.setup_lancedb2
 

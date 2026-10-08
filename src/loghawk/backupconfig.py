@@ -48,59 +48,13 @@ LH_DOCS_STORAGE_DIR_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 LH_EMBEDDING_MODEL = os.getenv(
     "LH_EMBEDDING_MODEL",
-    "ollama/nomic-embed-text"
+    "BAAI/bge-small-en-v1.5"
 )
 
 LH_LLM_MODEL = os.getenv(
     "LH_LLM_MODEL",
     "gemma2:latest"
 )
-
-LH_LLM_PROVIDER = os.getenv("LH_LLM_PROVIDER", "ollama").strip().lower()
-if LH_LLM_PROVIDER == "microsoft_foundry":
-    LH_LLM_PROVIDER = "azure_ai"
-if LH_LLM_PROVIDER not in {"ollama", "bedrock", "azure_ai"}:
-    raise ValueError(
-        "LH_LLM_PROVIDER must be one of: ollama, bedrock, azure_ai "
-        "(microsoft_foundry is an alias for azure_ai)"
-    )
-
-LH_LLM_BASE_URL = os.getenv(
-    "LH_LLM_BASE_URL",
-    "http://localhost:11434" if LH_LLM_PROVIDER == "ollama" else "",
-).strip()
-LH_LLM_API_KEY = os.getenv("LH_LLM_API_KEY", "").strip()
-LH_LLM_TIMEOUT_SECONDS = int(os.getenv("LH_LLM_TIMEOUT_SECONDS", "300"))
-if LH_LLM_TIMEOUT_SECONDS < 1:
-    raise ValueError("LH_LLM_TIMEOUT_SECONDS must be at least 1")
-
-_raw_llm_fallback_models = os.getenv("LH_LLM_FALLBACK_MODELS", "").strip()
-if _raw_llm_fallback_models:
-    LH_LLM_FALLBACK_MODELS = tuple(
-        model.strip()
-        for model in _raw_llm_fallback_models.split(",")
-        if model.strip()
-    )
-elif LH_LLM_PROVIDER == "ollama":
-    LH_LLM_FALLBACK_MODELS = (
-        "llama3.2:1b",
-        "qwen2.5:0.5b",
-        "tinyllama",
-    )
-else:
-    LH_LLM_FALLBACK_MODELS = ()
-
-LH_EMBEDDING_BASE_URL = os.getenv(
-    "LH_EMBEDDING_BASE_URL",
-    LH_LLM_BASE_URL,
-).strip()
-LH_EMBEDDING_API_KEY = os.getenv(
-    "LH_EMBEDDING_API_KEY",
-    LH_LLM_API_KEY,
-).strip()
-LH_EMBEDDING_BATCH_SIZE = int(os.getenv("LH_EMBEDDING_BATCH_SIZE", "32"))
-if LH_EMBEDDING_BATCH_SIZE < 1:
-    raise ValueError("LH_EMBEDDING_BATCH_SIZE must be at least 1")
 
 LH_CORRELATION_WINDOW_MINUTES = int(
     os.getenv("LH_CORRELATION_WINDOW_MINUTES", "5")
@@ -230,6 +184,11 @@ def anomaly_algorithm_backend_device(algorithm_id: str) -> tuple[str, str]:
 LH_TEMPORAL_ADDRESS = os.getenv(
     "LH_TEMPORAL_ADDRESS",
     "localhost:7233",
+)
+
+LH_OLLAMA_URL = os.getenv(
+    "LH_OLLAMA_URL",
+    "http://localhost:11434/api/chat",
 )
 
 LH_IDENTITY_MAPPING_SAMPLE_SIZE = int(

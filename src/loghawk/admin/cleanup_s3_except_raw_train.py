@@ -94,21 +94,21 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "Delete objects below s3://loghawk-data/somefolder/ "
-            "except raw/ and train/."
+            "except raw/ and train/. Defaults to deletion after confirmation."
         )
     )
     parser.add_argument(
-        "--execute",
+        "--dry-run",
         action="store_true",
-        help="Delete listed objects after an interactive confirmation.",
+        help="List objects that would be deleted without deleting them.",
     )
     args = parser.parse_args()
 
     client = create_s3_client()
     candidate_count = show_dry_run(client)
 
-    if not args.execute:
-        print("Dry run only. Add --execute to delete these objects.")
+    if args.dry_run:
+        print("Dry run only. No objects were deleted.")
         return
 
     if candidate_count == 0:
@@ -116,9 +116,9 @@ def main():
         return
 
     confirmation = input(
-        f'Type "DELETE {ROOT_PREFIX}" to continue: '
+        'Type "delete" to continue: '
     )
-    if confirmation != f"DELETE {ROOT_PREFIX}":
+    if confirmation != "delete":
         print("Confirmation did not match. Nothing was deleted.")
         return
 

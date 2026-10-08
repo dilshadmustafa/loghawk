@@ -9,4 +9,4 @@ if [[ ! -x "venv312/bin/python" ]]; then
     exit 1
 fi
 
-exec venv312/bin/python src/loghawk/chat_assistant/chat_assistant4.py
+exec venv312/bin/python src/loghawk/chat_assistant/chat_assistant5.py

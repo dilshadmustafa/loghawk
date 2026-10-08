@@ -20,9 +20,23 @@ echo.
 echo ============================================================
 echo Creating Python 3.12 virtual environment
 echo ============================================================
-py -3.12 -m venv venv312
-if errorlevel 1 goto :failed
+python -c "import sys; print('Python:', sys.version.split()[0]); raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+if errorlevel 1 (
+    echo Python 3.12 or newer is required. Install it or make it available as "python" on PATH.
+    exit /b 1
+)
 set "PYTHON=%~dp0venv312\Scripts\python.exe"
+if exist "%PYTHON%" (
+    echo Existing virtual environment found; reusing it.
+    "%PYTHON%" -c "import sys; print('Environment Python:', sys.version.split()[0]); raise SystemExit(0 if sys.version_info >= (3, 12) else 1)"
+    if errorlevel 1 (
+        echo Existing venv312 must use Python 3.12 or newer.
+        exit /b 1
+    )
+) else (
+    python -m venv venv312
+    if errorlevel 1 goto :failed
+)
 
 echo.
 echo ============================================================
@@ -65,7 +79,7 @@ echo ============================================================
 if /I "%SKIP_LANCEDB_SETUP%"=="true" (
     echo Skipping LanceDB setup.
 ) else (
-    "%PYTHON%" -m loghawk.admin.setup_lancedb
+    "%PYTHON%" -m loghawk.admin.setup_lancedb2
     if errorlevel 1 goto :failed
 )
 
@@ -123,6 +137,9 @@ if errorlevel 1 goto :failed
 )
 
 echo Setup complete.
+echo Activate the environment:
+echo   PowerShell: .\venv312\Scripts\Activate.ps1
+echo   Command Prompt: venv312\Scripts\activate.bat
 echo RustFS console: http://localhost:9001
 echo Temporal UI: http://localhost:8233
 echo Start the worker and workflow using the firsttime_start_workflow scripts.

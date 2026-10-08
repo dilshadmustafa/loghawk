@@ -8,12 +8,12 @@ async def run_identity_mapping(raw_folder: str) -> str:
         f"Starting identity mapping for raw folder: {raw_folder}"
     )
 
-    from loghawk.identity_mapping import identity_mapping5
+    from loghawk.identity_mapping import identity_mapping6
 
     activity.logger.info(
-        f"Identity mapping module: {identity_mapping5.__file__}"
+        f"Identity mapping module: {identity_mapping6.__file__}"
     )
-    mapping_paths = identity_mapping5.generate_identity_mappings(
+    mapping_paths = identity_mapping6.generate_identity_mappings(
         raw_folder
     )
     activity.logger.info(

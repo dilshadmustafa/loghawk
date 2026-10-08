@@ -12,6 +12,7 @@ pydantic #check if already by lancedb
 colorama
 tqdm
 ollama
+litellm
 duckdb
 
 sqlite-vec

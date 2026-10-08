@@ -9,4 +9,4 @@ if [[ ! -x "venv312/bin/streamlit" ]]; then
     exit 1
 fi
 
-exec venv312/bin/streamlit run src/loghawk/docs_to_ragvectordb/upload_docs.py
+exec venv312/bin/streamlit run src/loghawk/docs_to_ragvectordb/upload_docs2.py

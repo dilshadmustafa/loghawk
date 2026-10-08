@@ -197,7 +197,7 @@ echo "============================================================"
 echo "Setting up LanceDB"
 echo "============================================================"
 if [[ "$SKIP_LANCEDB_SETUP" == false ]]; then
-    python -m loghawk.admin.setup_lancedb
+    python -m loghawk.admin.setup_lancedb2
 else
     echo "Skipping LanceDB setup."
 fi
