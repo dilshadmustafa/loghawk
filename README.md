@@ -760,9 +760,43 @@ LogHawk uses **LiteLLM as the model gateway** so the application does not need t
 
 LiteLLM provides a unified interface for multiple model providers and can provide routing, retries/fallbacks, authentication hooks, logging and cost tracking.
 
-The primary local development path is **Ollama running Gemma 2 (`gemma2:latest`)**.
+### Provider and `.env` configuration
 
-The cloud/enterprise path is **Amazon Bedrock**.
+LLM and embedding settings are loaded from the repository-root `.env` by `src/loghawk/config.py`. Restart the worker, assistant, or UI process after changing these settings.
+
+| Variable | Purpose |
+|---|---|
+| `LH_LLM_PROVIDER` | Chat provider: `ollama`, `bedrock`, or `azure_ai`. `microsoft_foundry` is accepted as an alias for `azure_ai`. |
+| `LH_LLM_MODEL` | Chat model name or provider model ID. |
+| `LH_LLM_BASE_URL` | Provider endpoint. For Ollama, use the server root, such as `http://localhost:11434`, without `/api/chat`. |
+| `LH_LLM_API_KEY` | Provider API key; leave blank for Ollama or Bedrock using the AWS credential chain. |
+| `LH_LLM_TIMEOUT_SECONDS` | Chat request timeout in seconds; default `300`. |
+| `LH_LLM_FALLBACK_MODELS` | Optional comma-separated chat fallback models. |
+| `LH_EMBEDDING_MODEL` | Embedding model. For Ollama, use a LiteLLM model name such as `ollama/nomic-embed-text`. |
+| `LH_EMBEDDING_BASE_URL` | Embedding endpoint; defaults to `LH_LLM_BASE_URL`. |
+| `LH_EMBEDDING_API_KEY` | Embedding API key; defaults to `LH_LLM_API_KEY`. |
+| `LH_EMBEDDING_BATCH_SIZE` | Embedding request batch size; default `32`. |
+
+For Bedrock, configure the AWS region with `AWS_REGION` or `AWS_DEFAULT_REGION` and provide AWS credentials through the usual AWS credential chain. For Azure AI / Microsoft Foundry, configure the endpoint and key through `LH_LLM_BASE_URL` and `LH_LLM_API_KEY`.
+
+Example local Ollama configuration:
+
+```ini
+LH_LLM_PROVIDER=ollama
+LH_LLM_MODEL=llama3.2:3b
+LH_LLM_BASE_URL=http://localhost:11434
+LH_LLM_API_KEY=
+LH_LLM_TIMEOUT_SECONDS=300
+LH_LLM_FALLBACK_MODELS=
+LH_EMBEDDING_MODEL=ollama/nomic-embed-text
+LH_EMBEDDING_BASE_URL=http://localhost:11434
+LH_EMBEDDING_API_KEY=
+LH_EMBEDDING_BATCH_SIZE=32
+```
+
+Document ingestion and retrieval must use the same embedding model. After changing embedding models, rebuild the configured LanceDB table with `python -m loghawk.admin.rebuild_lancedb`.
+
+The local provider is **Ollama**; select its chat model with `LH_LLM_MODEL`. The cloud/enterprise options include **Amazon Bedrock** and **Azure AI / Microsoft Foundry**.
 
 ```text
                          LogHawk AIOps
@@ -780,8 +814,8 @@ The cloud/enterprise path is **Amazon Bedrock**.
         | Local / Private  |     | Cloud / Enterprise   |
         |                  |     |                      |
         | Ollama           |     | Amazon Bedrock       |
-        | Gemma 2          |     | Claude / Nova /      |
-        | gemma2:latest    |     | other supported      |
+        | Configured model |     | Claude / Nova /      |
+        | LH_LLM_MODEL     |     | other supported      |
         +------------------+     | foundation models   |
                   |               +----------------------+
                   v                       |
@@ -809,8 +843,8 @@ LiteLLM
 Ollama
    |
    v
-Gemma 2
-(gemma2:latest)
+Configured Ollama model
+(LH_LLM_MODEL)
 ```
 
 Local mode is intended for development, privacy-sensitive workloads, experimentation and environments where cloud inference is undesirable.
@@ -848,10 +882,10 @@ The application should call **LiteLLM rather than Ollama or Bedrock directly** w
                |                  |
             Ollama             Bedrock
                |                  |
-           Gemma 2          enterprise model
+     Configured model      enterprise model
 ```
 
-This allows the same RCA/agent application code to use local Gemma 2 during development and a Bedrock-hosted model for enterprise/cloud deployment.
+This allows the same provider-neutral application paths to use the configured local Ollama model or a cloud-hosted model.
 
 The model-selection policy can later support:
 
@@ -1301,7 +1335,7 @@ Temporal
 | scikit-learn Isolation Forest | Initial ML anomaly detection on aggregated features |
 | Temporal | Durable core workflow orchestration and remediation |
 | LiteLLM | Unified LLM gateway/router for local and cloud models |
-| Ollama + Gemma 2 (`gemma2:latest`) | Local/private LLM inference |
+| Ollama | Local/private LLM inference; select the model with `LH_LLM_MODEL` |
 | Amazon Bedrock | Managed enterprise GenAI, RAG, RCA and agent reasoning |
 | n8n | Scheduling, triggers, notifications and lightweight automation |
 | Kubernetes / AWS / Terraform | Remediation targets |
@@ -1467,18 +1501,19 @@ Detect: raw/  -> identitymapping/raw/   -> features/raw/   -> anomalies/raw/ -> 
 
 ## Phase 4 — Incident Intelligence
 
--   [ ]  Correlate related anomalies
--   [ ]  Generate incident IDs and severity
+-   [x]  Correlate related anomalies
+-   [x]  Generate incident IDs and severity
 -   [ ]  Generate incident summaries
 -   [ ]  Implement incident lifecycle
 -   [ ]  Store incident history
 -   [ ]  Add investigation API/UI
--   [ ]  Add incident correlation to Temporal workflow
+-   [x]  Add incident correlation to Temporal workflow
 
 ## Phase 5 — RAG-Based RCA
 
 -   [ ]  Persist structured incident history in DuckDB / Parquet
 -   [ ]  Index incident evidence and summaries in LanceDB
+-   [x]  Index and retrieve local documents in LanceDB using LiteLLM embeddings
 -   [ ]  Index runbooks and architecture documentation in LanceDB
 -   [ ]  Retrieve similar incidents
 -   [ ]  Build structured RCA context
@@ -1487,18 +1522,20 @@ Detect: raw/  -> identitymapping/raw/   -> features/raw/   -> anomalies/raw/ -> 
 
 ## Phase 6 — Local and Cloud LLM Gateway
 
--   [ ]  Add LiteLLM as the unified LLM gateway
--   [ ]  Configure Ollama as the local inference provider
--   [ ]  Configure Gemma 2 (`gemma2:latest`) for local RCA/development
--   [ ]  Add Amazon Bedrock as the managed cloud provider
+-   [x]  Add LiteLLM as the unified LLM gateway
+-   [x]  Configure Ollama as the local inference provider
+-   [x]  Configure chat and embedding model selection through `.env`
+-   [x]  Add Amazon Bedrock provider configuration
+-   [x]  Add Azure AI / Microsoft Foundry provider configuration
+-   [x]  Route active identity mapping, chat, and document RAG paths through LiteLLM
 -   [ ]  Define local-vs-cloud model routing policy
--   [ ]  Add provider fallback and retry policies
+-   [x]  Add configurable chat fallback models
+-   [ ]  Add centralized retry and provider-routing policies
 -   [ ]  Add model/request observability
--   [ ]  Keep application-level AI code provider-neutral
 
 ## Phase 7 — Bedrock and Agentic AIOps
 
--   [ ]  Integrate Amazon Bedrock through LiteLLM
+-   [x]  Integrate Amazon Bedrock through LiteLLM
 -   [ ]  Add Bedrock-powered RCA
 -   [ ]  Add operational RAG
 -   [ ]  Add controlled AI tools
@@ -1776,7 +1813,9 @@ bash firsttime_setup.sh
 
 These flags skip service/setup actions, but the script still creates or updates the Conda environment and installs packages. `SKIP_RUSTFS_SETUP=true` also skips bucket creation and sample-data generation/upload.
 
-#### NVIDIA GPU setup with RAPIDS cuML
+#### RAPIDS cuML setup with NVIDIA GPU (Optional)
+
+Run this setup only if you have an NVIDIA GPU with compute capability 7.0 or higher, are using a supported Linux environment—including supported Linux under WSL2—and specifically want to use RAPIDS cuML for anomaly detection. Refer to NVIDIA’s [installation guide](https://docs.nvidia.com/datascience/install/) and [platform support page](https://docs.nvidia.com/datascience/platform-support/) for supported platforms.
 
 Use `firsttime_setup_rapids_cuml.sh` inside Ubuntu on WSL2 or a supported Linux host with NVIDIA GPU access. It checks `nvidia-smi` and Java 17, installs Miniforge if needed, creates or updates the `loghawk-rapids` Conda environment with Python 3.12, cuML, and nvForest, explicitly installs PyTorch with CUDA 13.2 support, installs the project requirements, and verifies GPU access. It does not change `.env`.
 
