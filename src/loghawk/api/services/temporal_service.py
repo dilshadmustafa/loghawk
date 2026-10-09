@@ -57,6 +57,61 @@ async def start_run(request: PipelineRunRequest) -> str:
     return handle.id
 
 
+async def start_configured_run(
+    config_set: dict,
+    mode: str,
+    *,
+    workflow_id: str,
+) -> dict[str, str | None]:
+    """Start a workflow from a saved UI Config Set."""
+    client = await _get_client()
+    train_phase = mode in {"train", "train-detect"}
+    detect_phase = mode in {"detect", "train-detect"}
+    if config_set["external_data_use"]:
+        output_root = (
+            f"s3://{config_set['output_bucket']}/"
+            f"{config_set['output_batch']}"
+        )
+        train_sources = [
+            {
+                "url": f"s3://{item['bucket']}/"
+                f"{item['folder'].strip('/') + '/' if item['folder'].strip('/') else ''}",
+                "region": item["region"],
+            }
+            for item in config_set["train_sources"]
+        ]
+        detect_sources = [
+            {
+                "url": f"s3://{item['bucket']}/"
+                f"{item['folder'].strip('/') + '/' if item['folder'].strip('/') else ''}",
+                "region": item["region"],
+            }
+            for item in config_set["detect_sources"]
+        ]
+    else:
+        output_root = (
+            f"s3://{config_set['source_bucket']}/"
+            f"{config_set['source_batch']}"
+        )
+        train_sources = []
+        detect_sources = []
+
+    handle = await client.start_workflow(
+        LogHawkTrainDetectPipeline.run,
+        args=[
+            output_root,
+            train_phase,
+            detect_phase,
+            config_set["external_data_use"],
+            train_sources,
+            detect_sources,
+        ],
+        id=workflow_id,
+        task_queue=TASK_QUEUE,
+    )
+    return {"workflow_id": handle.id, "run_id": None}
+
+
 async def get_run_status(workflow_id: str):
     client = await _get_client()
     handle = client.get_workflow_handle(workflow_id)
