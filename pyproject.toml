@@ -16,6 +16,8 @@ dependencies = [
     "lancedb",
     "litellm",
     "boto3",
+    "fastapi",
+    "uvicorn[standard]",
     "scikit-learn",
     "pyod"
 ]
