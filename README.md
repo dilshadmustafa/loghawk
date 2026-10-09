@@ -1855,7 +1855,7 @@ From the repository root, start RustFS, Temporal, the LogHawk worker, the Web UI
 .\start_all_servers.bat
 ```
 
-**Linux:**
+**Linux/macOS:**
 
 ```bash
 bash start_all_servers.sh
