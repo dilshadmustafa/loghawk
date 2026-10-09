@@ -1845,6 +1845,24 @@ bash firsttime_setup.sh
 
 These flags skip service/setup actions, but the script still creates or updates the Conda environment and installs packages. `SKIP_RUSTFS_SETUP=true` also skips bucket creation and sample-data generation/upload.
 
+### LogHawk Web UI
+
+From the repository root, start RustFS, Temporal, the LogHawk worker, the Web UI API, and the Vue/Vite development server:
+
+**Windows (PowerShell):**
+
+```powershell
+.\start_all_servers.bat
+```
+
+**Linux:**
+
+```bash
+bash start_all_servers.sh
+```
+
+When the services are ready, open [http://localhost:5173](http://localhost:5173) in your browser to use the LogHawk Web UI.
+
 #### RAPIDS cuML setup with NVIDIA GPU (Optional)
 
 Run this setup only if you have an NVIDIA GPU with compute capability 7.0 or higher, are using a supported Linux environment—including supported Linux under WSL2—and specifically want to use RAPIDS cuML for anomaly detection. Refer to NVIDIA’s [installation guide](https://docs.nvidia.com/datascience/install/) and [platform support page](https://docs.nvidia.com/datascience/platform-support/) for supported platforms.
@@ -1883,7 +1901,7 @@ s3://loghawk-data/quickstart/train/elasticsearch-1.log
 s3://loghawk-data/quickstart/raw/elasticsearch-1.log
 ```
 
-#### Start the Temporal workflow
+#### To Start Temporal Workflow Through Console
 
 Keep the Temporal server running. In two separate terminals, run the worker first, then start the workflow:
 
