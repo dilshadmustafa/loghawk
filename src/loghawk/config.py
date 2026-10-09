@@ -256,7 +256,7 @@ if LH_IDENTITY_MAPPING_SAMPLE_STRATEGY not in {"reservoir", "first"}:
 
 _skip_existing = os.getenv(
     "LH_IDENTITY_MAPPING_SKIP_EXISTING",
-    "true",
+    "false",
 ).strip().lower()
 if _skip_existing not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
     raise ValueError(

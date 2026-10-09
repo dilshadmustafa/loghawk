@@ -640,7 +640,7 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_S3_SELECT_SKIP_FILENAMES` | Filenames that must bypass S3 Select | Comma-separated wildcard patterns |
 | `LH_TRAIN_PHASE` | Run mapping, Stage A, and model training on `<batch>/train/` | `true` / `false`, default `false` |
 | `LH_DETECT_PHASE` | Run mapping, Stage A, detection, and Stage C on `<batch>/raw/` | `true` / `false`, default `false` |
-| `LH_IDENTITY_MAPPING_SKIP_EXISTING` | Reuse an existing per-file mapping | `true` / `false`, default `true` |
+| `LH_IDENTITY_MAPPING_SKIP_EXISTING` | Reuse an existing per-file mapping | `true` / `false`, default `false` |
 | `LH_IDENTITY_MAPPING_SAMPLE_STRATEGY` | Mapping sample selection | `reservoir` or `first`, default `reservoir` |
 | `LH_IDENTITY_MAPPING_SAMPLE_SIZE` | Rows retained for mapping | Positive integer, default `10` |
 | `LH_IDENTITY_MAPPING_SAMPLE_SEED` | Reproducible reservoir sample seed | Integer, default `42` |
@@ -685,7 +685,7 @@ LH_S3_SELECT_SKIP_FILENAMES=metrics*,trace*,perf*,health*,status*,heartbeat*
 LH_IDENTITY_MAPPING_SAMPLE_STRATEGY=reservoir
 LH_IDENTITY_MAPPING_SAMPLE_SIZE=10
 LH_IDENTITY_MAPPING_SAMPLE_SEED=42
-LH_IDENTITY_MAPPING_SKIP_EXISTING=true
+LH_IDENTITY_MAPPING_SKIP_EXISTING=false
 LH_CORRELATION_WINDOW_MINUTES=5
 ```
 
