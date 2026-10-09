@@ -630,7 +630,14 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_S3_BUCKET` | S3 bucket | Defaults to `loghawk-data` |
 | `LH_S3_BATCH_FOLDER` | One batch folder beneath the bucket | Defaults to `2026-09-28`; any single folder name is allowed |
 | `LH_S3_ENDPOINT` | RustFS S3 endpoint | Defaults to `http://localhost:9000` |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` | S3 credentials and region | Set these for the local or deployed environment |
+| `LH_S3_ACCESS_KEY_ID`, `LH_S3_SECRET_ACCESS_KEY`, `LH_S3_REGION` | Internal RustFS credentials and region | AWS credential and region variables are fallbacks |
+| `LH_EXTERNAL_DATA_USE` | Read Train/Raw inputs from external S3 URLs | `true` / `false`, default `false` |
+| `LH_EXTERNAL_DATA_TRAIN`, `LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN` | Train input URLs and their corresponding regions | Comma-separated lists with the same number of entries |
+| `LH_EXTERNAL_DATA_RAW`, `LH_EXTERNAL_S3BUCKET_REGIONS_RAW` | Raw input URLs and their corresponding regions | Comma-separated lists with the same number of entries |
+| `LH_EXTERNAL_S3_ENDPOINT` | Endpoint for external S3-compatible storage | Leave blank for AWS S3 |
+| `LH_EXTERNAL_S3_ACCESS_KEY_ID`, `LH_EXTERNAL_S3_SECRET_ACCESS_KEY` | Optional external S3 credentials | Set both, or leave both blank to use the AWS credential provider chain |
+| `LH_S3_INPUT_FILENAMES` | Input filename wildcard allowlist for Identity Mapping and Stage A | Comma-separated patterns; empty means all supported files |
+| `LH_S3_SELECT_SKIP_FILENAMES` | Filenames that must bypass S3 Select | Comma-separated wildcard patterns |
 | `LH_TRAIN_PHASE` | Run mapping, Stage A, and model training on `<batch>/train/` | `true` / `false`, default `false` |
 | `LH_DETECT_PHASE` | Run mapping, Stage A, detection, and Stage C on `<batch>/raw/` | `true` / `false`, default `false` |
 | `LH_IDENTITY_MAPPING_SKIP_EXISTING` | Reuse an existing per-file mapping | `true` / `false`, default `true` |
@@ -638,22 +645,43 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_IDENTITY_MAPPING_SAMPLE_SIZE` | Rows retained for mapping | Positive integer, default `10` |
 | `LH_IDENTITY_MAPPING_SAMPLE_SEED` | Reproducible reservoir sample seed | Integer, default `42` |
 | `LH_S3_SELECT_SUPPORTED` | Declare S3 Select supported by the store | `true` / `false`, default `false` |
+| `LH_EXTERNAL_S3SELECT_SUPPORT` | Declare S3 Select supported by external storage | `true` / `false`, default `false` |
 | `LH_S3_SELECT_USE_TRAIN_PHASE` | Enable S3 Select for Train input | `true` / `false`, default `false` |
 | `LH_S3_SELECT_USE_DETECT_PHASE` | Enable S3 Select for Detect input | `true` / `false`, default `false` |
 | `LH_S3_SELECT_RECORD_FILTER` | Log levels to include | Default `WARN,ERROR`; `ALL` includes all levels |
 | `LH_CORRELATION_WINDOW_MINUTES` | Stage C correlation window | Positive integer, default `5` |
 
-Example `.env` settings (keep real credentials local and do not commit secrets):
+Example `.env` settings for internal RustFS and external AWS S3
+(keep real credentials local and do not commit secrets):
 
 ```ini
 LH_S3_BUCKET=loghawk-data
 LH_S3_BATCH_FOLDER=somefolder
+LH_S3_ENDPOINT=http://localhost:9000
+LH_S3_ACCESS_KEY_ID=rustfsadmin
+LH_S3_SECRET_ACCESS_KEY=rustfsadmin
+LH_S3_REGION=us-east-1
+
+# External AWS S3 input locations. Each region corresponds to the URL
+# at the same position in its comma-separated list.
+LH_EXTERNAL_DATA_USE=true
+LH_EXTERNAL_DATA_TRAIN=s3://my-log-bucket/train/
+LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN=us-east-1
+LH_EXTERNAL_DATA_RAW=s3://my-log-bucket/raw/
+LH_EXTERNAL_S3BUCKET_REGIONS_RAW=us-east-1
+LH_EXTERNAL_S3_ENDPOINT=
+LH_EXTERNAL_S3_ACCESS_KEY_ID=
+LH_EXTERNAL_S3_SECRET_ACCESS_KEY=
+
 LH_TRAIN_PHASE=true
 LH_DETECT_PHASE=true
 LH_S3_SELECT_SUPPORTED=true
-LH_S3_SELECT_USE_TRAIN_PHASE=false
+LH_EXTERNAL_S3SELECT_SUPPORT=true
+LH_S3_SELECT_USE_TRAIN_PHASE=true
 LH_S3_SELECT_USE_DETECT_PHASE=true
 LH_S3_SELECT_RECORD_FILTER=WARN,ERROR
+LH_S3_INPUT_FILENAMES=elasticsearch-*.log,k8slogs-*.log,metrics*,trace*,perf*,health*,status*,heartbeat*
+LH_S3_SELECT_SKIP_FILENAMES=metrics*,trace*,perf*,health*,status*,heartbeat*
 LH_IDENTITY_MAPPING_SAMPLE_STRATEGY=reservoir
 LH_IDENTITY_MAPPING_SAMPLE_SIZE=10
 LH_IDENTITY_MAPPING_SAMPLE_SEED=42
@@ -661,7 +689,11 @@ LH_IDENTITY_MAPPING_SKIP_EXISTING=true
 LH_CORRELATION_WINDOW_MINUTES=5
 ```
 
-S3 Select is used only when `LH_S3_SELECT_SUPPORTED=true` and the matching phase use flag is also true, for supported uncompressed JSON/JSONL inputs. The record filter is applied during Identity Mapping and Stage A. `WARN` also matches `WARNING`; `ALL` disables the severity filter. If both phase flags are true, Train runs before Detect. At least one phase flag must be true. Train-only fits models; Detect-only requires saved models. Row counts report records returned by the active S3 Select stream; they do not trigger an extra count read.
+When `LH_EXTERNAL_DATA_USE=true`, Identity Mapping and Stage A read inputs from the phase-specific external URLs. The number and order of region entries must match the URLs. For standard AWS S3, leave `LH_EXTERNAL_S3_ENDPOINT` blank; LogHawk builds the regional AWS endpoint from each URL's region. External credentials may be provided with both `LH_EXTERNAL_S3_ACCESS_KEY_ID` and `LH_EXTERNAL_S3_SECRET_ACCESS_KEY`, or left blank to use the AWS credential provider chain. Mapping and feature outputs remain in LogHawk's internal RustFS bucket.
+
+`LH_S3_INPUT_FILENAMES` is a case-insensitive wildcard allowlist applied to discovered filenames in Identity Mapping and Stage A. An empty value processes all supported filenames. `LH_S3_SELECT_SKIP_FILENAMES` bypasses S3 Select for matching filenames; those files still use the normal reader. Supported filename extensions are `.json`, `.jsonl`, `.log`, and their supported `.gz` forms, including `.json.gz`, `.jsonl.gz`, and `.log.gz`. A matching extension does not by itself make an arbitrary content format parseable. For example, Prometheus exposition text is not parsed as structured metrics just because it is stored with a `.log` extension.
+
+S3 Select is used only when the applicable internal or external support flag and phase-use flag are enabled, and the input is an eligible uncompressed JSON/JSONL object not matched by `LH_S3_SELECT_SKIP_FILENAMES`. The record filter is applied during Identity Mapping and Stage A. `WARN` also matches `WARNING`; `ALL` disables severity filtering. If both phase flags are true, Train runs before Detect. At least one phase flag must be true. Train-only fits models; Detect-only requires saved models. Row counts report records returned by the active S3 Select stream and do not trigger an extra count read.
 
 ---
 

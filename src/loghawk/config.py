@@ -1,4 +1,5 @@
 from pathlib import Path
+import fnmatch
 import os
 import platform
 from urllib.parse import urlparse
@@ -303,18 +304,21 @@ LH_S3_BUCKET= os.getenv(
     "loghawk-data"
 )
 
-LH_S3_ACCESS_KEY_ID= os.getenv(
-    "AWS_ACCESS_KEY_ID",
-    "rustfsadmin"
+LH_S3_ACCESS_KEY_ID = (
+    os.getenv("LH_S3_ACCESS_KEY_ID", "").strip()
+    or os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    or "rustfsadmin"
 )
 
-LH_S3_SECRET_ACCESS_KEY= os.getenv(
-    "AWS_SECRET_ACCESS_KEY",
-    "rustfsadmin"
+LH_S3_SECRET_ACCESS_KEY = (
+    os.getenv("LH_S3_SECRET_ACCESS_KEY", "").strip()
+    or os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
+    or "rustfsadmin"
 )
 
 LH_S3_REGION = (
-    os.getenv("AWS_REGION", "").strip()
+    os.getenv("LH_S3_REGION", "").strip()
+    or os.getenv("AWS_REGION", "").strip()
     or os.getenv("AWS_DEFAULT_REGION", "").strip()
     or "us-east-1"
 )
@@ -357,6 +361,23 @@ LH_EXTERNAL_S3SELECT_SUPPORT = _env_bool(
 
 def _parse_csv_setting(name: str) -> list[str]:
     return [value.strip() for value in os.getenv(name, "").split(",") if value.strip()]
+
+
+LH_S3_INPUT_FILENAMES = tuple(
+    _parse_csv_setting("LH_S3_INPUT_FILENAMES")
+)
+LH_S3_SELECT_SKIP_FILENAMES = tuple(
+    _parse_csv_setting("LH_S3_SELECT_SKIP_FILENAMES")
+)
+
+
+def matches_s3_filename(filename: str, patterns: tuple[str, ...]) -> bool:
+    """Match an S3 object's basename against case-insensitive wildcards."""
+    basename = filename.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+    return any(
+        fnmatch.fnmatchcase(basename, pattern.casefold())
+        for pattern in patterns
+    )
 
 
 def _parse_s3_folder_setting(name: str) -> list[str]:
