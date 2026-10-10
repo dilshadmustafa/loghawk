@@ -626,8 +626,8 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_S3_ENDPOINT` | RustFS S3 endpoint | Defaults to `http://localhost:9000` |
 | `LH_S3_ACCESS_KEY_ID`, `LH_S3_SECRET_ACCESS_KEY`, `LH_S3_REGION` | Internal RustFS credentials and region | AWS credential and region variables are fallbacks |
 | `LH_EXTERNAL_DATA_USE` | Read Train/Raw inputs from external S3 URLs | `true` / `false`, default `false` |
-| `LH_EXTERNAL_DATA_TRAIN`, `LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN` | Train input URLs and their corresponding regions | Comma-separated lists with the same number of entries |
-| `LH_EXTERNAL_DATA_RAW`, `LH_EXTERNAL_S3BUCKET_REGIONS_RAW` | Raw input URLs and their corresponding regions | Comma-separated lists with the same number of entries |
+| `LH_EXTERNAL_DATA_TRAIN`, `LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN` | Train input URLs and their corresponding regions | Multiple S3 URLs and matching AWS regions, comma-separated in the same order; list lengths must match |
+| `LH_EXTERNAL_DATA_RAW`, `LH_EXTERNAL_S3BUCKET_REGIONS_RAW` | Raw/Detect input URLs and their corresponding regions | Multiple S3 URLs and matching AWS regions, comma-separated in the same order; list lengths must match |
 | `LH_EXTERNAL_S3_ENDPOINT` | Endpoint for external S3-compatible storage | Leave blank for AWS S3 |
 | `LH_EXTERNAL_S3_ACCESS_KEY_ID`, `LH_EXTERNAL_S3_SECRET_ACCESS_KEY` | Optional external S3 credentials | Set both, or leave both blank to use the AWS credential provider chain |
 | `LH_S3_INPUT_FILENAMES` | Input filename wildcard allowlist for Identity Mapping and Stage A | Comma-separated patterns; empty means all supported files |
@@ -1917,6 +1917,20 @@ Interactive chat — Windows: firsttime_start_chat_assistant.bat
 Document upload — Windows: firsttime_start_webUI_doc_upload.bat
                   Linux/macOS: bash firsttime_start_webUI_doc_upload.sh
 ```
+
+### LogHawk Web UI capabilities
+
+The Web UI provides a browser-based way to configure and run LogHawk pipelines:
+
+- Create and manage reusable Config Sets for internal S3 or external AWS S3 inputs.
+- Browse external S3 buckets and folders, and specify a region for each selected source.
+- Add multiple S3 locations for external Train and Detect inputs, along with the region for each location.
+- Choose a RustFS/Internal S3 output bucket and batch for external-input runs.
+- Create Pipelines that select a Config Set and run Train, Detect, or both phases.
+- Launch saved Pipelines and monitor their status and Temporal workflow run details.
+- Use Quick Run to start a pipeline without first creating a saved Pipeline.
+
+The Web UI starts and monitors workflows; processing continues to run in the Temporal worker.
 
 ### LLM Provider References
 
