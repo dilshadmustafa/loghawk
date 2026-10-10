@@ -58,6 +58,8 @@ This may include commercial, proprietary, source-available, or open-source licen
 
 This provision is intended to permit the Project to change its commercial or licensing structure without requiring the Maintainer to obtain a new license from every contributor.
 
+This provision is intended to permit the Maintainer to change the Project's commercial or licensing structure without requiring the Maintainer to obtain a new license from every contributor.
+
 ## 6\. Patent License
 
 The Contributor grants the Maintainer, the Project, and recipients of LogHawk a perpetual, worldwide, non-exclusive, royalty-free patent license under patent claims that the Contributor can license and that are necessarily infringed by the Contributor's Contribution alone or by the combination of the Contribution with the Project to which it was submitted.
