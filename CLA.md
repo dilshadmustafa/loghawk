@@ -34,8 +34,8 @@ The Contributor grants the Maintainer and the Project a perpetual, worldwide, no
 *   publicly display and perform the Contribution;
 *   publicly display and perform the Contribution, modified Contribution, derivative works based on the Contribution;
 *   sublicense the Contribution as necessary to distribute LogHawk;
-*   sublicense the Contribution, modified Contribution, derivative works based on the Contribution as necessary to distribute LogHawk;
-*   sublicense the Contribution, modified Contribution, derivative works based on the Contribution as necessary to distribute LogHawk and/or sell LogHawk through commercial license and/or commercialize LogHawk;
+*   sublicense and/or relicense the Contribution, modified Contribution, derivative works based on the Contribution as necessary to distribute LogHawk;
+*   sublicense and/or relicense the Contribution, modified Contribution, derivative works based on the Contribution as necessary to distribute LogHawk and/or sell LogHawk through commercial license and/or commercialize LogHawk;
 *   use the Contribution for commercial purposes; and
 *   use the Contribution, modified Contribution, derivative works based on the Contribution for commercial purposes; and
 *   otherwise exercise copyright rights necessary to develop, maintain, distribute, and commercialize LogHawk.
