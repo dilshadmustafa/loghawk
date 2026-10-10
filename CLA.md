@@ -28,18 +28,23 @@ The Contributor grants the Maintainer and the Project a perpetual, worldwide, no
 *   modify the Contribution;
 *   prepare derivative works based on the Contribution;
 *   incorporate the Contribution into LogHawk;
-*   distribute the Contribution;
-*   distribute LogHawk containing the Contribution;
+*   incorporate the Contribution, modified Contribution, derivative works based on the Contribution into LogHawk;
+*   distribute the Contribution, modified Contribution, derivative works based on the Contribution;
+*   distribute LogHawk containing the Contribution, modified Contribution, derivative works based on the Contribution;
 *   publicly display and perform the Contribution;
+*   publicly display and perform the Contribution, modified Contribution, derivative works based on the Contribution;
 *   sublicense the Contribution as necessary to distribute LogHawk;
+*   sublicense the Contribution, modified Contribution, derivative works based on the Contribution as necessary to distribute LogHawk;
+*   sublicense the Contribution, modified Contribution, derivative works based on the Contribution as necessary to distribute LogHawk and/or sell LogHawk through commercial license and/or commercialize LogHawk;
 *   use the Contribution for commercial purposes; and
+*   use the Contribution, modified Contribution, derivative works based on the Contribution for commercial purposes; and
 *   otherwise exercise copyright rights necessary to develop, maintain, distribute, and commercialize LogHawk.
 
 The license applies to the Contribution in source-code and compiled/object-code form.
 
 ## 4\. Future Project Entity
 
-The Contributor grants the rights in this Agreement to the Project and to any legal entity that subsequently succeeds to, acquires, or is assigned the relevant rights in the LogHawk project.
+The Contributor grants the rights in this Agreement to the Maintainer and the Project and to any legal entity that subsequently succeeds to, acquires, or is assigned the relevant rights in the LogHawk project.
 
 This includes a company, corporation, partnership, foundation, or other legal entity established or designated to operate or develop LogHawk.
 

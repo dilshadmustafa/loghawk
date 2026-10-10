@@ -1,15 +1,9 @@
 Welcome to LogHawk
 ===================
 
-<div align="center">
-  <img src="https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg" width="50%">
-</div>
+<div align="center"><img src="https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg" width="50%"></div>
 
-<div align="center">
-  <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=H4V87SN5M2GG2">
-    <img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" alt="Donate with PayPal">
-  </a>
-</div>
+<div align="center"><a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&amp;hosted_button_id=H4V87SN5M2GG2"><img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" alt="Donate with PayPal"></a></div>
 
 Introduction
 -------------
@@ -449,11 +443,11 @@ Restart the worker after changing workflow or activity code so the running proce
 
 Activities should use:
 
-- retries;
-- timeouts;
-- idempotent processing where practical;
-- clear failure propagation;
-- durable workflow state.
+-   retries;
+-   timeouts;
+-   idempotent processing where practical;
+-   clear failure propagation;
+-   durable workflow state.
 
 Identity Mapping must complete successfully before Stage A starts.
 
@@ -651,8 +645,7 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_S3_SELECT_RECORD_FILTER` | Log levels to include | Default `WARN,ERROR`; `ALL` includes all levels |
 | `LH_CORRELATION_WINDOW_MINUTES` | Stage C correlation window | Positive integer, default `5` |
 
-Example `.env` settings for internal RustFS and external AWS S3
-(keep real credentials local and do not commit secrets):
+Example `.env` settings for internal RustFS and external AWS S3 (keep real credentials local and do not commit secrets):
 
 ```ini
 LH_S3_BUCKET=loghawk-data
@@ -1465,12 +1458,12 @@ Temporal should **call** the processing components rather than duplicating their
 
 `AGENTS.md` contains the project-specific instructions used by Codex, including:
 
-- architecture decisions;
-- S3/S3A conventions;
-- Stage A and Stage B folder contracts;
-- coding guidelines;
-- testing expectations;
-- mandatory approval before file modifications.
+-   architecture decisions;
+-   S3/S3A conventions;
+-   Stage A and Stage B folder contracts;
+-   coding guidelines;
+-   testing expectations;
+-   mandatory approval before file modifications.
 
 ---
 
@@ -1484,45 +1477,45 @@ Current processing uses a configurable batch folder with separate `train/` and `
 
 ## Phase 1 — Detection Foundation
 
--   [x] Define normalized feature contract
--   [x] Implement raw-log storage boundary
--   [x] Implement one-minute aggregation
--   [x] Implement anomaly feature extraction
--   [x] Implement Isolation Forest foundation
--   [x] Persist feature datasets as Parquet
--   [x] Persist anomaly results
--   [ ] Add broader synthetic anomalous-log test data
--   [ ] Add anomaly API/dashboard
+-   [x]  Define normalized feature contract
+-   [x]  Implement raw-log storage boundary
+-   [x]  Implement one-minute aggregation
+-   [x]  Implement anomaly feature extraction
+-   [x]  Implement Isolation Forest foundation
+-   [x]  Persist feature datasets as Parquet
+-   [x]  Persist anomaly results
+-   [ ]  Add broader synthetic anomalous-log test data
+-   [ ]  Add anomaly API/dashboard
 
 ## Phase 2 — Folder-Based Stage A → Stage B Pipeline
 
--   [x] Implement per-file Identity Mapping
--   [x] Implement idempotent identity mapping generation
--   [x] Implement folder-based Stage A
--   [x] Write grouped Stage A feature datasets per phase
--   [x] Implement folder-based Stage B
--   [x] Write grouped Stage B anomaly datasets
--   [x] Preserve generic `entity_id`
--   [x] Keep Python `s3://` and Spark `s3a://` conventions explicit
--   [x] Validate raw → mapping → features → anomalies contract
--   [x] Add field-role mapping for timestamp/message/status/exception fields
--   [ ] Add schema fingerprint/cache to reduce repeated LLM mapping calls
--   [ ] Add stage-level automated integration tests
+-   [x]  Implement per-file Identity Mapping
+-   [x]  Implement idempotent identity mapping generation
+-   [x]  Implement folder-based Stage A
+-   [x]  Write grouped Stage A feature datasets per phase
+-   [x]  Implement folder-based Stage B
+-   [x]  Write grouped Stage B anomaly datasets
+-   [x]  Preserve generic `entity_id`
+-   [x]  Keep Python `s3://` and Spark `s3a://` conventions explicit
+-   [x]  Validate raw → mapping → features → anomalies contract
+-   [x]  Add field-role mapping for timestamp/message/status/exception fields
+-   [ ]  Add schema fingerprint/cache to reduce repeated LLM mapping calls
+-   [ ]  Add stage-level automated integration tests
 
 ## Phase 3 — Temporal Orchestration
 
--   [x] Introduce Temporal
--   [x] Create LogHawk Temporal Worker
--   [x] Implement Stage A Activity
--   [x] Implement Stage B Activity
--   [x] Implement Identity Mapping Activity
--   [x] Order Identity Mapping → Stage A → Stage B
--   [x] Add Train and Detect phase selection
--   [x] Add retries
--   [x] Add activity timeouts
--   [ ] Add workflow-level failure handling for the complete folder pipeline
--   [ ] Add workflow observability
--   [ ] Add workflow audit metadata
+-   [x]  Introduce Temporal
+-   [x]  Create LogHawk Temporal Worker
+-   [x]  Implement Stage A Activity
+-   [x]  Implement Stage B Activity
+-   [x]  Implement Identity Mapping Activity
+-   [x]  Order Identity Mapping → Stage A → Stage B
+-   [x]  Add Train and Detect phase selection
+-   [x]  Add retries
+-   [x]  Add activity timeouts
+-   [ ]  Add workflow-level failure handling for the complete folder pipeline
+-   [ ]  Add workflow observability
+-   [ ]  Add workflow audit metadata
 
 Current phase flow:
 
@@ -1861,7 +1854,7 @@ From the repository root, start RustFS, Temporal, the LogHawk worker, the Web UI
 bash start_all_servers.sh
 ```
 
-When the services are ready, open [http://localhost:5173](http://localhost:5173) in your browser to use the LogHawk Web UI.
+When the services are ready, open http://localhost:5173 in your browser to use the LogHawk Web UI.
 
 #### RAPIDS cuML setup with NVIDIA GPU (Optional)
 
@@ -1954,7 +1947,15 @@ Copyright (c) Dilshad Mustafa 2026. All Rights Reserved.
 License
 -------------
 
-Please refer LICENSE.txt file for complete details on the license and terms and conditions.
+LogHawk is source-available software licensed under the **PolyForm Perimeter License 1.0.1**.
+
+You may use, modify, and distribute LogHawk subject to the terms of the license, including its restriction on providing products or services that compete with LogHawk.
+
+Please read the [`LICENSE`](LICENSE) file for the complete license terms.
+
+Third-party components remain subject to their respective licenses. See [`NOTICE`](NOTICE) for additional copyright and attribution information.
+
+Contributions are subject to the project's contribution terms. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CLA.md`](CLA.md) for details.
 
 About The Author
 --------------------
