@@ -658,10 +658,10 @@ LH_S3_REGION=us-east-1
 # External AWS S3 input locations. Each region corresponds to the URL
 # at the same position in its comma-separated list.
 LH_EXTERNAL_DATA_USE=true
-LH_EXTERNAL_DATA_TRAIN=s3://my-log-bucket/train/
-LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN=us-east-1
-LH_EXTERNAL_DATA_RAW=s3://my-log-bucket/raw/
-LH_EXTERNAL_S3BUCKET_REGIONS_RAW=us-east-1
+LH_EXTERNAL_DATA_TRAIN=s3://my-log-bucket/,s3://mybucket2/somefolder/,s3://anotherbucket3/examplefolder/
+LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN=us-east-1,us-west-2,us-east-2
+LH_EXTERNAL_DATA_RAW=s3://k8s-logs/elasticsearch/,s3://some-bucket/
+LH_EXTERNAL_S3BUCKET_REGIONS_RAW=us-east-2,us-west-1
 LH_EXTERNAL_S3_ENDPOINT=
 LH_EXTERNAL_S3_ACCESS_KEY_ID=
 LH_EXTERNAL_S3_SECRET_ACCESS_KEY=
@@ -1933,7 +1933,7 @@ Document upload — Windows: firsttime_start_webUI_doc_upload.bat
 
 -   Apache Spark: https://spark.apache.org/
 -   scikit-learn: https://scikit-learn.org/
--   RustFS: https://seaweedfs.com/
+-   RustFS: https://www.rustfs.com/
 -   LanceDB: https://lancedb.com/
 -   DuckDB: https://duckdb.org/
 
