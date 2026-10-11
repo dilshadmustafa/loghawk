@@ -3,8 +3,13 @@ import sqlite3
 from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 
-from loghawk.api.schemas import TaskArtifactWrite, TaskMessageWrite, TaskWrite
-from loghawk.api.services import task_service, task_store
+from loghawk.api.schemas import (
+    TaskArtifactImport,
+    TaskArtifactWrite,
+    TaskMessageWrite,
+    TaskWrite,
+)
+from loghawk.api.services import n8n_service, task_service, task_store
 
 
 router = APIRouter()
@@ -62,6 +67,28 @@ def delete_task_artifact(task_id: str, artifact_id: str) -> dict:
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@router.post("/{task_id}/import-to-n8n")
+def import_task_to_n8n(task_id: str, body: TaskArtifactImport) -> dict[str, str]:
+    task = task_store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["artifact_type"] != "n8n":
+        raise HTTPException(status_code=422, detail="Only n8n tasks can be imported")
+
+    artifact = task_store.get_artifact_version(task_id, body.artifact_id)
+    if artifact is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Saved Task version not found. Save the artifact before importing it.",
+        )
+    try:
+        return n8n_service.import_workflow(task["name"], artifact["content"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except n8n_service.N8nApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/{task_id}/messages")

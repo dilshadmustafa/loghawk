@@ -244,6 +244,12 @@ LH_TEMPORAL_ADDRESS = os.getenv(
     "localhost:7233",
 )
 
+LH_N8N_BASE_URL = os.getenv(
+    "LH_N8N_BASE_URL",
+    "http://localhost:5678",
+).rstrip("/")
+LH_N8N_API_KEY = os.getenv("LH_N8N_API_KEY", "").strip()
+
 LH_IDENTITY_MAPPING_SAMPLE_SIZE = int(
     os.getenv("LH_IDENTITY_MAPPING_SAMPLE_SIZE", "10")
 )

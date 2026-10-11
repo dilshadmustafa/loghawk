@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { createTask, deleteTaskArtifact, getTask, saveTaskArtifact, sendTaskMessage } from "../services/api";
+import {
+  createTask,
+  deleteTaskArtifact,
+  getTask,
+  importTaskToN8n,
+  saveTaskArtifact,
+  sendTaskMessage,
+} from "../services/api";
 import type { TaskArtifactType, TaskRecord, TaskShell } from "../types/api";
 
 const route = useRoute();
@@ -21,6 +28,8 @@ const saving = ref(false);
 const savingArtifact = ref(false);
 const deletingArtifact = ref(false);
 const sending = ref(false);
+const importingToN8n = ref(false);
+const importedWorkflow = ref<{ name: string; url: string } | null>(null);
 const error = ref("");
 const hasUnsavedChanges = computed(() =>
   hasGeneratedDraft.value || editorContent.value !== savedBaseline.value,
@@ -31,6 +40,28 @@ const hasArtifactToEdit = computed(() =>
 const selectedVersion = computed(() =>
   task.value?.artifacts?.find((artifact) => artifact.id === selectedVersionId.value) ?? null,
 );
+
+async function importSavedVersionToN8n() {
+  if (
+    !task.value
+    || task.value.artifact_type !== "n8n"
+    || !selectedVersionId.value
+    || hasGeneratedDraft.value
+    || hasUnsavedChanges.value
+  ) return;
+
+  importingToN8n.value = true;
+  importedWorkflow.value = null;
+  error.value = "";
+  try {
+    const result = await importTaskToN8n(task.value.id, selectedVersionId.value);
+    importedWorkflow.value = { name: result.name, url: result.url };
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not import workflow into n8n";
+  } finally {
+    importingToN8n.value = false;
+  }
+}
 
 async function loadTask() {
   if (!taskId.value) { task.value = null; return; }
@@ -166,6 +197,7 @@ function downloadArtifact() {
 }
 
 watch(taskId, () => void loadTask());
+watch(editorContent, () => { importedWorkflow.value = null; });
 onMounted(() => void loadTask());
 </script>
 
@@ -231,6 +263,19 @@ onMounted(() => void loadTask());
         <div class="artifact-header">
           <h2>{{ hasGeneratedDraft ? "Generated draft · Unsaved" : `Version ${selectedVersion?.version} · Editable` }}</h2>
           <div class="artifact-actions">
+            <button
+              v-if="task.artifact_type === 'n8n'"
+              class="btn primary"
+              :disabled="importingToN8n || !selectedVersionId || hasGeneratedDraft || hasUnsavedChanges"
+              @click="importSavedVersionToN8n"
+            >{{ importingToN8n ? "Importing…" : "Import Into n8n" }}</button>
+            <a
+              v-if="importedWorkflow"
+              class="btn"
+              :href="importedWorkflow.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open in n8n</a>
             <button class="btn" :disabled="!editorContent" @click="downloadArtifact">Download</button>
             <button
               v-if="selectedVersion && !hasGeneratedDraft"
@@ -245,7 +290,13 @@ onMounted(() => void loadTask());
           <button class="btn primary" :disabled="savingArtifact || !hasUnsavedChanges || !editorContent.trim()" @click="saveVersion">{{ savingArtifact ? "Saving…" : "Save Version" }}</button>
           <button class="btn" :disabled="savingArtifact || !hasUnsavedChanges" @click="cancelEdit">Cancel</button>
         </div>
-        <p class="muted">Review this artifact before using it. LogHawk does not run scripts or import/activate n8n workflows.</p>
+        <p v-if="task.artifact_type === 'n8n'" class="muted">
+          Save this Task version before importing it. Import creates an inactive
+          workflow; review it in n8n before activating it.
+        </p>
+        <p v-if="importedWorkflow" class="muted">
+          Imported inactive workflow “{{ importedWorkflow.name }}”.
+        </p>
       </section>
     </template>
   </div>

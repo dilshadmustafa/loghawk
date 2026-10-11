@@ -105,5 +105,14 @@ export const sendTaskMessage = (id: string, data: TaskMessageInput) =>
     body: JSON.stringify(data),
   });
 
+export const importTaskToN8n = (id: string, artifactId: string) =>
+  request<{ workflow_id: string; name: string; url: string }>(
+    `/tasks/${encodeURIComponent(id)}/import-to-n8n`,
+    {
+      method: "POST",
+      body: JSON.stringify({ artifact_id: artifactId }),
+    },
+  );
+
 export const externalSourceUrl = (source: ExternalS3Source) =>
   `s3://${source.bucket}/${source.folder ? `${source.folder.replace(/^\/+|\/+$/g, "")}/` : ""}`;

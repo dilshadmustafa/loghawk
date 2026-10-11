@@ -8,58 +8,80 @@ from loghawk.api.services import task_store
 from loghawk.llm.client import get_llm_client
 
 
-_RESPONSE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "reply": {"type": "string"},
-        "artifact": {"type": ["string", "null"]},
-    },
-    "required": ["reply", "artifact"],
-    "additionalProperties": False,
-}
+def _response_schema(task: dict) -> dict:
+    artifact_type = (
+        ["object", "null"]
+        if task["artifact_type"] == "n8n"
+        else ["string", "null"]
+    )
+    return {
+        "type": "object",
+        "properties": {
+            "reply": {"type": "string"},
+            "artifact": {"type": artifact_type},
+        },
+        "required": ["reply", "artifact"],
+        "additionalProperties": False,
+    }
 
 
 def _system_prompt(task: dict) -> str:
     kind = task["artifact_type"]
     if kind == "n8n":
         artifact_instructions = (
-            "When providing an artifact, return a complete n8n workflow JSON export. "
-            "It must parse as JSON and contain a nodes array and connections object. "
+            "When providing an artifact, return a complete n8n workflow as a JSON "
+            "object, not as a quoted or escaped JSON string. It must contain a nodes "
+            "array and connections object. "
             "Do not claim the workflow has been imported or activated."
         )
+        artifact_representation = "JSON object"
     elif kind == "python":
         artifact_instructions = (
             "Put the complete Python source only in the artifact field. The reply must "
             "be a short explanation, never source code. Include all required imports "
             "and implementation; do not return fragments or placeholders."
         )
+        artifact_representation = "string"
     else:
         shell = "Bash" if task["shell"] == "bash" else "PowerShell"
         artifact_instructions = (
             f"When providing an artifact, return a complete {shell} script as plain text. "
             "Do not mix shell syntaxes."
         )
+        artifact_representation = "string"
     return (
         "You help the user draft automation artifacts through conversation. "
         "Never execute code, access external systems, or claim an action was run. "
         "Do not include real credentials or secrets; use clearly named placeholders. "
         "Return a JSON object matching the requested response schema with a user-facing "
-        "reply and either a complete artifact string or null. Return null until enough "
+        f"reply and either a complete artifact {artifact_representation} or null. "
+        "Return null until enough "
         "requirements are known to produce a useful draft. "
         f"Task name: {task['name']}. {artifact_instructions}"
     )
 
 
-def _validate_artifact(task: dict, artifact: str | None) -> str | None:
+def _validate_artifact(task: dict, artifact: str | dict | None) -> str | None:
     if artifact is None:
         return None
-    if not artifact.strip():
-        raise ValueError("The model returned an empty artifact")
     if task["artifact_type"] == "n8n":
-        try:
-            workflow = json.loads(artifact)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Generated n8n workflow is not valid JSON: {exc}") from exc
+        if isinstance(artifact, str):
+            if not artifact.strip():
+                raise ValueError("The model returned an empty artifact")
+            try:
+                workflow = json.loads(artifact)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Generated n8n workflow is not valid JSON: {exc}"
+                ) from exc
+            serialized_artifact = artifact
+        elif isinstance(artifact, dict):
+            workflow = artifact
+            serialized_artifact = json.dumps(
+                workflow, ensure_ascii=False, indent=2
+            )
+        else:
+            raise ValueError("Generated n8n workflow must be a JSON object")
         if (
             not isinstance(workflow, dict)
             or not isinstance(workflow.get("nodes"), list)
@@ -68,7 +90,10 @@ def _validate_artifact(task: dict, artifact: str | None) -> str | None:
             raise ValueError(
                 "Generated n8n JSON must contain a nodes array and connections object"
             )
+        return serialized_artifact
     elif task["artifact_type"] == "python":
+        if not isinstance(artifact, str) or not artifact.strip():
+            raise ValueError("The model returned an empty or invalid artifact")
         try:
             tree = ast.parse(artifact)
         except SyntaxError as exc:
@@ -81,13 +106,15 @@ def _validate_artifact(task: dict, artifact: str | None) -> str | None:
             raise ValueError(
                 "Generated Python is only a bare expression, not a complete program."
             )
+    elif not isinstance(artifact, str) or not artifact.strip():
+        raise ValueError("The model returned an empty or invalid artifact")
     return artifact
 
 
 def draft_response(task: dict, history: list[dict[str, str]]) -> tuple[str, str | None]:
     content, response = get_llm_client().complete_with_response(
         [{"role": "system", "content": _system_prompt(task)}, *history],
-        response_schema=_RESPONSE_SCHEMA,
+        response_schema=_response_schema(task),
         model=config.LH_LLM_CODEASSIST_MODEL,
         temperature=0.2,
         max_tokens=config.LH_LLM_CODEASSIST_MAX_TOKENS,
@@ -104,7 +131,10 @@ def draft_response(task: dict, history: list[dict[str, str]]) -> tuple[str, str 
         artifact = payload.get("artifact")
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         raise RuntimeError("LLM response did not match the task response schema") from exc
-    if not isinstance(reply, str) or (artifact is not None and not isinstance(artifact, str)):
+    expected_artifact_type = dict if task["artifact_type"] == "n8n" else str
+    if not isinstance(reply, str) or (
+        artifact is not None and not isinstance(artifact, expected_artifact_type)
+    ):
         raise RuntimeError("LLM response has invalid reply or artifact types")
     return reply, _validate_artifact(task, artifact)
 

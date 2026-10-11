@@ -53,6 +53,18 @@ class TaskArtifactWrite(BaseModel):
         return value
 
 
+class TaskArtifactImport(BaseModel):
+    artifact_id: str
+
+    @field_validator("artifact_id")
+    @classmethod
+    def validate_artifact_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Save a Task version before importing it")
+        return value
+
+
 class ExternalS3Source(BaseModel):
     bucket: str
     folder: str = ""

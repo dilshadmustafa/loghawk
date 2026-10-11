@@ -6,6 +6,11 @@ import type { PipelineRunRecord } from "../types/api";
 
 const route = useRoute(); const run = ref<PipelineRunRecord | null>(null); const error = ref("");
 const workflowId = String(route.params.workflowId); let timer: number | undefined;
+function formatLocalTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
 async function refresh() {
   try { run.value = await getPipelineRun(workflowId); error.value = ""; if (run.value.status !== "RUNNING" && timer) window.clearInterval(timer); }
   catch (err) { error.value = err instanceof Error ? err.message : "Could not load run details"; }
@@ -23,8 +28,8 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer); });
       <dt>Temporal Run ID</dt><dd><code>{{ run.temporal_run_id || "Pending" }}</code></dd>
       <dt>Config Set</dt><dd>{{ run.config_set_name }}</dd>
       <dt>Phases</dt><dd>{{ run.run_mode }}</dd>
-      <dt>Started</dt><dd>{{ run.started_at }}</dd>
-      <dt>Completed</dt><dd>{{ run.completed_at || "—" }}</dd>
+      <dt>Started</dt><dd>{{ formatLocalTime(run.started_at) }}</dd>
+      <dt>Completed</dt><dd>{{ formatLocalTime(run.completed_at) }}</dd>
       <dt v-if="run.error">Error</dt><dd v-if="run.error" class="error">{{ run.error }}</dd>
     </dl><a v-if="run.temporal_ui_url" :href="run.temporal_ui_url" target="_blank" rel="noreferrer">Open in Temporal Web UI</a></section>
     <p v-else class="muted">Loading run…</p>

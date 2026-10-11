@@ -132,6 +132,16 @@ def get_task(task_id: str) -> dict | None:
         return _task(connection, row, include_messages=True) if row else None
 
 
+def get_artifact_version(task_id: str, artifact_id: str) -> dict | None:
+    with _connect() as connection:
+        row = connection.execute(
+            """SELECT id, version, content, created_at FROM task_artifacts
+               WHERE task_id = ? AND id = ? AND deleted_at IS NULL""",
+            (task_id, artifact_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def delete_task(task_id: str) -> bool:
     """Delete a Task; its messages and artifacts cascade through SQLite FKs."""
     with _connect() as connection:
