@@ -623,8 +623,8 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 |---|---|---|
 | `LH_S3_BUCKET` | S3 bucket | Defaults to `loghawk-data` |
 | `LH_S3_BATCH_FOLDER` | One batch folder beneath the bucket | Defaults to `2026-09-28`; any single folder name is allowed |
-| `LH_S3_ENDPOINT` | RustFS S3 endpoint | Defaults to `http://localhost:9000` |
-| `LH_S3_ACCESS_KEY_ID`, `LH_S3_SECRET_ACCESS_KEY`, `LH_S3_REGION` | Internal RustFS credentials and region | AWS credential and region variables are fallbacks |
+| `LH_S3_ENDPOINT` | RustFS/Internal S3 endpoint | Defaults to `http://localhost:9000` |
+| `LH_S3_ACCESS_KEY_ID`, `LH_S3_SECRET_ACCESS_KEY`, `LH_S3_REGION` | RustFS/Internal S3 credentials and region | AWS credential and region variables are fallbacks |
 | `LH_EXTERNAL_DATA_USE` | Read Train/Raw inputs from external S3 URLs | `true` / `false`, default `false` |
 | `LH_EXTERNAL_DATA_TRAIN`, `LH_EXTERNAL_S3BUCKET_REGIONS_TRAIN` | Train input URLs and their corresponding regions | Multiple S3 URLs and matching AWS regions, comma-separated in the same order; list lengths must match |
 | `LH_EXTERNAL_DATA_RAW`, `LH_EXTERNAL_S3BUCKET_REGIONS_RAW` | Raw/Detect input URLs and their corresponding regions | Multiple S3 URLs and matching AWS regions, comma-separated in the same order; list lengths must match |
@@ -793,6 +793,8 @@ LLM and embedding settings are loaded from the repository-root `.env` by `src/lo
 |---|---|
 | `LH_LLM_PROVIDER` | Chat provider: `ollama`, `bedrock`, or `azure_ai`. `microsoft_foundry` is accepted as an alias for `azure_ai`. |
 | `LH_LLM_MODEL` | Chat model name or provider model ID. |
+| `LH_LLM_CODEASSIST_MODEL` | Optional dedicated model for task artifact drafting; blank uses `LH_LLM_MODEL`. |
+| `LH_LLM_CODEASSIST_MAX_TOKENS` | Maximum output tokens for code-assistant responses; default `4096`. |
 | `LH_LLM_BASE_URL` | Provider endpoint. For Ollama, use the server root, such as `http://localhost:11434`, without `/api/chat`. |
 | `LH_LLM_API_KEY` | Provider API key; leave blank for Ollama or Bedrock using the AWS credential chain. |
 | `LH_LLM_TIMEOUT_SECONDS` | Chat request timeout in seconds; default `300`. |
@@ -1924,13 +1926,28 @@ The Web UI provides a browser-based way to configure and run LogHawk pipelines:
 
 - Create and manage reusable Config Sets for internal S3 or external AWS S3 inputs.
 - Browse external S3 buckets and folders, and specify a region for each selected source.
-- Add multiple S3 locations for external Train and Detect inputs, along with the region for each location.
+- Add multiple S3 locations for external Train and Detect inputs separately, along with the region for each location.
 - Choose a RustFS/Internal S3 output bucket and batch for external-input runs.
 - Create Pipelines that select a Config Set and run Train, Detect, or both phases.
 - Launch saved Pipelines and monitor their status and Temporal workflow run details.
 - Use Quick Run to start a pipeline without first creating a saved Pipeline.
+- Create Tasks to collaborate with the configured LLM on n8n workflow JSON, Python programs, or Bash/PowerShell scripts.
+- Edit generated artifacts and save versions explicitly. Browse version history, select a version, download it, or delete it.
+- Import a saved n8n workflow version into a customer/user-managed n8n instance. Imported workflows remain inactive; review and activate them in n8n.
 
 The Web UI starts and monitors workflows; processing continues to run in the Temporal worker.
+LogHawk does not execute generated Python or shell artifacts. n8n is an optional, separately Customer-managed integration.
+
+#### Configure Customer/User managed n8n details
+
+LogHawk uses these settings to connect to the n8n instance when importing a saved workflow version:
+
+| Variable | Purpose |
+|---|---|
+| `LH_N8N_BASE_URL` | Base URL of the customer/user-managed n8n instance; defaults to `http://localhost:5678`. |
+| `LH_N8N_API_KEY` | n8n API key, created in n8n under **Settings > n8n API**; required to import workflows. |
+
+`N8N_HOST`, `N8N_PORT`, `N8N_PROTOCOL`, `N8N_SECURE_COOKIE`, `N8N_WEBHOOK_URL`, and `GENERIC_TIMEZONE` configure the n8n runtime. They are not substitutes for the LogHawk connection URL and API key.
 
 ### LLM Provider References
 
