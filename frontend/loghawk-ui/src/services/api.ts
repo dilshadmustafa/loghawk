@@ -10,6 +10,9 @@ import type {
   PipelineRunStarted,
   PipelineRunStatus,
   RunMode,
+  TaskInput,
+  TaskMessageInput,
+  TaskRecord,
 } from "../types/api";
 
 const API_ROOT = "/api/v1";
@@ -23,6 +26,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.detail ?? `Request failed (${response.status})`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -52,6 +56,8 @@ export const saveConfigSet = (data: ConfigSetInput, id?: string) =>
     method: id ? "PUT" : "POST",
     body: JSON.stringify(data),
   });
+export const deleteConfigSet = (id: string) =>
+  request<void>(`/config-sets/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const getPipelines = () => request<Pipeline[]>("/pipelines");
 export const getPipeline = (id: string) =>
   request<Pipeline>(`/pipelines/${encodeURIComponent(id)}`);
@@ -62,6 +68,8 @@ export const savePipeline = (data: PipelineInput, id?: string) =>
   });
 export const runPipeline = (id: string) =>
   request<PipelineRunRecord>(`/pipelines/${encodeURIComponent(id)}/runs`, { method: "POST" });
+export const deletePipeline = (id: string) =>
+  request<void>(`/pipelines/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const getPipelineRun = (workflowId: string) =>
   request<PipelineRunRecord>(`/pipelines/runs/${encodeURIComponent(workflowId)}`);
 export const getExternalBuckets = (region: string) =>
@@ -70,6 +78,32 @@ export const getExternalRegions = () =>
   request<string[]>("/storage/external/regions");
 export const getExternalFolders = (bucket: string, region: string, prefix = "") =>
   request<string[]>(`/storage/external/folders?bucket=${encodeURIComponent(bucket)}&region=${encodeURIComponent(region)}&prefix=${encodeURIComponent(prefix)}`);
+
+export const getTasks = () => request<TaskRecord[]>("/tasks");
+export const createTask = (data: TaskInput) =>
+  request<TaskRecord>("/tasks", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const getTask = (id: string) =>
+  request<TaskRecord>(`/tasks/${encodeURIComponent(id)}`);
+export const deleteTask = (id: string) =>
+  request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const saveTaskArtifact = (id: string, content: string) =>
+  request<TaskRecord>(`/tasks/${encodeURIComponent(id)}/artifacts`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+export const deleteTaskArtifact = (taskId: string, artifactId: string) =>
+  request<TaskRecord>(
+    `/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "DELETE" },
+  );
+export const sendTaskMessage = (id: string, data: TaskMessageInput) =>
+  request<TaskRecord>(`/tasks/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 
 export const externalSourceUrl = (source: ExternalS3Source) =>
   `s3://${source.bucket}/${source.folder ? `${source.folder.replace(/^\/+|\/+$/g, "")}/` : ""}`;

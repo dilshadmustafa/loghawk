@@ -89,6 +89,28 @@ def update_pipeline(pipeline_id: str, body: PipelineWrite) -> dict:
     return pipeline
 
 
+@router.delete("/{pipeline_id}", status_code=204)
+async def delete_pipeline(pipeline_id: str) -> None:
+    pipeline = config_store.get_pipeline(pipeline_id)
+    if pipeline is None:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    await _refresh_active_run(pipeline.get("latest_run"))
+    active_run = config_store.get_active_run(pipeline_id)
+    if active_run:
+        raise HTTPException(
+            status_code=409,
+            detail="This Pipeline has a RUNNING execution and cannot be deleted yet.",
+        )
+    result = config_store.delete_pipeline(pipeline_id)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    if result == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="This Pipeline has a RUNNING execution and cannot be deleted yet.",
+        )
+
+
 @router.post("/{pipeline_id}/runs", status_code=202)
 async def start_pipeline_run(pipeline_id: str) -> dict:
     pipeline = config_store.get_pipeline(pipeline_id)

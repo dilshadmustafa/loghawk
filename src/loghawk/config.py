@@ -58,6 +58,16 @@ LH_LLM_MODEL = os.getenv(
     "gemma2:latest"
 )
 
+LH_LLM_CODEASSIST_MODEL = (
+    os.getenv("LH_LLM_CODEASSIST_MODEL", "").strip()
+    or LH_LLM_MODEL
+)
+LH_LLM_CODEASSIST_MAX_TOKENS = int(
+    os.getenv("LH_LLM_CODEASSIST_MAX_TOKENS", "4096")
+)
+if LH_LLM_CODEASSIST_MAX_TOKENS < 1:
+    raise ValueError("LH_LLM_CODEASSIST_MAX_TOKENS must be at least 1")
+
 LH_LLM_PROVIDER = os.getenv("LH_LLM_PROVIDER", "ollama").strip().lower()
 if LH_LLM_PROVIDER == "microsoft_foundry":
     LH_LLM_PROVIDER = "azure_ai"

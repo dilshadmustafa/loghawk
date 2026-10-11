@@ -1,5 +1,44 @@
 export type RunMode = "train" | "detect" | "train-detect";
 export type PhaseMode = RunMode;
+export type TaskArtifactType = "n8n" | "python" | "shell";
+export type TaskShell = "bash" | "powershell";
+
+export interface TaskMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export interface TaskArtifact {
+  id: string;
+  version: number;
+  content: string;
+  created_at: string;
+}
+
+export interface TaskRecord {
+  id: string;
+  name: string;
+  artifact_type: TaskArtifactType;
+  shell: TaskShell | null;
+  created_at: string;
+  updated_at: string;
+  messages?: TaskMessage[];
+  latest_artifact?: TaskArtifact | null;
+  artifacts?: TaskArtifact[];
+  draft_artifact?: string | null;
+}
+
+export interface TaskInput {
+  name: string;
+  artifact_type: TaskArtifactType;
+  shell?: TaskShell | null;
+}
+
+export interface TaskMessageInput {
+  content: string;
+}
 
 export interface ExternalS3Source {
   bucket: string;

@@ -9,6 +9,10 @@ import loghawk.config as config
 
 def _chat_model(model: str | None = None) -> str:
     name = (model or config.LH_LLM_MODEL).strip()
+    if config.LH_LLM_PROVIDER == "ollama":
+        if name.startswith(("ollama_chat/", "ollama/")):
+            return name
+        return "ollama_chat/" + name
     if "/" in name:
         return name
     prefixes = {
@@ -56,12 +60,14 @@ class LiteLLMClient:
         response_schema: dict[str, Any] | None = None,
         model: str | None = None,
         temperature: float = 0.1,
+        max_tokens: int | None = None,
     ) -> str:
         content, _response = self.complete_with_response(
             messages,
             response_schema=response_schema,
             model=model,
             temperature=temperature,
+            max_tokens=max_tokens,
         )
         return content
 
@@ -72,11 +78,14 @@ class LiteLLMClient:
         response_schema: dict[str, Any] | None = None,
         model: str | None = None,
         temperature: float = 0.1,
+        max_tokens: int | None = None,
     ) -> tuple[str, Any]:
         from litellm import completion
 
         kwargs = self._chat_kwargs(model)
         kwargs.update(messages=list(messages), temperature=temperature)
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         if response_schema:
             kwargs["response_format"] = {
                 "type": "json_schema",

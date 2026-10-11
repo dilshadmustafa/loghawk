@@ -19,6 +19,11 @@
           <h2>Quick Run</h2>
           <RouterLink to="/quick-run">Start a quick run</RouterLink>
         </section>
+        <section>
+          <h2>Tasks</h2>
+          <RouterLink to="/tasks/new">Create Task</RouterLink>
+          <RouterLink to="/tasks">List Tasks</RouterLink>
+        </section>
       </nav>
       <p class="sidebar-note">AI decides and explains.<br />Deterministic workflows execute and verify.</p>
     </aside>
@@ -62,13 +67,13 @@ button, select, input { font: inherit; }
 .muted { color: #aebbc7; }
 .error { color: #ff9f9f; }
 .success { color: #8fe5ce; }
-.actions { display: flex; flex-wrap: wrap; gap: .65rem; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
 .btn { padding: .65rem .9rem; color: #e8edf2; background: #243442; border: 1px solid #405665; border-radius: .45rem; cursor: pointer; text-decoration: none; }
 .btn.primary { color: #08131b; background: #6bd7bb; border-color: #6bd7bb; font-weight: 700; }
 .btn:disabled { cursor: not-allowed; opacity: .45; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
-th, td { padding: .75rem .65rem; border-bottom: 1px solid #293a46; vertical-align: top; }
+.table-wrap th, .table-wrap td { padding: .75rem .65rem; border-bottom: 1px solid #293a46; vertical-align: middle; }
 th { color: #93a7b6; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; }
 td { color: #d8e1e7; font-size: .88rem; }
 a { color: #8fe5ce; }

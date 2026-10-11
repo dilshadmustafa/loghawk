@@ -4,6 +4,7 @@ from loghawk.api.routers.config_sets import router as config_sets_router
 from loghawk.api.routers.pipeline_runs import router as pipeline_runs_router
 from loghawk.api.routers.pipelines import router as pipelines_router
 from loghawk.api.routers.storage import router as storage_router
+from loghawk.api.routers.tasks import router as tasks_router
 
 
 app = FastAPI(
@@ -27,6 +28,11 @@ app.include_router(
     pipeline_runs_router,
     prefix="/api/v1/pipeline-runs",
     tags=["pipeline runs"],
+)
+app.include_router(
+    tasks_router,
+    prefix="/api/v1/tasks",
+    tags=["tasks"],
 )
 
 

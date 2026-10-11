@@ -57,3 +57,15 @@ def update_config_set(config_set_id: str, body: ConfigSetWrite) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail="Config Set not found")
     return result
+
+
+@router.delete("/{config_set_id}", status_code=204)
+def delete_config_set(config_set_id: str) -> None:
+    result = config_store.delete_config_set(config_set_id)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Config Set not found")
+    if result == "in_use":
+        raise HTTPException(
+            status_code=409,
+            detail="This Config Set is used by a Pipeline. Delete or update that Pipeline first.",
+        )

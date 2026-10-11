@@ -1,0 +1,271 @@
+<script setup lang="ts">
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { createTask, deleteTaskArtifact, getTask, saveTaskArtifact, sendTaskMessage } from "../services/api";
+import type { TaskArtifactType, TaskRecord, TaskShell } from "../types/api";
+
+const route = useRoute();
+const router = useRouter();
+const taskId = computed(() => typeof route.params.id === "string" ? route.params.id : "");
+const task = ref<TaskRecord | null>(null);
+const name = ref("");
+const artifactType = ref<TaskArtifactType>("n8n");
+const shell = ref<TaskShell>("bash");
+const message = ref("");
+const editorContent = ref("");
+const savedBaseline = ref("");
+const selectedVersionId = ref("");
+const hasGeneratedDraft = ref(false);
+const loading = ref(false);
+const saving = ref(false);
+const savingArtifact = ref(false);
+const deletingArtifact = ref(false);
+const sending = ref(false);
+const error = ref("");
+const hasUnsavedChanges = computed(() =>
+  hasGeneratedDraft.value || editorContent.value !== savedBaseline.value,
+);
+const hasArtifactToEdit = computed(() =>
+  hasGeneratedDraft.value || Boolean(selectedVersionId.value),
+);
+const selectedVersion = computed(() =>
+  task.value?.artifacts?.find((artifact) => artifact.id === selectedVersionId.value) ?? null,
+);
+
+async function loadTask() {
+  if (!taskId.value) { task.value = null; return; }
+  loading.value = true;
+  try {
+    task.value = await getTask(taskId.value);
+    savedBaseline.value = task.value.latest_artifact?.content ?? "";
+    editorContent.value = savedBaseline.value;
+    selectedVersionId.value = task.value.latest_artifact?.id ?? "";
+    hasGeneratedDraft.value = false;
+    error.value = "";
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not load Task";
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function create() {
+  saving.value = true;
+  error.value = "";
+  try {
+    const created = await createTask({
+      name: name.value,
+      artifact_type: artifactType.value,
+      shell: artifactType.value === "shell" ? shell.value : null,
+    });
+    await router.replace(`/tasks/${created.id}`);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not create Task";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function send() {
+  if (!task.value || !message.value.trim()) return;
+  sending.value = true;
+  error.value = "";
+  try {
+    task.value = await sendTaskMessage(task.value.id, { content: message.value });
+    if (task.value.draft_artifact) {
+      editorContent.value = task.value.draft_artifact;
+      hasGeneratedDraft.value = true;
+    }
+    message.value = "";
+  } catch (err) {
+    const requestError = err instanceof Error
+      ? err.message
+      : "Task assistant request failed";
+    await loadTask();
+    error.value = requestError;
+  } finally {
+    sending.value = false;
+  }
+}
+
+async function saveVersion() {
+  if (!task.value || !hasUnsavedChanges.value || !editorContent.value.trim()) return;
+  savingArtifact.value = true;
+  error.value = "";
+  try {
+    task.value = await saveTaskArtifact(task.value.id, editorContent.value);
+    const latest = task.value.latest_artifact;
+    savedBaseline.value = latest?.content ?? "";
+    editorContent.value = savedBaseline.value;
+    selectedVersionId.value = latest?.id ?? "";
+    hasGeneratedDraft.value = false;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not save artifact version";
+  } finally {
+    savingArtifact.value = false;
+  }
+}
+
+function cancelEdit() {
+  editorContent.value = savedBaseline.value;
+  hasGeneratedDraft.value = false;
+}
+
+function selectVersion(version: NonNullable<TaskRecord["latest_artifact"]>) {
+  if (version.id === selectedVersionId.value && !hasGeneratedDraft.value && !hasUnsavedChanges.value) return;
+  if (
+    hasUnsavedChanges.value
+    && !window.confirm("Discard the unsaved draft or edits and open this saved version?")
+  ) return;
+  selectedVersionId.value = version.id;
+  savedBaseline.value = version.content;
+  editorContent.value = version.content;
+  hasGeneratedDraft.value = false;
+}
+
+async function deleteSelectedVersion() {
+  if (!task.value || !selectedVersion.value || hasGeneratedDraft.value) return;
+  const unsavedMessage = hasUnsavedChanges.value
+    ? " Unsaved editor changes will also be discarded."
+    : "";
+  const confirmed = window.confirm(
+    `Delete Version ${selectedVersion.value.version} from the visible version history? It will no longer be selectable or downloadable.${unsavedMessage}`,
+  );
+  if (!confirmed) return;
+
+  deletingArtifact.value = true;
+  error.value = "";
+  try {
+    task.value = await deleteTaskArtifact(task.value.id, selectedVersion.value.id);
+    const latest = task.value.latest_artifact;
+    selectedVersionId.value = latest?.id ?? "";
+    savedBaseline.value = latest?.content ?? "";
+    editorContent.value = savedBaseline.value;
+    hasGeneratedDraft.value = false;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not delete artifact version";
+  } finally {
+    deletingArtifact.value = false;
+  }
+}
+
+function downloadArtifact() {
+  if (!task.value || !editorContent.value) return;
+  const extension = task.value.artifact_type === "n8n"
+    ? "json"
+    : task.value.artifact_type === "python"
+      ? "py"
+      : task.value.shell === "powershell" ? "ps1" : "sh";
+  const safeName = task.value.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "loghawk-task";
+  const url = URL.createObjectURL(new Blob([editorContent.value], { type: "text/plain;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeName}.${extension}`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+watch(taskId, () => void loadTask());
+onMounted(() => void loadTask());
+</script>
+
+<template>
+  <div class="view">
+    <header class="view-header">
+      <div><h1>{{ task ? task.name : "Create Task" }}</h1><p>Collaborate with the configured LLM to draft an artifact. Nothing is executed or activated.</p></div>
+      <RouterLink class="btn" to="/tasks">Back to Tasks</RouterLink>
+    </header>
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="loading" class="muted">Loading Task…</p>
+    <template v-else-if="!task">
+      <section class="card">
+        <div class="form-grid">
+          <label class="field">Task name<input v-model="name" placeholder="e.g. Restart unhealthy service" /></label>
+          <label class="field">Artifact type
+            <select v-model="artifactType"><option value="n8n">n8n workflow JSON</option><option value="python">Python program</option><option value="shell">Shell script</option></select>
+          </label>
+          <label v-if="artifactType === 'shell'" class="field">Shell target
+            <select v-model="shell"><option value="bash">Bash</option><option value="powershell">PowerShell</option></select>
+          </label>
+        </div>
+      </section>
+      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim()" @click="create">{{ saving ? "Creating…" : "Create Task" }}</button><RouterLink class="btn" to="/tasks">Cancel</RouterLink></div>
+    </template>
+    <template v-else>
+      <section class="card">
+        <div class="task-type-notice">
+          <strong>Artifact type:</strong>
+          {{ task.artifact_type === "n8n" ? "n8n workflow JSON" : task.artifact_type === "python" ? "Python program" : `${task.shell} script` }}.
+          This task type is fixed. To draft a different kind of artifact, create a new task.
+        </div>
+        <h2>Chat</h2>
+        <div class="messages" aria-live="polite">
+          <p v-if="!task.messages?.length" class="muted">Describe what you want the {{ task.artifact_type === 'shell' ? `${task.shell} script` : task.artifact_type }} to do.</p>
+          <article v-for="item in task.messages" :key="item.id" class="message" :class="item.role">
+            <strong>{{ item.role === "user" ? "You" : "Assistant" }}</strong><p>{{ item.content }}</p>
+          </article>
+          <p v-if="sending" class="muted">Generating response…</p>
+        </div>
+        <form class="composer" @submit.prevent="send">
+          <label class="field">Message<textarea v-model="message" rows="4" :disabled="sending" placeholder="Describe requirements, constraints, and expected behavior…" /></label>
+          <button class="btn primary" :disabled="sending || !message.trim()">{{ sending ? "Sending…" : "Send" }}</button>
+        </form>
+      </section>
+      <section v-if="task.artifacts?.length" class="card">
+        <h2>Version history</h2>
+        <div class="version-list">
+          <button
+            v-for="version in task.artifacts"
+            :key="version.id"
+            type="button"
+            class="version-button"
+            :class="{ selected: version.id === selectedVersionId && !hasGeneratedDraft }"
+            @click="selectVersion(version)"
+          >
+            <span>Version {{ version.version }}</span>
+            <small>{{ new Date(version.created_at).toLocaleString() }}</small>
+          </button>
+        </div>
+      </section>
+      <section v-if="hasArtifactToEdit" class="card">
+        <div class="artifact-header">
+          <h2>{{ hasGeneratedDraft ? "Generated draft · Unsaved" : `Version ${selectedVersion?.version} · Editable` }}</h2>
+          <div class="artifact-actions">
+            <button class="btn" :disabled="!editorContent" @click="downloadArtifact">Download</button>
+            <button
+              v-if="selectedVersion && !hasGeneratedDraft"
+              class="btn"
+              :disabled="deletingArtifact || savingArtifact"
+              @click="deleteSelectedVersion"
+            >{{ deletingArtifact ? "Deleting…" : "Delete" }}</button>
+          </div>
+        </div>
+        <label class="field artifact-field">Code<textarea v-model="editorContent" rows="20" spellcheck="false" /></label>
+        <div class="actions">
+          <button class="btn primary" :disabled="savingArtifact || !hasUnsavedChanges || !editorContent.trim()" @click="saveVersion">{{ savingArtifact ? "Saving…" : "Save Version" }}</button>
+          <button class="btn" :disabled="savingArtifact || !hasUnsavedChanges" @click="cancelEdit">Cancel</button>
+        </div>
+        <p class="muted">Review this artifact before using it. LogHawk does not run scripts or import/activate n8n workflows.</p>
+      </section>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.messages { display: grid; gap: .8rem; max-height: 50vh; overflow-y: auto; margin-bottom: 1rem; }
+.message { padding: .8rem; border-radius: .5rem; background: #17232d; }
+.message.user { border-left: 3px solid #6bd7bb; }
+.message.assistant { border-left: 3px solid #809bb0; }
+.message p { margin: .35rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.composer { display: grid; gap: .75rem; }
+textarea { width: 100%; padding: .7rem .75rem; color: #e8edf2; background: #17232d; border: 1px solid #344553; border-radius: .45rem; resize: vertical; }
+.artifact-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.artifact-header h2 { margin-bottom: 0; }
+.artifact-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+.artifact-field textarea { min-height: 24rem; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .84rem; line-height: 1.5; white-space: pre; }
+.version-list { display: flex; flex-wrap: wrap; gap: .6rem; }
+.version-button { display: grid; gap: .25rem; padding: .6rem .75rem; color: #d8e1e7; background: #17232d; border: 1px solid #344553; border-radius: .45rem; text-align: left; cursor: pointer; }
+.version-button.selected { border-color: #6bd7bb; box-shadow: 0 0 0 1px #6bd7bb; }
+.version-button small { color: #aebbc7; }
+@media (max-width: 520px) { .artifact-header { align-items: flex-start; flex-direction: column; } }
+</style>

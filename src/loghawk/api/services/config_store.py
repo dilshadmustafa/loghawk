@@ -162,6 +162,25 @@ def save_config_set(data: dict, config_set_id: str | None = None) -> dict | None
     return get_config_set(config_set_id)
 
 
+def delete_config_set(config_set_id: str) -> str:
+    """Delete a Config Set unless a saved Pipeline still references it."""
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        exists = connection.execute(
+            "SELECT 1 FROM config_sets WHERE id = ?", (config_set_id,)
+        ).fetchone()
+        if exists is None:
+            return "not_found"
+        in_use = connection.execute(
+            "SELECT 1 FROM pipelines WHERE config_set_id = ? LIMIT 1",
+            (config_set_id,),
+        ).fetchone()
+        if in_use:
+            return "in_use"
+        connection.execute("DELETE FROM config_sets WHERE id = ?", (config_set_id,))
+    return "deleted"
+
+
 def create_pipeline(data: dict) -> dict:
     pipeline_id = uuid4().hex
     now = _now()
@@ -191,6 +210,37 @@ def update_pipeline(pipeline_id: str, data: dict) -> dict | None:
         if cursor.rowcount == 0:
             return None
     return get_pipeline(pipeline_id)
+
+
+def delete_pipeline(pipeline_id: str) -> str:
+    """Delete a Pipeline and its local run history, leaving Temporal untouched."""
+    connection = _connect()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        exists = connection.execute(
+            "SELECT 1 FROM pipelines WHERE id = ?", (pipeline_id,)
+        ).fetchone()
+        if exists is None:
+            connection.rollback()
+            return "not_found"
+        active_run = connection.execute(
+            "SELECT 1 FROM pipeline_runs WHERE pipeline_id = ? AND status = 'RUNNING' LIMIT 1",
+            (pipeline_id,),
+        ).fetchone()
+        if active_run:
+            connection.rollback()
+            return "running"
+        connection.execute(
+            "DELETE FROM pipeline_runs WHERE pipeline_id = ?", (pipeline_id,)
+        )
+        connection.execute("DELETE FROM pipelines WHERE id = ?", (pipeline_id,))
+        connection.commit()
+        return "deleted"
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def _pipeline_with_latest_run(row: sqlite3.Row) -> dict:

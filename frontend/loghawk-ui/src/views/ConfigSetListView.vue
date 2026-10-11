@@ -1,17 +1,26 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { getConfigSets } from "../services/api";
+import { deleteConfigSet, getConfigSets } from "../services/api";
 import type { ConfigSet } from "../types/api";
 
 const items = ref<ConfigSet[]>([]);
 const error = ref("");
 const loading = ref(true);
+const deletingId = ref("");
 async function refresh() {
   loading.value = true;
   try { items.value = await getConfigSets(); error.value = ""; }
   catch (err) { error.value = err instanceof Error ? err.message : "Could not load Config Sets"; }
   finally { loading.value = false; }
+}
+async function remove(item: ConfigSet) {
+  if (!window.confirm(`Delete Config Set “${item.name}”?`)) return;
+  deletingId.value = item.id;
+  error.value = "";
+  try { await deleteConfigSet(item.id); await refresh(); }
+  catch (err) { error.value = err instanceof Error ? err.message : "Could not delete Config Set"; }
+  finally { deletingId.value = ""; }
 }
 onMounted(() => void refresh());
 </script>
@@ -25,7 +34,7 @@ onMounted(() => void refresh());
       <div v-else class="table-wrap"><table><thead><tr><th>Name</th><th>Mode</th><th>Inputs</th><th>Processing output</th><th></th></tr></thead>
         <tbody><tr v-for="item in items" :key="item.id"><td>{{ item.name }}</td><td><span class="pill">{{ item.external_data_use ? "External S3" : "Internal S3" }}</span></td>
           <td>{{ item.external_data_use ? `${item.train_sources.length} Train · ${item.detect_sources.length} Detect` : `${item.source_bucket}/${item.source_batch}` }}</td>
-          <td>s3://{{ item.output_bucket }}/{{ item.output_batch }}/</td><td><RouterLink :to="`/config-sets/${item.id}/edit`">View / Edit</RouterLink></td></tr></tbody>
+          <td>s3://{{ item.output_bucket }}/{{ item.output_batch }}/</td><td><div class="actions"><RouterLink :to="`/config-sets/${item.id}/edit`">View / Edit</RouterLink><button class="btn" :disabled="deletingId === item.id" @click="remove(item)">{{ deletingId === item.id ? "Deleting…" : "Delete" }}</button></div></td></tr></tbody>
       </table></div>
     </section>
   </div>

@@ -4,6 +4,53 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 RunMode = Literal["train", "detect", "train-detect"]
+TaskArtifactType = Literal["n8n", "python", "shell"]
+TaskShell = Literal["bash", "powershell"]
+
+
+class TaskWrite(BaseModel):
+    name: str
+    artifact_type: TaskArtifactType
+    shell: TaskShell | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_task_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Task name is required")
+        return value
+
+    @model_validator(mode="after")
+    def validate_shell(self):
+        if self.artifact_type == "shell" and self.shell is None:
+            raise ValueError("Choose Bash or PowerShell for a shell task")
+        if self.artifact_type != "shell" and self.shell is not None:
+            raise ValueError("Shell target is only valid for shell tasks")
+        return self
+
+
+class TaskMessageWrite(BaseModel):
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Message cannot be empty")
+        return value
+
+
+class TaskArtifactWrite(BaseModel):
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Artifact cannot be empty")
+        return value
 
 
 class ExternalS3Source(BaseModel):

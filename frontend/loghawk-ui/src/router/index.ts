@@ -5,6 +5,8 @@ import ConfigSetFormView from "../views/ConfigSetFormView.vue";
 import PipelineListView from "../views/PipelineListView.vue";
 import PipelineFormView from "../views/PipelineFormView.vue";
 import PipelineRunDetailView from "../views/PipelineRunDetailView.vue";
+import TaskListView from "../views/TaskListView.vue";
+import TaskWorkspaceView from "../views/TaskWorkspaceView.vue";
 
 export default createRouter({
   history: createWebHistory(),
@@ -18,5 +20,8 @@ export default createRouter({
     { path: "/pipelines/new", name: "pipeline-create", component: PipelineFormView },
     { path: "/pipelines/:id/edit", name: "pipeline-edit", component: PipelineFormView },
     { path: "/pipeline-runs/:workflowId", name: "pipeline-run-detail", component: PipelineRunDetailView },
+    { path: "/tasks", name: "tasks", component: TaskListView },
+    { path: "/tasks/new", name: "task-create", component: TaskWorkspaceView },
+    { path: "/tasks/:id", name: "task-workspace", component: TaskWorkspaceView },
   ],
 });
