@@ -1,0 +1,893 @@
+"""Hawk: cross-platform split-pane CLI for LogHawk chat, commands, and Tasks."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import shlex
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+import duckdb
+from textual import work
+from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
+
+import loghawk.config as config
+from loghawk.cli.command_terminal import CommandShellSession
+from loghawk.cli import task_workspace
+from loghawk.llm import get_llm_client
+from loghawk.utils import lancedbutils2
+
+
+def _quoted_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+class ConfirmDeleteScreen(ModalScreen[bool]):
+    """Confirmation dialog for deleting a saved Task artifact version."""
+
+    CSS = """
+    ConfirmDeleteScreen { align: center middle; }
+    #confirm-box { width: 64; height: auto; padding: 1 2; border: round $primary; background: $surface; }
+    #confirm-box Button { margin: 1 1 0 0; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container(id="confirm-box"):
+            yield Static("Delete this saved Task version? This action cannot be undone.")
+            with Horizontal():
+                yield Button("Delete version", variant="error", id="confirm-delete")
+                yield Button("Cancel", id="cancel-delete")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm-delete")
+
+
+class DownloadPathScreen(ModalScreen[str | None]):
+    """Prompt for a destination path when downloading an artifact."""
+
+    CSS = """
+    DownloadPathScreen { align: center middle; }
+    #download-box { width: 80; height: auto; padding: 1 2; border: round $primary; background: $surface; }
+    #download-box Input { margin: 1 0; }
+    #download-box Button { margin: 0 1 0 0; }
+    """
+
+    def __init__(self, suggested_path: str) -> None:
+        super().__init__()
+        self.suggested_path = suggested_path
+
+    def compose(self) -> ComposeResult:
+        with Container(id="download-box"):
+            yield Static("Download artifact to:")
+            yield Input(value=self.suggested_path, id="download-path")
+            with Horizontal():
+                yield Button("Download", variant="primary", id="confirm-download")
+                yield Button("Cancel", id="cancel-download")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "confirm-download":
+            self.dismiss(self.query_one("#download-path", Input).value.strip())
+        else:
+            self.dismiss(None)
+
+
+class HawkCLI(App[None]):
+    """Three terminal panes alongside an editable Task artifact workspace."""
+
+    TITLE = "Hawk CLI"
+    BINDINGS = [("ctrl+q", "quit", "Quit Hawk")]
+    CSS = """
+    Screen {
+        layout: horizontal;
+        padding: 0;
+    }
+    #terminal-column {
+        layout: vertical;
+        width: 1fr;
+        height: 1fr;
+    }
+    .pane {
+        border: round $primary;
+        padding: 0 1;
+        height: 1fr;
+        width: 1fr;
+    }
+    .pane-title { text-style: bold; height: 1; }
+    #editor-pane { width: 1.25fr; height: 1fr; }
+    #llm-output, #command-one-output, #command-two-output { height: 1fr; }
+    #editor-toolbar { height: auto; min-height: 3; }
+    #task-create-pane { height: auto; padding: 0 1; }
+    #task-create-fields { height: auto; }
+    #task-chat-pane { height: 1fr; min-height: 8; }
+    #task-chat-output { height: 1fr; }
+    #task-message-row { height: auto; }
+    #version-select { width: 1fr; }
+    #editor { height: 1fr; border: round $secondary; }
+    Button { min-width: 10; }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.current_task: dict | None = None
+        self.current_artifact: dict | None = None
+        self._editor_baseline = ""
+        self._suppress_version_event = False
+        self._has_generated_draft = False
+        self._task_chat_busy = False
+        self._pending_task_runs: dict[str, tuple[dict, dict]] = {}
+        self._chat_history: list[dict[str, str]] = []
+        self._chat_busy = False
+        self._sessions: dict[str, CommandShellSession] = {}
+
+    def compose(self) -> ComposeResult:
+        with Container(id="terminal-column"):
+            with Container(id="llm-pane", classes="pane"):
+                yield Static("LLM Terminal · Ctrl+Q to quit", classes="pane-title")
+                yield RichLog(id="llm-output", wrap=True, markup=False, auto_scroll=True)
+                yield Input(placeholder="Chat with the configured LLM…", id="llm-input")
+
+            with Container(id="command-one-pane", classes="pane"):
+                yield Static("Command Terminal 1 · /taskview <taskname> · /tasknew · /taskrun <taskname>", classes="pane-title")
+                yield RichLog(id="command-one-output", wrap=True, markup=False, auto_scroll=True)
+                with Horizontal():
+                    yield Input(placeholder="Shell command · /taskview <taskname> · /tasknew · /taskrun <taskname>", id="command-one-input")
+                    yield Button("Stop", id="command-one-stop")
+
+            with Container(id="command-two-pane", classes="pane"):
+                yield Static("Command Terminal 2 · /taskview <taskname> · /tasknew · /taskrun <taskname>", classes="pane-title")
+                yield RichLog(id="command-two-output", wrap=True, markup=False, auto_scroll=True)
+                with Horizontal():
+                    yield Input(placeholder="Shell command · /taskview <taskname> · /tasknew · /taskrun <taskname>", id="command-two-input")
+                    yield Button("Stop", id="command-two-stop")
+
+        with Container(id="editor-pane", classes="pane"):
+            yield Static("Editor · use /task <name> or /tasknew", classes="pane-title")
+            with Container(id="task-create-pane"):
+                yield Static("Create Task", classes="pane-title")
+                with Horizontal(id="task-create-fields"):
+                    yield Input(placeholder="Task name", id="task-name-input")
+                    yield Select(
+                        [("Python", "python"), ("Shell", "shell"), ("n8n", "n8n")],
+                        value="python",
+                        allow_blank=False,
+                        id="task-type-select",
+                    )
+                yield Static("Shell target", id="task-type-shell-label")
+                yield Select(
+                    [("Bash", "bash"), ("PowerShell", "powershell")],
+                    value="bash",
+                    allow_blank=False,
+                    id="task-shell-select",
+                )
+                with Horizontal():
+                    yield Button("Create Task", variant="primary", id="create-task")
+                    yield Button("Cancel", id="cancel-create-task")
+            with Container(id="task-chat-pane"):
+                yield Static("Task Chat", classes="pane-title")
+                yield RichLog(id="task-chat-output", wrap=True, markup=False, auto_scroll=True)
+                with Horizontal(id="task-message-row"):
+                    yield Input(placeholder="Describe the artifact you want…", id="task-message-input")
+                    yield Button("Send", variant="primary", id="send-task-message")
+            with Horizontal(id="editor-toolbar"):
+                yield Select([], prompt="Task version", allow_blank=True, id="version-select")
+                yield Button("Save Version", id="save-version")
+                yield Button("Download", id="download-version")
+                yield Button("Delete", variant="error", id="delete-version")
+                yield Button("Cancel", id="cancel-edit")
+            yield TextArea("", id="editor", soft_wrap=False)
+            yield Static("No Task loaded.", id="editor-status")
+
+    async def on_mount(self) -> None:
+        self.query_one("#llm-output", RichLog).write(
+            f"Model: {config.LH_LLM_MODEL}\n"
+            "Chat uses the configured LiteLLM provider and indexed LanceDB context when available.\n"
+        )
+        for terminal_id, output_id in (
+            ("command-one", "command-one-output"),
+            ("command-two", "command-two-output"),
+        ):
+            output = self.query_one(f"#{output_id}", RichLog)
+            session = CommandShellSession(
+                on_output=output.write,
+                cwd=str(config.PROJECT_ROOT),
+            )
+            self._sessions[terminal_id] = session
+            try:
+                await session.start()
+            except Exception as exc:
+                output.write(f"Could not start command shell: {exc}\n")
+        self.query_one("#task-create-pane", Container).display = False
+        self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#task-shell-select", Select).display = False
+        self.query_one("#task-type-shell-label", Static).display = False
+        self._load_chat_history()
+        self._sync_editor_controls()
+
+    def _load_chat_history(self) -> None:
+        table = _quoted_identifier(config.LH_DUCKDB_TABLE_NAME)
+        connection = None
+        try:
+            connection = duckdb.connect(str(config.LH_DUCKDB_FILE_PATH))
+            connection.execute(
+                f"CREATE TABLE IF NOT EXISTS {table} ("
+                "user_id VARCHAR, user_name VARCHAR, user_email VARCHAR, "
+                "role VARCHAR, content VARCHAR, creation_date DATE)"
+            )
+            rows = connection.execute(
+                f"SELECT role, content FROM {table} ORDER BY creation_date"
+            ).fetchall()
+            self._chat_history = [
+                {"role": str(role), "content": str(content)}
+                for role, content in rows
+                if role in {"user", "assistant"}
+            ]
+            if self._chat_history:
+                self.query_one("#llm-output", RichLog).write(
+                    f"Loaded {len(self._chat_history)} prior chat messages from DuckDB.\n"
+                )
+        except Exception as exc:
+            self.query_one("#llm-output", RichLog).write(
+                f"Could not load DuckDB chat history: {exc}\n"
+            )
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def _persist_chat_message(self, role: str, content: str) -> None:
+        table = _quoted_identifier(config.LH_DUCKDB_TABLE_NAME)
+        connection = duckdb.connect(str(config.LH_DUCKDB_FILE_PATH))
+        try:
+            connection.execute(
+                f"CREATE TABLE IF NOT EXISTS {table} ("
+                "user_id VARCHAR, user_name VARCHAR, user_email VARCHAR, "
+                "role VARCHAR, content VARCHAR, creation_date DATE)"
+            )
+            connection.execute(
+                f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, current_date)",
+                ["anon", "anon", "anon@anon.com", role, content],
+            )
+        finally:
+            connection.close()
+
+    def _retrieve_context(self, prompt: str) -> str:
+        database = lancedbutils2.connect_database()
+        table = lancedbutils2.open_table(database, config.LH_LANCEDB_TABLE_NAME)
+        if table is None:
+            return ""
+        vector = lancedbutils2.embed_texts([prompt])[0]
+        rows = table.search(vector).limit(5).to_list()
+        chunks = []
+        for row in rows:
+            if isinstance(row, dict):
+                value = row.get("text") or row.get("content") or row.get("document")
+            else:
+                value = row
+            if value and str(value).strip():
+                chunks.append(str(value).strip())
+        return "\n\n".join(chunks)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
+        if not text:
+            return
+        event.input.value = ""
+        if event.input.id == "task-message-input":
+            self._submit_task_message(text)
+            return
+        if event.input.id == "llm-input":
+            if self._chat_busy:
+                self.query_one("#llm-output", RichLog).write("Wait for the current response to finish.\n")
+                return
+            self._chat_busy = True
+            event.input.disabled = True
+            self.query_one("#llm-output", RichLog).write(f"\nYou: {text}\nAssistant: ")
+            self._run_chat(text)
+            return
+
+        terminal_id = "command-one" if event.input.id == "command-one-input" else "command-two"
+        output_id = f"{terminal_id}-output"
+        output = self.query_one(f"#{output_id}", RichLog)
+        if terminal_id in self._pending_task_runs:
+            self._confirm_task_run(terminal_id, text)
+            return
+        if text.startswith("/task"):
+            self._handle_task_command(text, output, terminal_id)
+            return
+        output.write(f"$ {text}\n")
+        self.run_worker(self._run_command(terminal_id, text), name=f"{terminal_id}-command")
+
+    @work(thread=True, exclusive=True, group="hawk-llm")
+    def _run_chat(self, prompt: str) -> None:
+        response_parts: list[str] = []
+        try:
+            try:
+                context = self._retrieve_context(prompt)
+            except Exception as exc:
+                context = ""
+                self.app.call_from_thread(
+                    self._write_chat_chunk,
+                    f"\n[RAG retrieval skipped: {exc}]\n",
+                )
+            user_content = prompt
+            if context:
+                user_content = (
+                    "Use the following retrieved context to answer the user's question.\n\n"
+                    f"Context:\n{context}\n\nQuestion:\n{prompt}"
+                )
+            messages = [
+                *self._chat_history,
+                {"role": "user", "content": user_content},
+            ]
+            client = get_llm_client()
+            candidates = [config.LH_LLM_MODEL, *config.LH_LLM_FALLBACK_MODELS]
+            last_error: Exception | None = None
+            for model in dict.fromkeys(name for name in candidates if name):
+                try:
+                    for chunk in client.stream(messages, model=model):
+                        response_parts.append(chunk)
+                        self.app.call_from_thread(
+                            self._write_chat_chunk,
+                            chunk,
+                        )
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if response_parts:
+                        break
+                    response_parts.clear()
+            if last_error is not None:
+                raise last_error
+            response = "".join(response_parts)
+            if not response:
+                raise RuntimeError("The configured LLM returned an empty response.")
+            self._chat_history.append({"role": "user", "content": user_content})
+            self._chat_history.append({"role": "assistant", "content": response})
+            self._persist_chat_message("user", prompt)
+            self._persist_chat_message("assistant", response)
+            self.app.call_from_thread(self._finish_chat, None)
+        except Exception as exc:
+            self.app.call_from_thread(self._finish_chat, str(exc))
+
+    def _write_chat_chunk(self, chunk: str) -> None:
+        self.query_one("#llm-output", RichLog).write(chunk)
+
+    def _finish_chat(self, error: str | None) -> None:
+        output = self.query_one("#llm-output", RichLog)
+        if error:
+            output.write(f"\nLLM chat failed: {error}")
+        output.write("\n\n")
+        self.query_one("#llm-input", Input).disabled = False
+        self.query_one("#llm-input", Input).focus()
+        self._chat_busy = False
+
+    async def _run_command(self, terminal_id: str, command: str) -> None:
+        session = self._sessions[terminal_id]
+        try:
+            await session.submit(command)
+        except Exception as exc:
+            self.query_one(f"#{terminal_id}-output", RichLog).write(
+                f"Command failed: {exc}\n"
+            )
+
+    def _handle_task_command(
+        self, command: str, output: RichLog, terminal_id: str
+    ) -> None:
+        try:
+            parts = shlex.split(command)
+        except ValueError as exc:
+            output.write(f"Invalid /task command: {exc}\n")
+            return
+        command_name = parts[0].lower() if parts else ""
+        if command_name == "/tasknew":
+            if len(parts) != 1:
+                output.write("Usage: /tasknew\n")
+                return
+            if self.current_task and (
+                self._editor_is_dirty() or self._has_generated_draft
+            ):
+                output.write("Save or cancel the current Task edits before starting a new Task.\n")
+                return
+            if self._task_chat_busy:
+                output.write("Wait for the current Task assistant response before starting a new Task.\n")
+                return
+            self._begin_task_creation()
+            output.write("Task creation form opened in the Editor pane.\n")
+            return
+        if command_name == "/taskrun":
+            if len(parts) != 2:
+                output.write('Usage: /taskrun <taskname> (quote names containing spaces)\n')
+                return
+            if self._sessions[terminal_id].busy:
+                output.write("Wait for the current command to finish before running a Task.\n")
+                return
+            if self._task_chat_busy:
+                output.write("Wait for the current Task assistant response before running a Task.\n")
+                return
+            if self.current_task and (
+                self._editor_is_dirty() or self._has_generated_draft
+            ):
+                output.write("Save or cancel the current Task edits before running another Task.\n")
+                return
+            task = task_workspace.find_task_by_name(parts[1])
+            if task is None:
+                output.write(f"Task not found: {parts[1]}\n")
+                return
+            artifact = task.get("latest_artifact")
+            if artifact is None:
+                output.write(f"Task has no saved artifact version: {task['name']}\n")
+                return
+            self._load_task(task)
+            if task["artifact_type"] == "n8n":
+                output.write(
+                    f"Loaded {task['name']} Version {artifact['version']} in the Editor pane. "
+                    "n8n workflow JSON must be imported into the customer-managed n8n instance to run.\n"
+                )
+                return
+            self._pending_task_runs[terminal_id] = (task, artifact)
+            output.write(
+                f"Run {task['name']} · Version {artifact['version']}? (Y/N): "
+            )
+            return
+        if len(parts) != 2 or command_name != "/taskview":
+            output.write('Usage: /taskview <taskname> (quote names containing spaces)\n')
+            return
+        if self._task_chat_busy:
+            output.write("Wait for the current Task assistant response before switching Tasks.\n")
+            return
+        if self.current_task and (
+            self._editor_is_dirty() or self._has_generated_draft
+        ):
+            output.write("Save or discard the current editor changes before loading another Task.\n")
+            return
+        task = task_workspace.find_task_by_name(parts[1])
+        if task is None:
+            output.write(f"Task not found: {parts[1]}\n")
+            return
+        self._load_task(task)
+        output.write(f"Loaded Task: {task['name']}\n")
+
+    def _confirm_task_run(self, terminal_id: str, answer: str) -> None:
+        output = self.query_one(f"#{terminal_id}-output", RichLog)
+        normalized = answer.strip().casefold()
+        if normalized in {"n", "no"}:
+            self._pending_task_runs.pop(terminal_id, None)
+            output.write("Task run canceled.\n")
+            return
+        if normalized not in {"y", "yes"}:
+            output.write("Please answer Y or N: ")
+            return
+        task, artifact = self._pending_task_runs.pop(terminal_id)
+        output.write(f"Confirmed. Running {task['name']} Version {artifact['version']}…\n")
+        self.run_worker(
+            self._run_task_artifact(terminal_id, task, artifact),
+            name=f"task-run-{terminal_id}",
+        )
+
+    async def _run_task_artifact(
+        self, terminal_id: str, task: dict, artifact: dict
+    ) -> None:
+        output = self.query_one(f"#{terminal_id}-output", RichLog)
+        artifact_type = task["artifact_type"]
+        shell = task.get("shell")
+        suffix = ".py" if artifact_type == "python" else (".ps1" if shell == "powershell" else ".sh")
+        session = self._sessions[terminal_id]
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="hawk-task-") as temp_dir:
+                artifact_path = Path(temp_dir) / f"task{suffix}"
+                artifact_path.write_text(artifact["content"], encoding="utf-8")
+                command = self._task_execution_command(
+                    artifact_type, shell, artifact_path
+                )
+                if not await session.submit(command):
+                    output.write("Could not start the Task in this command terminal.\n")
+                    return
+                while session.busy:
+                    await asyncio.sleep(0.1)
+        except Exception as exc:
+            output.write(f"Task run failed: {exc}\n")
+
+    @staticmethod
+    def _task_execution_command(
+        artifact_type: str, shell: str | None, artifact_path: Path
+    ) -> str:
+        if os.name == "nt":
+            quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+            path = quote(artifact_path)
+            cleanup = f"Remove-Item -LiteralPath {path} -Force"
+            if artifact_type == "python":
+                executable = quote(sys.executable)
+                return (
+                    f"& {executable} {path}; $taskExitCode = $LASTEXITCODE; "
+                    f"{cleanup}; Write-Output ('[Task exit code: ' + $taskExitCode + ']')"
+                )
+            if shell == "bash":
+                executable = shutil.which("bash")
+                if not executable:
+                    raise RuntimeError("Bash is not installed or not available on PATH.")
+                return (
+                    f"& {quote(executable)} {path}; $taskExitCode = $LASTEXITCODE; "
+                    f"{cleanup}; Write-Output ('[Task exit code: ' + $taskExitCode + ']')"
+                )
+            executable = (
+                shutil.which("pwsh")
+                or shutil.which("powershell")
+                or shutil.which("powershell.exe")
+            )
+            if not executable:
+                raise RuntimeError("PowerShell is not available on PATH.")
+            return (
+                f"& {quote(executable)} -NoProfile -File {path}; "
+                f"$taskExitCode = $LASTEXITCODE; {cleanup}; "
+                "Write-Output ('[Task exit code: ' + $taskExitCode + ']')"
+            )
+
+        path = shlex.quote(str(artifact_path))
+        cleanup = f"rm -f -- {path}"
+        if artifact_type == "python":
+            return (
+                f"{shlex.quote(sys.executable)} {path}; task_exit_code=$?; "
+                f"{cleanup}; printf '[Task exit code: %s]\\n' \"$task_exit_code\""
+            )
+        if shell == "bash":
+            executable = shutil.which("bash")
+            if not executable:
+                raise RuntimeError("Bash is not installed or not available on PATH.")
+            return (
+                f"{shlex.quote(executable)} {path}; task_exit_code=$?; {cleanup}; "
+                "printf '[Task exit code: %s]\\n' \"$task_exit_code\""
+            )
+        executable = shutil.which("pwsh")
+        if not executable:
+            raise RuntimeError("PowerShell (pwsh) is not installed or not available on PATH.")
+        return (
+            f"{shlex.quote(executable)} -NoProfile -File {path}; "
+            f"task_exit_code=$?; {cleanup}; printf '[Task exit code: %s]\\n' \"$task_exit_code\""
+        )
+
+    def _begin_task_creation(self) -> None:
+        self.current_task = None
+        self.current_artifact = None
+        self._has_generated_draft = False
+        self.query_one("#task-create-pane", Container).display = True
+        self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#task-name-input", Input).value = ""
+        self.query_one("#task-type-select", Select).value = "python"
+        self.query_one("#task-shell-select", Select).value = "bash"
+        version_selector = self.query_one("#version-select", Select)
+        version_selector.set_options([])
+        version_selector.clear()
+        self.query_one("#task-chat-output", RichLog).clear()
+        self.query_one("#task-shell-select", Select).display = False
+        self.query_one("#task-type-shell-label", Static).display = False
+        self.query_one("#editor-status", Static).update(
+            "Enter Task details, then create it to start the assistant chat."
+        )
+        self._set_editor_text("")
+        self._sync_editor_controls()
+
+    def _create_task(self) -> None:
+        name = self.query_one("#task-name-input", Input).value.strip()
+        if not name:
+            self.notify("Task name is required.", severity="warning")
+            self.query_one("#task-name-input", Input).focus()
+            return
+        artifact_type = str(self.query_one("#task-type-select", Select).value)
+        shell = (
+            str(self.query_one("#task-shell-select", Select).value)
+            if artifact_type == "shell"
+            else None
+        )
+        try:
+            task = task_workspace.create_task(name, artifact_type, shell)
+        except Exception as exc:
+            self.notify(f"Could not create Task: {exc}", severity="error")
+            return
+        self._load_task(task)
+        self.query_one("#editor-status", Static).update(
+            f"{task['name']} · {artifact_type} · describe the artifact in Task Chat"
+        )
+
+    def _cancel_task_creation(self) -> None:
+        self.query_one("#task-create-pane", Container).display = False
+        self.query_one("#task-chat-pane", Container).display = False
+        self._set_editor_text("")
+        self._sync_editor_controls()
+        self.query_one("#editor-status", Static).update(
+            "Task creation canceled; no Task was saved."
+        )
+
+    def _submit_task_message(self, prompt: str) -> None:
+        if not self.current_task:
+            self.notify("Create or load a Task before chatting with its assistant.", severity="warning")
+            return
+        if self._task_chat_busy:
+            self.notify("Wait for the current Task assistant response to finish.", severity="warning")
+            return
+        message_input = self.query_one("#task-message-input", Input)
+        message_input.disabled = True
+        self.query_one("#send-task-message", Button).disabled = True
+        self._task_chat_busy = True
+        self.query_one("#task-chat-output", RichLog).write(
+            f"You: {prompt}\nAssistant: …\n"
+        )
+        self._run_task_message(self.current_task["id"], prompt)
+
+    @work(thread=True, exclusive=True, group="hawk-task-assistant")
+    def _run_task_message(self, task_id: str, prompt: str) -> None:
+        try:
+            task = task_workspace.respond_to_message(task_id, prompt)
+            if task is None:
+                raise RuntimeError("Task was deleted before the assistant could respond.")
+            self.app.call_from_thread(self._finish_task_message, task, None)
+        except Exception as exc:
+            task = task_workspace.get_task(task_id)
+            self.app.call_from_thread(self._finish_task_message, task, str(exc))
+
+    def _finish_task_message(self, task: dict | None, error: str | None) -> None:
+        self._task_chat_busy = False
+        self.query_one("#task-message-input", Input).disabled = False
+        self.query_one("#send-task-message", Button).disabled = False
+        if task is not None:
+            self.current_task = task
+            self._render_task_messages(task)
+            draft = task.get("draft_artifact")
+            if draft:
+                self._has_generated_draft = True
+                self.query_one("#editor", TextArea).text = draft
+                self.query_one("#editor-status", Static).update(
+                    f"{task['name']} · generated draft · unsaved"
+                )
+        if error:
+            self.query_one("#task-chat-output", RichLog).write(
+                f"Task assistant failed: {error}\n"
+            )
+        self._sync_editor_controls()
+
+    def _render_task_messages(self, task: dict) -> None:
+        output = self.query_one("#task-chat-output", RichLog)
+        output.clear()
+        for message in task.get("messages", []):
+            label = "You" if message["role"] == "user" else "Assistant"
+            output.write(f"{label}: {message['content']}\n")
+
+    def _load_task(self, task: dict) -> None:
+        self.current_task = task
+        self._has_generated_draft = False
+        self.query_one("#task-create-pane", Container).display = False
+        self.query_one("#task-chat-pane", Container).display = True
+        self._render_task_messages(task)
+        artifacts = task.get("artifacts", [])
+        options = [
+            (f"Version {item['version']} · {item['created_at']}", item["id"])
+            for item in artifacts
+        ]
+        selector = self.query_one("#version-select", Select)
+        self._suppress_version_event = True
+        selector.set_options(options)
+        if artifacts:
+            self._load_artifact(artifacts[0])
+            selector.value = artifacts[0]["id"]
+        else:
+            self.current_artifact = None
+            self._set_editor_text("")
+            self.query_one("#editor-status", Static).update(
+                f"{task['name']} · no saved artifact versions yet"
+            )
+            selector.clear()
+        self._suppress_version_event = False
+        self._sync_editor_controls()
+
+    def _load_artifact(self, artifact: dict) -> None:
+        self.current_artifact = artifact
+        self._set_editor_text(artifact["content"])
+        self.query_one("#editor-status", Static).update(
+            f"{self.current_task['name']} · Version {artifact['version']}"
+        )
+
+    def _set_editor_text(self, text: str) -> None:
+        editor = self.query_one("#editor", TextArea)
+        editor.text = text
+        self._editor_baseline = text
+
+    def _editor_is_dirty(self) -> bool:
+        return self.query_one("#editor", TextArea).text != self._editor_baseline
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "task-type-select":
+            show_shell = event.value == "shell"
+            self.query_one("#task-type-shell-label", Static).display = show_shell
+            self.query_one("#task-shell-select", Select).display = show_shell
+            return
+        if event.select.id != "version-select" or self._suppress_version_event:
+            return
+        if event.select.is_blank or not self.current_task:
+            return
+        if self._editor_is_dirty() or self._has_generated_draft:
+            self.notify("Save or cancel the current draft before selecting another version.", severity="warning")
+            if self.current_artifact:
+                event.select.value = self.current_artifact["id"]
+            else:
+                event.select.clear()
+            return
+        artifact = task_workspace.get_artifact(self.current_task["id"], str(event.value))
+        if artifact is not None:
+            self._load_artifact(artifact)
+            self._sync_editor_controls()
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id == "editor":
+            self._sync_editor_controls()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "task-name-input" and self.is_mounted:
+            self.query_one("#create-task", Button).disabled = not bool(
+                event.value.strip()
+            )
+
+    def _sync_editor_controls(self) -> None:
+        if not self.is_mounted:
+            return
+        editor = self.query_one("#editor", TextArea)
+        has_task = self.current_task is not None
+        dirty = editor.text != self._editor_baseline
+        self.query_one("#save-version", Button).disabled = not (
+            has_task and (dirty or self._has_generated_draft) and bool(editor.text.strip())
+        )
+        self.query_one("#download-version", Button).disabled = not (
+            has_task and bool(editor.text.strip())
+        )
+        self.query_one("#delete-version", Button).disabled = not (
+            has_task and self.current_artifact is not None and not self._has_generated_draft
+        )
+        self.query_one("#cancel-edit", Button).disabled = not (
+            has_task and (dirty or self._has_generated_draft)
+        )
+        self.query_one("#version-select", Select).disabled = not has_task
+        self.query_one("#create-task", Button).disabled = not bool(
+            self.query_one("#task-name-input", Input).value.strip()
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "create-task":
+            self._create_task()
+        elif event.button.id == "cancel-create-task":
+            self._cancel_task_creation()
+        elif event.button.id == "send-task-message":
+            message_input = self.query_one("#task-message-input", Input)
+            prompt = message_input.value.strip()
+            if prompt:
+                message_input.value = ""
+                self._submit_task_message(prompt)
+        elif event.button.id == "cancel-edit":
+            self._cancel_edit()
+        elif event.button.id == "save-version":
+            self._save_version()
+        elif event.button.id == "download-version":
+            self._download_version()
+        elif event.button.id == "delete-version":
+            self._confirm_delete_version()
+        elif event.button.id in {"command-one-stop", "command-two-stop"}:
+            terminal_id = event.button.id.removesuffix("-stop")
+            self.run_worker(self._sessions[terminal_id].stop(), name=f"{terminal_id}-stop")
+
+    def _save_version(self) -> None:
+        if not self.current_task:
+            return
+        try:
+            task = task_workspace.save_artifact(
+                self.current_task["id"],
+                self.query_one("#editor", TextArea).text,
+            )
+            if task:
+                self._load_task(task)
+                self.query_one("#editor-status", Static).update(
+                    f"{task['name']} · Version {task['latest_artifact']['version']} saved"
+                )
+        except Exception as exc:
+            self.notify(f"Could not save version: {exc}", severity="error")
+
+    def _cancel_edit(self) -> None:
+        if not self.current_task:
+            return
+        self._has_generated_draft = False
+        self._set_editor_text(self._editor_baseline)
+        if self.current_artifact:
+            status = f"{self.current_task['name']} · Version {self.current_artifact['version']}"
+        else:
+            status = f"{self.current_task['name']} · no saved artifact version selected"
+        self.query_one("#editor-status", Static).update(status)
+        self._sync_editor_controls()
+
+    def _download_version(self) -> None:
+        if not self.current_task:
+            return
+        content = self.query_one("#editor", TextArea).text
+        if not content.strip():
+            return
+        version = (
+            self.current_artifact["version"]
+            if self.current_artifact and not self._has_generated_draft
+            else None
+        )
+        filename = self._artifact_filename(
+            self.current_task,
+            version,
+        )
+        self.push_screen(
+            DownloadPathScreen(filename),
+            callback=lambda destination: self._download_to_path(
+                destination,
+                content,
+            ),
+        )
+
+    def _download_to_path(self, destination: str | None, content: str) -> None:
+        if not destination:
+            return
+        path = Path(destination).expanduser()
+        try:
+            if path.exists():
+                raise FileExistsError(f"File already exists: {path}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            self.query_one("#editor-status", Static).update(f"Downloaded to {path}")
+        except OSError as exc:
+            self.notify(f"Could not download artifact: {exc}", severity="error")
+
+    @staticmethod
+    def _artifact_filename(task: dict, version: int | None) -> str:
+        suffix = {
+            "n8n": ".json",
+            "python": ".py",
+            "shell": ".ps1" if task.get("shell") == "powershell" else ".sh",
+        }.get(task["artifact_type"], ".txt")
+        safe_name = "".join(
+            character if character.isalnum() or character in "-_." else "-"
+            for character in task["name"]
+        ).strip("-.") or "loghawk-task"
+        version_label = f"v{version}" if version is not None else "draft"
+        return f"{safe_name}-{version_label}{suffix}"
+
+    def _confirm_delete_version(self) -> None:
+        if not self.current_task or not self.current_artifact:
+            return
+        self.push_screen(ConfirmDeleteScreen(), callback=self._delete_version)
+
+    def _delete_version(self, confirmed: bool) -> None:
+        if not confirmed or not self.current_task or not self.current_artifact:
+            return
+        task_id = self.current_task["id"]
+        artifact_id = self.current_artifact["id"]
+        deleted_version = self.current_artifact["version"]
+        if task_workspace.delete_artifact(task_id, artifact_id):
+            task = task_workspace.get_task(task_id)
+            if task:
+                self._load_task(task)
+                self.query_one("#editor-status", Static).update(
+                    f"Deleted Version {deleted_version}"
+                )
+        else:
+            self.notify("Artifact version was not found.", severity="error")
+
+    async def on_unmount(self) -> None:
+        await asyncio.gather(
+            *(session.close() for session in self._sessions.values()),
+            return_exceptions=True,
+        )
+
+
+def main() -> None:
+    """Launch the Hawk terminal UI."""
+    HawkCLI().run()
+
+
+if __name__ == "__main__":
+    main()
