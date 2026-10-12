@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hawk = "loghawk.cli.hawk_cli:main"
+hawk = "loghawk.cli.hawk_console:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

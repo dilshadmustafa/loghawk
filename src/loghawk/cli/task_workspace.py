@@ -6,7 +6,7 @@ from loghawk.api.services import task_service, task_store
 
 
 def list_tasks() -> list[dict]:
-    """Return saved Tasks from the shared Web UI SQLite store."""
+    """Return saved Tasks from Hawk Console's local SQLite store."""
     return task_store.list_tasks()
 
 
@@ -26,7 +26,7 @@ def get_task(task_id: str) -> dict | None:
 def create_task(
     name: str, category: str, artifact_type: str, shell: str | None = None
 ) -> dict:
-    """Create a Task using the same SQLite store as the Web UI."""
+    """Create a Task in Hawk Console's local SQLite store."""
     return task_store.create_task(
         {
             "name": name.strip(),

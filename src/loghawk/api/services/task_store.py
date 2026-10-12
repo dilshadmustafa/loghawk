@@ -9,11 +9,19 @@ from pathlib import Path
 from uuid import uuid4
 
 import loghawk.config as config
+from loghawk.utils.user_identity import get_userid
 
 
 DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_webui.sqlite3"
 _SCHEMA_LOCK = threading.Lock()
 _SCHEMA_READY = False
+
+
+def configure_database_path(path: Path) -> None:
+    """Select the SQLite database for this process before store operations begin."""
+    global DB_PATH, _SCHEMA_READY
+    DB_PATH = Path(path)
+    _SCHEMA_READY = False
 
 
 def _now() -> str:
@@ -35,6 +43,7 @@ def _ensure_schema() -> None:
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
+                    userid TEXT NOT NULL,
                     category TEXT NOT NULL DEFAULT 'Uncategorized',
                     artifact_type TEXT NOT NULL CHECK (
                         artifact_type IN ('n8n', 'python', 'shell')
@@ -46,6 +55,7 @@ def _ensure_schema() -> None:
                 CREATE TABLE IF NOT EXISTS task_messages (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    userid TEXT NOT NULL,
                     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -55,6 +65,7 @@ def _ensure_schema() -> None:
                 CREATE TABLE IF NOT EXISTS task_artifacts (
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    userid TEXT NOT NULL,
                     version INTEGER NOT NULL,
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -70,6 +81,18 @@ def _ensure_schema() -> None:
                 connection.execute(
                     "ALTER TABLE tasks ADD COLUMN category "
                     "TEXT NOT NULL DEFAULT 'Uncategorized'"
+                )
+            for table_name in ("tasks", "task_messages", "task_artifacts"):
+                columns = {
+                    row[1]
+                    for row in connection.execute(f"PRAGMA table_info({table_name})")
+                }
+                if "userid" not in columns:
+                    connection.execute(f"ALTER TABLE {table_name} ADD COLUMN userid TEXT")
+                connection.execute(
+                    f"UPDATE {table_name} SET userid = ? "
+                    "WHERE userid IS NULL OR TRIM(userid) = ''",
+                    (get_userid(),),
                 )
             artifact_columns = {
                 row[1]
@@ -175,8 +198,8 @@ def create_task(data: dict) -> dict:
     with _connect() as connection:
         connection.execute(
             """INSERT INTO tasks
-               (id, name, category, artifact_type, shell, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (id, name, category, artifact_type, shell, created_at, updated_at, userid)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task_id,
                 data["name"],
@@ -185,6 +208,7 @@ def create_task(data: dict) -> dict:
                 data.get("shell"),
                 now,
                 now,
+                get_userid(),
             ),
         )
     task = get_task(task_id)
@@ -202,9 +226,10 @@ def add_message(task_id: str, role: str, content: str) -> dict | None:
         if row is None:
             return None
         connection.execute(
-            """INSERT INTO task_messages (id, task_id, role, content, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (message_id, task_id, role, content, now),
+            """INSERT INTO task_messages
+               (id, task_id, role, content, created_at, userid)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (message_id, task_id, role, content, now, get_userid()),
         )
         connection.execute(
             "UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id)
@@ -239,9 +264,9 @@ def save_artifact(task_id: str, content: str) -> dict:
         artifact_id = uuid4().hex
         connection.execute(
             """INSERT INTO task_artifacts
-               (id, task_id, version, content, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (artifact_id, task_id, version, content, now),
+               (id, task_id, version, content, created_at, userid)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (artifact_id, task_id, version, content, now, get_userid()),
         )
         connection.execute(
             "UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id)

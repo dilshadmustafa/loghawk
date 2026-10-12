@@ -1,4 +1,4 @@
-"""Hawk: cross-platform split-pane CLI for LogHawk chat, commands, and Tasks."""
+"""Hawk Console: split-pane interface for LogHawk chat, commands, and Tasks."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import duckdb
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
@@ -20,13 +19,9 @@ from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
 
 import loghawk.config as config
 from loghawk.cli.command_terminal import CommandShellSession
-from loghawk.cli import command_history, task_workspace
+from loghawk.cli import command_history, local_store, task_workspace
 from loghawk.llm import get_llm_client
 from loghawk.utils import lancedbutils2
-
-
-def _quoted_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -78,10 +73,10 @@ class DownloadPathScreen(ModalScreen[str | None]):
             self.dismiss(None)
 
 
-class HawkCLI(App[None]):
+class HawkConsole(App[None]):
     """Three terminal panes alongside an editable Task artifact workspace."""
 
-    TITLE = "Hawk CLI"
+    TITLE = "Hawk Console"
     BINDINGS = [("ctrl+q", "quit", "Quit Hawk")]
     CSS = """
     Screen {
@@ -115,6 +110,7 @@ class HawkCLI(App[None]):
     #command-editor-toolbar { height: auto; min-height: 3; }
     #version-select { width: 1fr; }
     #editor { height: 1fr; border: round $secondary; }
+    #command-output-mirror { height: 1fr; }
     Button { min-width: 10; }
     """
 
@@ -133,6 +129,7 @@ class HawkCLI(App[None]):
         self._awaiting_llm_command_final_confirmation = False
         self._command_editor_visibility: dict[str, bool] = {}
         self._sessions: dict[str, CommandShellSession] = {}
+        self._active_command_outputs: set[str] = set()
         self._command_history = {"command-one": [], "command-two": []}
         self._command_history_index = {"command-one": 0, "command-two": 0}
         self._command_history_draft = {"command-one": "", "command-two": ""}
@@ -198,6 +195,12 @@ class HawkCLI(App[None]):
                 yield Button("Cancel", id="cancel-edit")
             yield TextArea("", id="editor", soft_wrap=False)
             yield Static("No Task loaded.", id="editor-status")
+            yield RichLog(
+                id="command-output-mirror",
+                wrap=True,
+                markup=False,
+                auto_scroll=True,
+            )
             with Container(id="task-list-pane"):
                 yield Static("Tasks", classes="pane-title")
                 yield RichLog(id="task-list-output", wrap=True, markup=False, auto_scroll=True)
@@ -210,6 +213,7 @@ class HawkCLI(App[None]):
                     yield Button("Cancel", id="cancel-command-edits")
 
     async def on_mount(self) -> None:
+        local_store.initialize_console_database()
         self.query_one("#llm-output", RichLog).write(
             f"Model: {config.LH_LLM_MODEL}\n"
             "Chat uses the configured LiteLLM provider and indexed LanceDB context when available.\n"
@@ -225,7 +229,8 @@ class HawkCLI(App[None]):
         ):
             output = self.query_one(f"#{output_id}", RichLog)
             session = CommandShellSession(
-                on_output=output.write,
+                on_output=lambda text, terminal_id=terminal_id:
+                    self._handle_command_output(terminal_id, text),
                 cwd=str(config.PROJECT_ROOT),
             )
             self._sessions[terminal_id] = session
@@ -245,6 +250,7 @@ class HawkCLI(App[None]):
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = False
         self.query_one("#task-list-pane", Container).display = False
+        self.query_one("#command-output-mirror", RichLog).display = False
         self.query_one("#command-editor-pane", Container).display = False
         self.query_one("#task-shell-select", Select).display = False
         self.query_one("#task-type-shell-label", Static).display = False
@@ -252,50 +258,19 @@ class HawkCLI(App[None]):
         self._sync_editor_controls()
 
     def _load_chat_history(self) -> None:
-        table = _quoted_identifier(config.LH_DUCKDB_TABLE_NAME)
-        connection = None
         try:
-            connection = duckdb.connect(str(config.LH_DUCKDB_FILE_PATH))
-            connection.execute(
-                f"CREATE TABLE IF NOT EXISTS {table} ("
-                "user_id VARCHAR, user_name VARCHAR, user_email VARCHAR, "
-                "role VARCHAR, content VARCHAR, creation_date DATE)"
-            )
-            rows = connection.execute(
-                f"SELECT role, content FROM {table} ORDER BY creation_date"
-            ).fetchall()
-            self._chat_history = [
-                {"role": str(role), "content": str(content)}
-                for role, content in rows
-                if role in {"user", "assistant"}
-            ]
+            self._chat_history = local_store.load_conversation_history()
             if self._chat_history:
                 self.query_one("#llm-output", RichLog).write(
-                    f"Loaded {len(self._chat_history)} prior chat messages from DuckDB.\n"
+                    f"Loaded {len(self._chat_history)} prior chat messages from SQLite.\n"
                 )
         except Exception as exc:
             self.query_one("#llm-output", RichLog).write(
-                f"Could not load DuckDB chat history: {exc}\n"
+                f"Could not load SQLite chat history: {exc}\n"
             )
-        finally:
-            if connection is not None:
-                connection.close()
 
     def _persist_chat_message(self, role: str, content: str) -> None:
-        table = _quoted_identifier(config.LH_DUCKDB_TABLE_NAME)
-        connection = duckdb.connect(str(config.LH_DUCKDB_FILE_PATH))
-        try:
-            connection.execute(
-                f"CREATE TABLE IF NOT EXISTS {table} ("
-                "user_id VARCHAR, user_name VARCHAR, user_email VARCHAR, "
-                "role VARCHAR, content VARCHAR, creation_date DATE)"
-            )
-            connection.execute(
-                f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, current_date)",
-                ["anon", "anon", "anon@anon.com", role, content],
-            )
-        finally:
-            connection.close()
+        local_store.save_conversation_message(role, content)
 
     def _retrieve_context(self, prompt: str) -> str:
         database = lancedbutils2.connect_database()
@@ -542,6 +517,7 @@ class HawkCLI(App[None]):
             "editor-toolbar",
             "editor",
             "editor-status",
+            "command-output-mirror",
         )
         self._command_editor_visibility = {
             widget_id: self.query_one(f"#{widget_id}").display
@@ -650,12 +626,47 @@ class HawkCLI(App[None]):
 
     async def _run_command(self, terminal_id: str, command: str) -> None:
         session = self._sessions[terminal_id]
+        self._begin_command_output(terminal_id, command)
         try:
             await session.submit(command)
         except Exception as exc:
-            self.query_one(f"#{terminal_id}-output", RichLog).write(
-                f"Command failed: {exc}\n"
-            )
+            message = f"Command failed: {exc}"
+            self.query_one(f"#{terminal_id}-output", RichLog).write(f"{message}\n")
+            self.query_one("#command-output-mirror", RichLog).write(message)
+            self._active_command_outputs.discard(terminal_id)
+
+    def _begin_command_output(self, terminal_id: str, command: str) -> None:
+        mirror = self.query_one("#command-output-mirror", RichLog)
+        if not mirror.display:
+            mirror.clear()
+        for widget_id in (
+            "task-create-pane",
+            "task-chat-pane",
+            "editor-toolbar",
+            "editor",
+            "editor-status",
+            "task-list-pane",
+            "command-editor-pane",
+        ):
+            self.query_one(f"#{widget_id}").display = False
+        mirror.display = True
+        self._active_command_outputs.add(terminal_id)
+        label = "Terminal 1" if terminal_id == "command-one" else "Terminal 2"
+        mirror.write(f"[{label}] $ {command}")
+
+    def _handle_command_output(self, terminal_id: str, text: str) -> None:
+        self.query_one(f"#{terminal_id}-output", RichLog).write(text)
+        if (
+            terminal_id not in self._active_command_outputs
+            or text.startswith("Shell ready:")
+        ):
+            return
+        mirror = self.query_one("#command-output-mirror", RichLog)
+        label = "Terminal 1" if terminal_id == "command-one" else "Terminal 2"
+        for line in text.splitlines():
+            mirror.write(f"[{label}] {line}")
+        if "[command finished]" in text or "[ shell session ended ]" in text:
+            self._active_command_outputs.discard(terminal_id)
 
     def _handle_task_command(
         self, command: str, output: RichLog, terminal_id: str
@@ -721,14 +732,16 @@ class HawkCLI(App[None]):
             self._load_task(task)
             if task["artifact_type"] == "n8n":
                 output.write(
-                    f"Loaded {task['name']} · Category: {task['category']} · "
+                    f"Loaded {task['name']} · User ID: {task['userid']} · "
+                    f"Category: {task['category']} · "
                     f"Version {artifact['version']} in the Editor pane. "
                     "n8n workflow JSON must be imported into the customer-managed n8n instance to run.\n"
                 )
                 return
             self._pending_task_runs[terminal_id] = (task, artifact)
             output.write(
-                f"Run {task['name']} · Category: {task['category']} · "
+                f"Run {task['name']} · User ID: {task['userid']} · "
+                f"Category: {task['category']} · "
                 f"Version {artifact['version']}? (Y/N): "
             )
             return
@@ -749,7 +762,8 @@ class HawkCLI(App[None]):
             return
         self._load_task(task)
         output.write(
-            f"Loaded Task: {task['name']} · Category: {task['category']} · "
+            f"Loaded Task: {task['name']} · User ID: {task['userid']} · "
+            f"Category: {task['category']} · "
             f"Type: {task['artifact_type']}\n"
         )
 
@@ -758,14 +772,29 @@ class HawkCLI(App[None]):
         normalized = answer.strip().casefold()
         if normalized in {"n", "no"}:
             self._pending_task_runs.pop(terminal_id, None)
+            self.current_task = None
+            self.current_artifact = None
+            self._has_generated_draft = False
+            self.query_one("#task-chat-pane", Container).display = False
+            self.query_one("#task-chat-output", RichLog).clear()
+            selector = self.query_one("#version-select", Select)
+            selector.set_options([])
+            selector.clear()
+            self._set_editor_text("")
+            self.query_one("#editor-status", Static).update("No Task loaded.")
+            self._sync_editor_controls()
             output.write("Task run canceled.\n")
             return
         if normalized not in {"y", "yes"}:
             output.write("Please answer Y or N: ")
             return
         task, artifact = self._pending_task_runs.pop(terminal_id)
+        self._begin_command_output(
+            terminal_id, f"/taskrun {task['name']} · Version {artifact['version']}"
+        )
         output.write(
-            f"Confirmed. Running {task['name']} · Category: {task['category']} · "
+            f"Confirmed. Running {task['name']} · User ID: {task['userid']} · "
+            f"Category: {task['category']} · "
             f"Version {artifact['version']}…\n"
         )
         self.run_worker(
@@ -862,6 +891,10 @@ class HawkCLI(App[None]):
         self._has_generated_draft = False
         self.query_one("#task-create-pane", Container).display = True
         self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#command-output-mirror", RichLog).display = False
+        self.query_one("#editor-toolbar", Horizontal).display = True
+        self.query_one("#editor", TextArea).display = True
+        self.query_one("#editor-status", Static).display = True
         self.query_one("#task-name-input", Input).value = ""
         self.query_one("#task-category-input", Input).value = ""
         self.query_one("#task-type-select", Select).value = "python"
@@ -913,6 +946,7 @@ class HawkCLI(App[None]):
             "editor-toolbar",
             "editor",
             "editor-status",
+            "command-output-mirror",
         ):
             self.query_one(f"#{widget_id}").display = False
 
@@ -932,13 +966,24 @@ class HawkCLI(App[None]):
                     len("Task Name"),
                     max(len(task["name"]) for task in category_tasks),
                 )
+                userid_width = max(
+                    len("User ID"),
+                    max(len(str(task.get("userid") or "")) for task in category_tasks),
+                )
                 task_list_output.write("")
                 task_list_output.write(f"Category: {category}")
-                task_list_output.write(f"{'Task Name':<{name_width}}  Task Type")
-                task_list_output.write(f"{'-' * name_width}  ---------")
+                task_list_output.write(
+                    f"{'Task Name':<{name_width}}  "
+                    f"{'User ID':<{userid_width}}  Task Type"
+                )
+                task_list_output.write(
+                    f"{'-' * name_width}  {'-' * userid_width}  ---------"
+                )
                 for task in category_tasks:
                     task_list_output.write(
-                        f"{task['name']:<{name_width}}  {task['artifact_type']}"
+                        f"{task['name']:<{name_width}}  "
+                        f"{str(task.get('userid') or ''):<{userid_width}}  "
+                        f"{task['artifact_type']}"
                     )
         else:
             task_list_output.write("No Tasks found.")
@@ -1038,6 +1083,10 @@ class HawkCLI(App[None]):
         self._has_generated_draft = False
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = True
+        self.query_one("#command-output-mirror", RichLog).display = False
+        self.query_one("#editor-toolbar", Horizontal).display = True
+        self.query_one("#editor", TextArea).display = True
+        self.query_one("#editor-status", Static).display = True
         self._render_task_messages(task)
         artifacts = task.get("artifacts", [])
         options = [
@@ -1054,7 +1103,8 @@ class HawkCLI(App[None]):
             self.current_artifact = None
             self._set_editor_text("")
             self.query_one("#editor-status", Static).update(
-                f"{task['name']} · {task['category']} · {task['artifact_type']} · "
+                f"Task: {task['name']} · User ID: {task['userid']} · "
+                f"Category: {task['category']} · Type: {task['artifact_type']} · "
                 "no saved artifact versions yet"
             )
             selector.clear()
@@ -1065,8 +1115,10 @@ class HawkCLI(App[None]):
         self.current_artifact = artifact
         self._set_editor_text(artifact["content"])
         self.query_one("#editor-status", Static).update(
-            f"{self.current_task['name']} · {self.current_task['category']} · "
-            f"{self.current_task['artifact_type']} · Version {artifact['version']}"
+            f"Task: {self.current_task['name']} · "
+            f"User ID: {self.current_task['userid']} · "
+            f"Category: {self.current_task['category']} · "
+            f"Type: {self.current_task['artifact_type']} · Version {artifact['version']}"
         )
 
     def _set_editor_text(self, text: str) -> None:
@@ -1271,7 +1323,7 @@ class HawkCLI(App[None]):
 
 def main() -> None:
     """Launch the Hawk terminal UI."""
-    HawkCLI().run()
+    HawkConsole().run()
 
 
 if __name__ == "__main__":

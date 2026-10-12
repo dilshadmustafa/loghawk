@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
-import loghawk.config as config
+from loghawk.cli.local_store import LOCAL_DB_PATH
+from loghawk.utils.user_identity import get_userid
 
 
 MAX_HISTORY_ENTRIES = 500
 _TERMINALS = {"command-one", "command-two"}
-_DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_webui.sqlite3"
+_DB_PATH = LOCAL_DB_PATH
 
 
 def _connect() -> sqlite3.Connection:
@@ -19,15 +19,26 @@ def _connect() -> sqlite3.Connection:
     connection.execute(
         """CREATE TABLE IF NOT EXISTS cli_command_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            userid TEXT NOT NULL,
             terminal_id TEXT NOT NULL
                 CHECK (terminal_id IN ('command-one', 'command-two')),
             command TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )"""
     )
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(cli_command_history)")
+    }
+    if "userid" not in columns:
+        connection.execute("ALTER TABLE cli_command_history ADD COLUMN userid TEXT")
     connection.execute(
-        """CREATE INDEX IF NOT EXISTS cli_command_history_terminal_id
-           ON cli_command_history (terminal_id, id)"""
+        "UPDATE cli_command_history SET userid = ? "
+        "WHERE userid IS NULL OR TRIM(userid) = ''",
+        (get_userid(),),
+    )
+    connection.execute(
+        """CREATE INDEX IF NOT EXISTS cli_command_history_terminal_user_id
+           ON cli_command_history (terminal_id, userid, id)"""
     )
     connection.commit()
     return connection
@@ -40,8 +51,9 @@ def load_history(terminal_id: str) -> list[str]:
     try:
         rows = connection.execute(
             """SELECT command FROM cli_command_history
-               WHERE terminal_id = ? ORDER BY id DESC LIMIT ?""",
-            (terminal_id, MAX_HISTORY_ENTRIES),
+               WHERE terminal_id = ? AND userid = ?
+               ORDER BY id DESC LIMIT ?""",
+            (terminal_id, get_userid(), MAX_HISTORY_ENTRIES),
         ).fetchall()
         return [row[0] for row in reversed(rows)]
     finally:
@@ -56,16 +68,17 @@ def save_command(terminal_id: str, command: str) -> None:
     connection = _connect()
     try:
         connection.execute(
-            "INSERT INTO cli_command_history (terminal_id, command) VALUES (?, ?)",
-            (terminal_id, command),
+            """INSERT INTO cli_command_history (userid, terminal_id, command)
+               VALUES (?, ?, ?)""",
+            (get_userid(), terminal_id, command),
         )
         connection.execute(
             """DELETE FROM cli_command_history
-               WHERE terminal_id = ? AND id NOT IN (
+               WHERE terminal_id = ? AND userid = ? AND id NOT IN (
                    SELECT id FROM cli_command_history
-                   WHERE terminal_id = ? ORDER BY id DESC LIMIT ?
+                   WHERE terminal_id = ? AND userid = ? ORDER BY id DESC LIMIT ?
                )""",
-            (terminal_id, terminal_id, MAX_HISTORY_ENTRIES),
+            (terminal_id, get_userid(), terminal_id, get_userid(), MAX_HISTORY_ENTRIES),
         )
         connection.commit()
     finally:

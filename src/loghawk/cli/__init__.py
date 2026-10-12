@@ -1,1 +1,1 @@
-"""Cross-platform Hawk CLI."""
+"""Cross-platform Hawk Console."""
