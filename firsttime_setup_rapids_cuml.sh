@@ -115,13 +115,19 @@ esac
 
 if command -v conda >/dev/null 2>&1; then
     CONDA_BASE="$(conda info --base)"
+elif [[ -f "$MINIFORGE_PREFIX/etc/profile.d/conda.sh" ]]; then
+    CONDA_BASE="$MINIFORGE_PREFIX"
 else
-    INSTALLER="$(mktemp "${TMPDIR:-/tmp}/loghawk-miniforge.XXXXXX")"
-    trap 'rm -f "$INSTALLER"' EXIT
+    INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/loghawk-miniforge.XXXXXX")"
+    INSTALLER="$INSTALLER_DIR/Miniforge3.sh"
+    trap 'rm -f "$INSTALLER"; rmdir "$INSTALLER_DIR" 2>/dev/null || true' EXIT
     curl -fsSL \
         "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${ARCH}.sh" \
         -o "$INSTALLER"
     bash "$INSTALLER" -b -p "$MINIFORGE_PREFIX"
+    rm -f "$INSTALLER"
+    rmdir "$INSTALLER_DIR"
+    trap - EXIT
     CONDA_BASE="$MINIFORGE_PREFIX"
 fi
 
@@ -174,15 +180,15 @@ echo "Checking PySpark and Java 17"
 echo "============================================================"
 python -c 'from pyspark.sql import SparkSession; s=SparkSession.builder.master("local[*]").getOrCreate(); print("Spark:",s.version); print("Python:",__import__("sys").version); print("Java:",s.sparkContext._jvm.java.lang.System.getProperty("java.version")); s.stop()'
 
-echo
-echo "============================================================"
-echo "Setting up DuckDB"
-echo "============================================================"
-if [[ "$SKIP_DUCKDB_SETUP" == false ]]; then
-    python -m loghawk.admin.setup_duckdb
-else
-    echo "Skipping DuckDB setup."
-fi
+# echo
+# echo "============================================================"
+# echo "Setting up DuckDB"
+# echo "============================================================"
+# if [[ "$SKIP_DUCKDB_SETUP" == false ]]; then
+#     python -m loghawk.admin.setup_duckdb
+# else
+#     echo "Skipping DuckDB setup."
+# fi
 
 echo
 echo "============================================================"
@@ -255,4 +261,3 @@ echo "  conda activate $RAPIDS_ENV_NAME"
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"
 echo "Start the worker and workflow using the firsttime_start_workflow scripts."
-

@@ -112,13 +112,15 @@ else
     echo "============================================================"
     echo "Installing Miniforge / Conda if needed"
     echo "============================================================"
-    INSTALLER="$(mktemp "${TMPDIR:-/tmp}/loghawk-miniforge.XXXXXX")"
-    trap 'rm -f "$INSTALLER"' EXIT
+    INSTALLER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/loghawk-miniforge.XXXXXX")"
+    INSTALLER="$INSTALLER_DIR/Miniforge3.sh"
+    trap 'rm -f "$INSTALLER"; rmdir "$INSTALLER_DIR" 2>/dev/null || true' EXIT
     curl -fsSL \
         "https://github.com/conda-forge/miniforge/releases/latest/download/${INSTALLER_NAME}" \
         -o "$INSTALLER"
     bash "$INSTALLER" -b -p "$MINIFORGE_PREFIX"
     rm -f "$INSTALLER"
+    rmdir "$INSTALLER_DIR"
     trap - EXIT
     CONDA_BASE="$MINIFORGE_PREFIX"
 fi
@@ -183,15 +185,15 @@ echo "Installing packages mentioned in requirements.txt"
 echo "============================================================"
 python -m pip install -r requirements.txt
 python -m pip install -e .
-echo
-echo "============================================================"
-echo "Setting up DuckDB"
-echo "============================================================"
-if [[ "$SKIP_DUCKDB_SETUP" == false ]]; then
-    python -m loghawk.admin.setup_duckdb
-else
-    echo "Skipping DuckDB setup."
-fi
+# echo
+# echo "============================================================"
+# echo "Setting up DuckDB"
+# echo "============================================================"
+# if [[ "$SKIP_DUCKDB_SETUP" == false ]]; then
+#     python -m loghawk.admin.setup_duckdb
+# else
+#     echo "Skipping DuckDB setup."
+# fi
 echo
 echo "============================================================"
 echo "Setting up LanceDB"

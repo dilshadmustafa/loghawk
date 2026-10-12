@@ -62,16 +62,16 @@ echo ============================================================
 if errorlevel 1 goto :failed
 "%PYTHON%" -m pip install -e .
 if errorlevel 1 goto :failed
-echo.
-echo ============================================================
-echo Setting up DuckDB
-echo ============================================================
-if /I "%SKIP_DUCKDB_SETUP%"=="true" (
-    echo Skipping DuckDB setup.
-) else (
-    "%PYTHON%" -m loghawk.admin.setup_duckdb
-    if errorlevel 1 goto :failed
-)
+rem echo.
+rem echo ============================================================
+rem echo Setting up DuckDB
+rem echo ============================================================
+rem if /I "%SKIP_DUCKDB_SETUP%"=="true" (
+rem     echo Skipping DuckDB setup.
+rem ) else (
+rem     "%PYTHON%" -m loghawk.admin.setup_duckdb
+rem     if errorlevel 1 goto :failed
+rem )
 echo.
 echo ============================================================
 echo Setting up LanceDB
