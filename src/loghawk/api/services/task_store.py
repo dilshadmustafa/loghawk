@@ -35,6 +35,7 @@ def _ensure_schema() -> None:
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
+                    category TEXT NOT NULL DEFAULT 'Uncategorized',
                     artifact_type TEXT NOT NULL CHECK (
                         artifact_type IN ('n8n', 'python', 'shell')
                     ),
@@ -62,6 +63,14 @@ def _ensure_schema() -> None:
                 );
                 """
             )
+            task_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(tasks)")
+            }
+            if "category" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN category "
+                    "TEXT NOT NULL DEFAULT 'Uncategorized'"
+                )
             artifact_columns = {
                 row[1]
                 for row in connection.execute("PRAGMA table_info(task_artifacts)")
@@ -166,11 +175,12 @@ def create_task(data: dict) -> dict:
     with _connect() as connection:
         connection.execute(
             """INSERT INTO tasks
-               (id, name, artifact_type, shell, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (id, name, category, artifact_type, shell, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 task_id,
                 data["name"],
+                data.get("category") or "Uncategorized",
                 data["artifact_type"],
                 data.get("shell"),
                 now,

@@ -4,21 +4,22 @@ cd /d "%~dp0"
 set "LOGHAWK_ROOT=%CD%"
 set "PYTHON=%LOGHAWK_ROOT%\venv312\Scripts\python.exe"
 
+rem n8n auto-start is disabled. Configure and start a customer-managed n8n instance separately.
 rem Load only n8n settings from .env; do not pass LogHawk credentials to n8n.
-for /f "usebackq tokens=1,* delims==" %%A in ("%LOGHAWK_ROOT%\.env") do (
-    if "%%A"=="N8N_HOST" set "N8N_HOST=%%B"
-    if "%%A"=="N8N_PORT" set "N8N_PORT=%%B"
-    if "%%A"=="N8N_PROTOCOL" set "N8N_PROTOCOL=%%B"
-    if "%%A"=="N8N_SECURE_COOKIE" set "N8N_SECURE_COOKIE=%%B"
-    if "%%A"=="N8N_WEBHOOK_URL" set "N8N_WEBHOOK_URL=%%B"
-    if "%%A"=="GENERIC_TIMEZONE" set "GENERIC_TIMEZONE=%%B"
-)
-if not defined N8N_HOST set "N8N_HOST=localhost"
-if not defined N8N_PORT set "N8N_PORT=5678"
-if not defined N8N_PROTOCOL set "N8N_PROTOCOL=http"
-if not defined N8N_SECURE_COOKIE set "N8N_SECURE_COOKIE=false"
-if not defined N8N_WEBHOOK_URL set "N8N_WEBHOOK_URL=http://localhost:5678/"
-if not defined GENERIC_TIMEZONE set "GENERIC_TIMEZONE=Asia/Kolkata"
+rem for /f "usebackq tokens=1,* delims==" %%A in ("%LOGHAWK_ROOT%\.env") do (
+rem     if "%%A"=="N8N_HOST" set "N8N_HOST=%%B"
+rem     if "%%A"=="N8N_PORT" set "N8N_PORT=%%B"
+rem     if "%%A"=="N8N_PROTOCOL" set "N8N_PROTOCOL=%%B"
+rem     if "%%A"=="N8N_SECURE_COOKIE" set "N8N_SECURE_COOKIE=%%B"
+rem     if "%%A"=="N8N_WEBHOOK_URL" set "N8N_WEBHOOK_URL=%%B"
+rem     if "%%A"=="GENERIC_TIMEZONE" set "GENERIC_TIMEZONE=%%B"
+rem )
+rem if not defined N8N_HOST set "N8N_HOST=localhost"
+rem if not defined N8N_PORT set "N8N_PORT=5678"
+rem if not defined N8N_PROTOCOL set "N8N_PROTOCOL=http"
+rem if not defined N8N_SECURE_COOKIE set "N8N_SECURE_COOKIE=false"
+rem if not defined N8N_WEBHOOK_URL set "N8N_WEBHOOK_URL=http://localhost:5678/"
+rem if not defined GENERIC_TIMEZONE set "GENERIC_TIMEZONE=Asia/Kolkata"
 
 echo ============================================================
 echo Starting LogHawk services
@@ -100,46 +101,47 @@ if /I not "%TEMPORAL_READY%"=="true" (
 )
 echo Temporal is ready at http://localhost:8233
 
-echo.
-echo ============================================================
-echo Checking n8n
-echo ============================================================
-docker container inspect loghawk-n8n >nul 2>&1
-if errorlevel 1 (
-    docker run -d --name loghawk-n8n --restart unless-stopped ^
-        -p 5678:5678 ^
-        -v loghawk-n8n-data:/home/node/.n8n ^
-        -e N8N_HOST=!N8N_HOST! ^
-        -e N8N_PORT=!N8N_PORT! ^
-        -e N8N_PROTOCOL=!N8N_PROTOCOL! ^
-        -e N8N_SECURE_COOKIE=!N8N_SECURE_COOKIE! ^
-        -e N8N_WEBHOOK_URL=!N8N_WEBHOOK_URL! ^
-        -e GENERIC_TIMEZONE=!GENERIC_TIMEZONE! ^
-        n8nio/n8n:latest
-    if errorlevel 1 exit /b 1
-) else (
-    set "N8N_RUNNING=false"
-    for /f "delims=" %%R in ('docker inspect -f "{{.State.Running}}" loghawk-n8n') do set "N8N_RUNNING=%%R"
-    if /I not "!N8N_RUNNING!"=="true" docker start loghawk-n8n
-    if errorlevel 1 exit /b 1
-)
-
-set "N8N_READY=false"
-for /L %%I in (1,1,30) do (
-    powershell -NoProfile -Command "$c=New-Object Net.Sockets.TcpClient; try {$c.Connect('127.0.0.1',5678); exit 0} catch {exit 1} finally {$c.Dispose()}" >nul 2>&1
-    if not errorlevel 1 (
-        set "N8N_READY=true"
-        goto :n8n_ready
-    )
-    timeout /t 2 /nobreak >nul
-)
-:n8n_ready
-if /I not "%N8N_READY%"=="true" (
-    echo n8n did not become ready on port 5678 within 60 seconds.
-    docker logs --tail 50 loghawk-n8n
-    exit /b 1
-)
-echo n8n is ready at http://localhost:5678
+rem n8n Docker startup and readiness checks are disabled.
+rem echo.
+rem echo ============================================================
+rem echo Checking n8n
+rem echo ============================================================
+rem docker container inspect loghawk-n8n >nul 2>&1
+rem if errorlevel 1 (
+rem     docker run -d --name loghawk-n8n --restart unless-stopped
+rem         -p 5678:5678
+rem         -v loghawk-n8n-data:/home/node/.n8n
+rem         -e N8N_HOST=!N8N_HOST!
+rem         -e N8N_PORT=!N8N_PORT!
+rem         -e N8N_PROTOCOL=!N8N_PROTOCOL!
+rem         -e N8N_SECURE_COOKIE=!N8N_SECURE_COOKIE!
+rem         -e N8N_WEBHOOK_URL=!N8N_WEBHOOK_URL!
+rem         -e GENERIC_TIMEZONE=!GENERIC_TIMEZONE!
+rem         n8nio/n8n:latest
+rem     if errorlevel 1 exit /b 1
+rem ) else (
+rem     set "N8N_RUNNING=false"
+rem     for /f "delims=" %%R in ('docker inspect -f "{{.State.Running}}" loghawk-n8n') do set "N8N_RUNNING=%%R"
+rem     if /I not "!N8N_RUNNING!"=="true" docker start loghawk-n8n
+rem     if errorlevel 1 exit /b 1
+rem )
+rem
+rem set "N8N_READY=false"
+rem for /L %%I in (1,1,30) do (
+rem     powershell -NoProfile -Command "$c=New-Object Net.Sockets.TcpClient; try {$c.Connect('127.0.0.1',5678); exit 0} catch {exit 1} finally {$c.Dispose()}" >nul 2>&1
+rem     if not errorlevel 1 (
+rem         set "N8N_READY=true"
+rem         goto :n8n_ready
+rem     )
+rem     timeout /t 2 /nobreak >nul
+rem )
+rem :n8n_ready
+rem if /I not "%N8N_READY%"=="true" (
+rem     echo n8n did not become ready on port 5678 within 60 seconds.
+rem     docker logs --tail 50 loghawk-n8n
+rem     exit /b 1
+rem )
+rem echo n8n is ready at http://localhost:5678
 
 echo.
 echo ============================================================
@@ -193,5 +195,5 @@ echo Web UI: http://localhost:5173
 echo Web UI API: http://localhost:8000
 echo RustFS console: http://localhost:9001
 echo Temporal UI: http://localhost:8233
-echo n8n: http://localhost:5678
+rem echo n8n: http://localhost:5678
 exit /b 0

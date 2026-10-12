@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shlex
 import shutil
@@ -11,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 import duckdb
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
@@ -19,7 +20,7 @@ from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
 
 import loghawk.config as config
 from loghawk.cli.command_terminal import CommandShellSession
-from loghawk.cli import task_workspace
+from loghawk.cli import command_history, task_workspace
 from loghawk.llm import get_llm_client
 from loghawk.utils import lancedbutils2
 
@@ -107,6 +108,11 @@ class HawkCLI(App[None]):
     #task-chat-pane { height: 1fr; min-height: 8; }
     #task-chat-output { height: 1fr; }
     #task-message-row { height: auto; }
+    #task-list-pane { height: 1fr; padding: 0 1; }
+    #task-list-output { height: 1fr; }
+    #command-editor-pane { height: 1fr; padding: 0 1; }
+    #command-editor { height: 1fr; border: round $secondary; }
+    #command-editor-toolbar { height: auto; min-height: 3; }
     #version-select { width: 1fr; }
     #editor { height: 1fr; border: round $secondary; }
     Button { min-width: 10; }
@@ -123,41 +129,51 @@ class HawkCLI(App[None]):
         self._pending_task_runs: dict[str, tuple[dict, dict]] = {}
         self._chat_history: list[dict[str, str]] = []
         self._chat_busy = False
+        self._pending_llm_command: str | None = None
+        self._awaiting_llm_command_final_confirmation = False
+        self._command_editor_visibility: dict[str, bool] = {}
         self._sessions: dict[str, CommandShellSession] = {}
+        self._command_history = {"command-one": [], "command-two": []}
+        self._command_history_index = {"command-one": 0, "command-two": 0}
+        self._command_history_draft = {"command-one": "", "command-two": ""}
 
     def compose(self) -> ComposeResult:
         with Container(id="terminal-column"):
             with Container(id="llm-pane", classes="pane"):
-                yield Static("LLM Terminal · Ctrl+Q to quit", classes="pane-title")
+                yield Static("LLM Terminal · Ctrl+Q to quit, Shift+Ctrl+C/Shift+Ctrl+V to Copy/Paste", classes="pane-title")
                 yield RichLog(id="llm-output", wrap=True, markup=False, auto_scroll=True)
                 yield Input(placeholder="Chat with the configured LLM…", id="llm-input")
 
             with Container(id="command-one-pane", classes="pane"):
-                yield Static("Command Terminal 1 · /taskview <taskname> · /tasknew · /taskrun <taskname>", classes="pane-title")
+                yield Static("Command Terminal 1 · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", classes="pane-title")
                 yield RichLog(id="command-one-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal():
-                    yield Input(placeholder="Shell command · /taskview <taskname> · /tasknew · /taskrun <taskname>", id="command-one-input")
+                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", id="command-one-input")
                     yield Button("Stop", id="command-one-stop")
 
             with Container(id="command-two-pane", classes="pane"):
-                yield Static("Command Terminal 2 · /taskview <taskname> · /tasknew · /taskrun <taskname>", classes="pane-title")
+                yield Static("Command Terminal 2 · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", classes="pane-title")
                 yield RichLog(id="command-two-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal():
-                    yield Input(placeholder="Shell command · /taskview <taskname> · /tasknew · /taskrun <taskname>", id="command-two-input")
+                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", id="command-two-input")
                     yield Button("Stop", id="command-two-stop")
 
         with Container(id="editor-pane", classes="pane"):
-            yield Static("Editor · use /task <name> or /tasknew", classes="pane-title")
+            yield Static("Editor · use /taskview <name> or /tasknew", classes="pane-title")
             with Container(id="task-create-pane"):
                 yield Static("Create Task", classes="pane-title")
-                with Horizontal(id="task-create-fields"):
+                with Container(id="task-create-fields"):
+                    yield Static("Task name")
                     yield Input(placeholder="Task name", id="task-name-input")
+                    yield Static("Task Type")
                     yield Select(
                         [("Python", "python"), ("Shell", "shell"), ("n8n", "n8n")],
                         value="python",
                         allow_blank=False,
                         id="task-type-select",
                     )
+                    yield Static("Category")
+                    yield Input(placeholder="Enter a category", id="task-category-input")
                 yield Static("Shell target", id="task-type-shell-label")
                 yield Select(
                     [("Bash", "bash"), ("PowerShell", "powershell")],
@@ -182,11 +198,26 @@ class HawkCLI(App[None]):
                 yield Button("Cancel", id="cancel-edit")
             yield TextArea("", id="editor", soft_wrap=False)
             yield Static("No Task loaded.", id="editor-status")
+            with Container(id="task-list-pane"):
+                yield Static("Tasks", classes="pane-title")
+                yield RichLog(id="task-list-output", wrap=True, markup=False, auto_scroll=True)
+                yield Button("Close", id="close-task-list")
+            with Container(id="command-editor-pane"):
+                yield Static("Edit Proposed Command", classes="pane-title")
+                yield TextArea("", id="command-editor", soft_wrap=False)
+                with Horizontal(id="command-editor-toolbar"):
+                    yield Button("Confirm Changes", variant="primary", id="confirm-command-edits")
+                    yield Button("Cancel", id="cancel-command-edits")
 
     async def on_mount(self) -> None:
         self.query_one("#llm-output", RichLog).write(
             f"Model: {config.LH_LLM_MODEL}\n"
             "Chat uses the configured LiteLLM provider and indexed LanceDB context when available.\n"
+            "Ordinary chat uses the LLM directly. Prefix a question with /rag to search LanceDB.\n"
+            "To request shell command(s), enter /command generate commands based on above discussion "
+            "or /command <what to do>.\n"
+            "Type YES or yes to run it, E or e to edit it in the Editor pane, "
+            "or N or anything else to cancel.\n"
         )
         for terminal_id, output_id in (
             ("command-one", "command-one-output"),
@@ -199,11 +230,22 @@ class HawkCLI(App[None]):
             )
             self._sessions[terminal_id] = session
             try:
+                self._command_history[terminal_id] = (
+                    command_history.load_history(terminal_id)
+                )
+                self._command_history_index[terminal_id] = len(
+                    self._command_history[terminal_id]
+                )
+            except Exception as exc:
+                output.write(f"Could not load command history: {exc}\n")
+            try:
                 await session.start()
             except Exception as exc:
                 output.write(f"Could not start command shell: {exc}\n")
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#task-list-pane", Container).display = False
+        self.query_one("#command-editor-pane", Container).display = False
         self.query_one("#task-shell-select", Select).display = False
         self.query_one("#task-type-shell-label", Static).display = False
         self._load_chat_history()
@@ -281,13 +323,51 @@ class HawkCLI(App[None]):
             self._submit_task_message(text)
             return
         if event.input.id == "llm-input":
+            if self._pending_llm_command is not None:
+                self._confirm_llm_command(text)
+                return
+            if text.startswith("/command"):
+                request = text[len("/command"):].strip()
+                if not request:
+                    self.query_one("#llm-output", RichLog).write(
+                        "Usage: /command <what you want the shell to do>\n"
+                    )
+                    return
+                if self._chat_busy:
+                    self.query_one("#llm-output", RichLog).write(
+                        "Wait for the current response to finish.\n"
+                    )
+                    return
+                self._chat_busy = True
+                event.input.disabled = True
+                self.query_one("#llm-output", RichLog).write(
+                    f"\nCommand request: {request}\nPreparing a command proposal…\n"
+                )
+                context_limit = config.LH_CLI_COMMAND_CONTEXT_MESSAGES
+                chat_history = (
+                    list(self._chat_history[-context_limit:])
+                    if context_limit
+                    else []
+                )
+                self._propose_command(request, chat_history)
+                return
+            use_rag = text == "/rag" or text.startswith("/rag ")
+            if use_rag:
+                text = text[len("/rag"):].strip()
+                if not text:
+                    self.query_one("#llm-output", RichLog).write(
+                        "Usage: /rag <question to answer using indexed documents>\n"
+                    )
+                    return
             if self._chat_busy:
                 self.query_one("#llm-output", RichLog).write("Wait for the current response to finish.\n")
                 return
             self._chat_busy = True
             event.input.disabled = True
-            self.query_one("#llm-output", RichLog).write(f"\nYou: {text}\nAssistant: ")
-            self._run_chat(text)
+            self.query_one("#llm-output", RichLog).write(
+                f"\nYou: {text}\nAssistant:\n"
+            )
+            self._run_chat(text, use_rag=use_rag)
             return
 
         terminal_id = "command-one" if event.input.id == "command-one-input" else "command-two"
@@ -296,28 +376,231 @@ class HawkCLI(App[None]):
         if terminal_id in self._pending_task_runs:
             self._confirm_task_run(terminal_id, text)
             return
+        self._record_command_history(terminal_id, text)
         if text.startswith("/task"):
             self._handle_task_command(text, output, terminal_id)
             return
         output.write(f"$ {text}\n")
         self.run_worker(self._run_command(terminal_id, text), name=f"{terminal_id}-command")
 
+    def _record_command_history(self, terminal_id: str, command: str) -> None:
+        history = self._command_history[terminal_id]
+        history.append(command)
+        del history[:-command_history.MAX_HISTORY_ENTRIES]
+        self._command_history_index[terminal_id] = len(history)
+        self._command_history_draft[terminal_id] = ""
+        try:
+            command_history.save_command(terminal_id, command)
+        except Exception as exc:
+            self.query_one(f"#{terminal_id}-output", RichLog).write(
+                f"Could not persist command history: {exc}\n"
+            )
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key not in {"up", "down"}:
+            return
+        focused = self.focused
+        if not isinstance(focused, Input) or focused.id not in {
+            "command-one-input",
+            "command-two-input",
+        }:
+            return
+
+        terminal_id = (
+            "command-one" if focused.id == "command-one-input" else "command-two"
+        )
+        history = self._command_history[terminal_id]
+        index = self._command_history_index[terminal_id]
+        if event.key == "up":
+            if index == len(history):
+                self._command_history_draft[terminal_id] = focused.value
+            if index > 0:
+                index -= 1
+                focused.value = history[index]
+        elif index < len(history) - 1:
+            index += 1
+            focused.value = history[index]
+        elif index == len(history) - 1 and history:
+            index = len(history)
+            focused.value = self._command_history_draft[terminal_id]
+
+        self._command_history_index[terminal_id] = index
+        focused.cursor_position = len(focused.value)
+        event.stop()
+        event.prevent_default()
+
+    @work(thread=True, exclusive=True, group="hawk-command-assist")
+    def _propose_command(
+        self, request: str, chat_history: list[dict[str, str]]
+    ) -> None:
+        try:
+            shell_name = "PowerShell" if os.name == "nt" else "Bash"
+            schema = {
+                "type": "object",
+                "properties": {
+                    "explanation": {"type": "string"},
+                    "command": {"type": ["string", "null"]},
+                },
+                "required": ["explanation", "command"],
+                "additionalProperties": False,
+            }
+            content = get_llm_client().complete(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"Draft one {shell_name} command for the user's request. "
+                            "Do not execute commands or claim they were executed. "
+                            "Return a brief explanation and the exact command. "
+                            "Set command to null if clarification is needed. "
+                            "Return only data matching the response schema."
+                        ),
+                    },
+                    *chat_history,
+                    {"role": "user", "content": request},
+                ],
+                response_schema=schema,
+                model=config.LH_LLM_CODEASSIST_MODEL or config.LH_LLM_MODEL,
+                temperature=0.1,
+                max_tokens=config.LH_LLM_CODEASSIST_MAX_TOKENS,
+            )
+            proposal = json.loads(content)
+            command = proposal.get("command")
+            if command is not None and (
+                not isinstance(command, str) or not command.strip()
+            ):
+                raise ValueError("The model returned an invalid command.")
+            self.app.call_from_thread(
+                self._finish_command_proposal,
+                proposal.get("explanation", ""),
+                command.strip() if command else None,
+                None,
+            )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self._finish_command_proposal, "", None, str(exc)
+            )
+
+    def _finish_command_proposal(
+        self, explanation: str, command: str | None, error: str | None
+    ) -> None:
+        output = self.query_one("#llm-output", RichLog)
+        if error:
+            output.write(f"Could not prepare command: {error}\n")
+        elif command is None:
+            output.write(f"{explanation}\nNo command is ready to run.\n")
+        else:
+            self._pending_llm_command = command
+            output.write(
+                f"{explanation}\n"
+                "Proposed command for Command Terminal 1:\n"
+                f"{command}\n"
+                "Type YES or yes to run it, E or e to edit it in the Editor pane, "
+                "or N or anything else to cancel: "
+            )
+        self._chat_busy = False
+        self.query_one("#llm-input", Input).disabled = False
+        self.query_one("#llm-input", Input).focus()
+
+    def _confirm_llm_command(self, answer: str) -> None:
+        output = self.query_one("#llm-output", RichLog)
+        response = answer.strip().casefold()
+        if response == "e" and not self._awaiting_llm_command_final_confirmation:
+            self._open_command_editor()
+            return
+        if response != "yes":
+            self._pending_llm_command = None
+            self._awaiting_llm_command_final_confirmation = False
+            output.write("Command canceled.\n")
+            return
+        session = self._sessions["command-one"]
+        if session.busy:
+            output.write(
+                "Command Terminal 1 is busy. The proposal is still pending; "
+                "type YES or yes again after it finishes, or N or anything else to cancel.\n"
+            )
+            return
+        command = self._pending_llm_command
+        self._pending_llm_command = None
+        self._awaiting_llm_command_final_confirmation = False
+        output.write("Sending the approved command to Command Terminal 1.\n")
+        self.query_one("#command-one-output", RichLog).write(f"$ {command}\n")
+        self.run_worker(
+            self._run_command("command-one", command),
+            name="command-one-llm-approved",
+        )
+
+    def _open_command_editor(self) -> None:
+        if self._pending_llm_command is None:
+            return
+        editor_pane = self.query_one("#command-editor-pane", Container)
+        if editor_pane.display:
+            return
+        widget_ids = (
+            "task-create-pane",
+            "task-chat-pane",
+            "editor-toolbar",
+            "editor",
+            "editor-status",
+        )
+        self._command_editor_visibility = {
+            widget_id: self.query_one(f"#{widget_id}").display
+            for widget_id in widget_ids
+        }
+        for widget_id in widget_ids:
+            self.query_one(f"#{widget_id}").display = False
+        self.query_one("#command-editor", TextArea).text = self._pending_llm_command
+        editor_pane.display = True
+        self.query_one("#llm-input", Input).disabled = True
+        self.query_one("#command-editor", TextArea).focus()
+
+    def _close_command_editor(self) -> None:
+        self.query_one("#command-editor-pane", Container).display = False
+        for widget_id, was_displayed in self._command_editor_visibility.items():
+            self.query_one(f"#{widget_id}").display = was_displayed
+        self._command_editor_visibility.clear()
+        self.query_one("#llm-input", Input).disabled = False
+        self.query_one("#llm-input", Input).focus()
+
+    def _confirm_command_edits(self) -> None:
+        command = self.query_one("#command-editor", TextArea).text.strip()
+        if not command:
+            self.notify("Command cannot be empty.", severity="warning")
+            self.query_one("#command-editor", TextArea).focus()
+            return
+        self._pending_llm_command = command
+        self._awaiting_llm_command_final_confirmation = True
+        self._close_command_editor()
+        self.query_one("#llm-output", RichLog).write(
+            "Updated command for Command Terminal 1:\n"
+            f"{command}\n"
+            "Type YES or yes to run it, or N or anything else to cancel: "
+        )
+
+    def _cancel_command_edits(self) -> None:
+        self._pending_llm_command = None
+        self._awaiting_llm_command_final_confirmation = False
+        self._close_command_editor()
+        self.query_one("#llm-output", RichLog).write("Command canceled.\n")
+
     @work(thread=True, exclusive=True, group="hawk-llm")
-    def _run_chat(self, prompt: str) -> None:
+    def _run_chat(self, prompt: str, use_rag: bool = False) -> None:
         response_parts: list[str] = []
         try:
             try:
-                context = self._retrieve_context(prompt)
+                context = self._retrieve_context(prompt) if use_rag else ""
             except Exception as exc:
                 context = ""
                 self.app.call_from_thread(
-                    self._write_chat_chunk,
+                    self._write_chat_notice,
                     f"\n[RAG retrieval skipped: {exc}]\n",
                 )
             user_content = prompt
             if context:
                 user_content = (
-                    "Use the following retrieved context to answer the user's question.\n\n"
+                    "The following text came from indexed documents. Use it only "
+                    "when it directly helps answer the question. If it is unrelated, "
+                    "disregard it and answer from general knowledge.\n\n"
                     f"Context:\n{context}\n\nQuestion:\n{prompt}"
                 )
             messages = [
@@ -331,10 +614,6 @@ class HawkCLI(App[None]):
                 try:
                     for chunk in client.stream(messages, model=model):
                         response_parts.append(chunk)
-                        self.app.call_from_thread(
-                            self._write_chat_chunk,
-                            chunk,
-                        )
                     last_error = None
                     break
                 except Exception as exc:
@@ -351,15 +630,17 @@ class HawkCLI(App[None]):
             self._chat_history.append({"role": "assistant", "content": response})
             self._persist_chat_message("user", prompt)
             self._persist_chat_message("assistant", response)
-            self.app.call_from_thread(self._finish_chat, None)
+            self.app.call_from_thread(self._finish_chat, None, response)
         except Exception as exc:
-            self.app.call_from_thread(self._finish_chat, str(exc))
+            self.app.call_from_thread(self._finish_chat, str(exc), None)
 
-    def _write_chat_chunk(self, chunk: str) -> None:
-        self.query_one("#llm-output", RichLog).write(chunk)
+    def _write_chat_notice(self, notice: str) -> None:
+        self.query_one("#llm-output", RichLog).write(notice)
 
-    def _finish_chat(self, error: str | None) -> None:
+    def _finish_chat(self, error: str | None, response: str | None) -> None:
         output = self.query_one("#llm-output", RichLog)
+        if response:
+            output.write(response)
         if error:
             output.write(f"\nLLM chat failed: {error}")
         output.write("\n\n")
@@ -385,6 +666,20 @@ class HawkCLI(App[None]):
             output.write(f"Invalid /task command: {exc}\n")
             return
         command_name = parts[0].lower() if parts else ""
+        if command_name == "/tasklist":
+            if len(parts) != 1:
+                output.write("Usage: /tasklist\n")
+                return
+            if self._task_chat_busy:
+                output.write("Wait for the current Task assistant response before listing Tasks.\n")
+                return
+            if self.current_task and (
+                self._editor_is_dirty() or self._has_generated_draft
+            ):
+                output.write("Save or cancel the current Task edits before displaying the Task list.\n")
+                return
+            self._show_task_list(output)
+            return
         if command_name == "/tasknew":
             if len(parts) != 1:
                 output.write("Usage: /tasknew\n")
@@ -426,13 +721,15 @@ class HawkCLI(App[None]):
             self._load_task(task)
             if task["artifact_type"] == "n8n":
                 output.write(
-                    f"Loaded {task['name']} Version {artifact['version']} in the Editor pane. "
+                    f"Loaded {task['name']} · Category: {task['category']} · "
+                    f"Version {artifact['version']} in the Editor pane. "
                     "n8n workflow JSON must be imported into the customer-managed n8n instance to run.\n"
                 )
                 return
             self._pending_task_runs[terminal_id] = (task, artifact)
             output.write(
-                f"Run {task['name']} · Version {artifact['version']}? (Y/N): "
+                f"Run {task['name']} · Category: {task['category']} · "
+                f"Version {artifact['version']}? (Y/N): "
             )
             return
         if len(parts) != 2 or command_name != "/taskview":
@@ -451,7 +748,10 @@ class HawkCLI(App[None]):
             output.write(f"Task not found: {parts[1]}\n")
             return
         self._load_task(task)
-        output.write(f"Loaded Task: {task['name']}\n")
+        output.write(
+            f"Loaded Task: {task['name']} · Category: {task['category']} · "
+            f"Type: {task['artifact_type']}\n"
+        )
 
     def _confirm_task_run(self, terminal_id: str, answer: str) -> None:
         output = self.query_one(f"#{terminal_id}-output", RichLog)
@@ -464,7 +764,10 @@ class HawkCLI(App[None]):
             output.write("Please answer Y or N: ")
             return
         task, artifact = self._pending_task_runs.pop(terminal_id)
-        output.write(f"Confirmed. Running {task['name']} Version {artifact['version']}…\n")
+        output.write(
+            f"Confirmed. Running {task['name']} · Category: {task['category']} · "
+            f"Version {artifact['version']}…\n"
+        )
         self.run_worker(
             self._run_task_artifact(terminal_id, task, artifact),
             name=f"task-run-{terminal_id}",
@@ -553,12 +856,14 @@ class HawkCLI(App[None]):
         )
 
     def _begin_task_creation(self) -> None:
+        self._close_task_list()
         self.current_task = None
         self.current_artifact = None
         self._has_generated_draft = False
         self.query_one("#task-create-pane", Container).display = True
         self.query_one("#task-chat-pane", Container).display = False
         self.query_one("#task-name-input", Input).value = ""
+        self.query_one("#task-category-input", Input).value = ""
         self.query_one("#task-type-select", Select).value = "python"
         self.query_one("#task-shell-select", Select).value = "bash"
         version_selector = self.query_one("#version-select", Select)
@@ -575,9 +880,14 @@ class HawkCLI(App[None]):
 
     def _create_task(self) -> None:
         name = self.query_one("#task-name-input", Input).value.strip()
+        category = self.query_one("#task-category-input", Input).value.strip()
         if not name:
             self.notify("Task name is required.", severity="warning")
             self.query_one("#task-name-input", Input).focus()
+            return
+        if not category:
+            self.notify("Task category is required.", severity="warning")
+            self.query_one("#task-category-input", Input).focus()
             return
         artifact_type = str(self.query_one("#task-type-select", Select).value)
         shell = (
@@ -586,18 +896,82 @@ class HawkCLI(App[None]):
             else None
         )
         try:
-            task = task_workspace.create_task(name, artifact_type, shell)
+            task = task_workspace.create_task(name, category, artifact_type, shell)
         except Exception as exc:
             self.notify(f"Could not create Task: {exc}", severity="error")
             return
         self._load_task(task)
         self.query_one("#editor-status", Static).update(
-            f"{task['name']} · {artifact_type} · describe the artifact in Task Chat"
+            f"{task['name']} · {category} · {artifact_type} · describe the artifact in Task Chat"
         )
+
+    def _show_task_list(self, terminal_output: RichLog) -> None:
+        pane = self.query_one("#task-list-pane", Container)
+        for widget_id in (
+            "task-create-pane",
+            "task-chat-pane",
+            "editor-toolbar",
+            "editor",
+            "editor-status",
+        ):
+            self.query_one(f"#{widget_id}").display = False
+
+        task_list_output = self.query_one("#task-list-output", RichLog)
+        task_list_output.clear()
+        tasks = task_workspace.list_tasks()
+        if tasks:
+            grouped: dict[str, list[dict]] = {}
+            for task in tasks:
+                category = task.get("category") or "Uncategorized"
+                grouped.setdefault(category, []).append(task)
+            for category in sorted(grouped, key=str.casefold):
+                category_tasks = sorted(
+                    grouped[category], key=lambda item: item["name"].casefold()
+                )
+                name_width = max(
+                    len("Task Name"),
+                    max(len(task["name"]) for task in category_tasks),
+                )
+                task_list_output.write("")
+                task_list_output.write(f"Category: {category}")
+                task_list_output.write(f"{'Task Name':<{name_width}}  Task Type")
+                task_list_output.write(f"{'-' * name_width}  ---------")
+                for task in category_tasks:
+                    task_list_output.write(
+                        f"{task['name']:<{name_width}}  {task['artifact_type']}"
+                    )
+        else:
+            task_list_output.write("No Tasks found.")
+        pane.display = True
+        terminal_output.write(f"Displayed {len(tasks)} Task(s) in the Editor pane.\n")
+
+    def _close_task_list(self) -> None:
+        pane = self.query_one("#task-list-pane", Container)
+        if not pane.display:
+            return
+        pane.display = False
+        self.current_task = None
+        self.current_artifact = None
+        self._has_generated_draft = False
+        self.query_one("#task-create-pane", Container).display = False
+        self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#editor-toolbar", Horizontal).display = True
+        self.query_one("#editor", TextArea).display = True
+        self.query_one("#editor-status", Static).display = True
+        self.query_one("#task-chat-output", RichLog).clear()
+        self.query_one("#task-name-input", Input).value = ""
+        self.query_one("#task-category-input", Input).value = ""
+        selector = self.query_one("#version-select", Select)
+        selector.set_options([])
+        selector.clear()
+        self._set_editor_text("")
+        self.query_one("#editor-status", Static).update("No Task loaded.")
+        self._sync_editor_controls()
 
     def _cancel_task_creation(self) -> None:
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#task-category-input", Input).value = ""
         self._set_editor_text("")
         self._sync_editor_controls()
         self.query_one("#editor-status", Static).update(
@@ -659,6 +1033,7 @@ class HawkCLI(App[None]):
             output.write(f"{label}: {message['content']}\n")
 
     def _load_task(self, task: dict) -> None:
+        self._close_task_list()
         self.current_task = task
         self._has_generated_draft = False
         self.query_one("#task-create-pane", Container).display = False
@@ -679,7 +1054,8 @@ class HawkCLI(App[None]):
             self.current_artifact = None
             self._set_editor_text("")
             self.query_one("#editor-status", Static).update(
-                f"{task['name']} · no saved artifact versions yet"
+                f"{task['name']} · {task['category']} · {task['artifact_type']} · "
+                "no saved artifact versions yet"
             )
             selector.clear()
         self._suppress_version_event = False
@@ -689,7 +1065,8 @@ class HawkCLI(App[None]):
         self.current_artifact = artifact
         self._set_editor_text(artifact["content"])
         self.query_one("#editor-status", Static).update(
-            f"{self.current_task['name']} · Version {artifact['version']}"
+            f"{self.current_task['name']} · {self.current_task['category']} · "
+            f"{self.current_task['artifact_type']} · Version {artifact['version']}"
         )
 
     def _set_editor_text(self, text: str) -> None:
@@ -727,9 +1104,10 @@ class HawkCLI(App[None]):
             self._sync_editor_controls()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "task-name-input" and self.is_mounted:
+        if event.input.id in {"task-name-input", "task-category-input"} and self.is_mounted:
             self.query_one("#create-task", Button).disabled = not bool(
-                event.value.strip()
+                self.query_one("#task-name-input", Input).value.strip()
+                and self.query_one("#task-category-input", Input).value.strip()
             )
 
     def _sync_editor_controls(self) -> None:
@@ -753,6 +1131,7 @@ class HawkCLI(App[None]):
         self.query_one("#version-select", Select).disabled = not has_task
         self.query_one("#create-task", Button).disabled = not bool(
             self.query_one("#task-name-input", Input).value.strip()
+            and self.query_one("#task-category-input", Input).value.strip()
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -760,6 +1139,8 @@ class HawkCLI(App[None]):
             self._create_task()
         elif event.button.id == "cancel-create-task":
             self._cancel_task_creation()
+        elif event.button.id == "close-task-list":
+            self._close_task_list()
         elif event.button.id == "send-task-message":
             message_input = self.query_one("#task-message-input", Input)
             prompt = message_input.value.strip()
@@ -774,6 +1155,10 @@ class HawkCLI(App[None]):
             self._download_version()
         elif event.button.id == "delete-version":
             self._confirm_delete_version()
+        elif event.button.id == "confirm-command-edits":
+            self._confirm_command_edits()
+        elif event.button.id == "cancel-command-edits":
+            self._cancel_command_edits()
         elif event.button.id in {"command-one-stop", "command-two-stop"}:
             terminal_id = event.button.id.removesuffix("-stop")
             self.run_worker(self._sessions[terminal_id].stop(), name=f"{terminal_id}-stop")

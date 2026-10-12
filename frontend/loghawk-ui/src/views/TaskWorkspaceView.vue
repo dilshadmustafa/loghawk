@@ -16,6 +16,7 @@ const router = useRouter();
 const taskId = computed(() => typeof route.params.id === "string" ? route.params.id : "");
 const task = ref<TaskRecord | null>(null);
 const name = ref("");
+const category = ref("");
 const artifactType = ref<TaskArtifactType>("n8n");
 const shell = ref<TaskShell>("bash");
 const message = ref("");
@@ -86,6 +87,7 @@ async function create() {
   try {
     const created = await createTask({
       name: name.value,
+      category: category.value,
       artifact_type: artifactType.value,
       shell: artifactType.value === "shell" ? shell.value : null,
     });
@@ -213,6 +215,7 @@ onMounted(() => void loadTask());
       <section class="card">
         <div class="form-grid">
           <label class="field">Task name<input v-model="name" placeholder="e.g. Restart unhealthy service" /></label>
+          <label class="field">Category<input v-model="category" placeholder="e.g. Kubernetes" /></label>
           <label class="field">Artifact type
             <select v-model="artifactType"><option value="n8n">n8n workflow JSON</option><option value="python">Python program</option><option value="shell">Shell script</option></select>
           </label>
@@ -221,10 +224,11 @@ onMounted(() => void loadTask());
           </label>
         </div>
       </section>
-      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim()" @click="create">{{ saving ? "Creating…" : "Create Task" }}</button><RouterLink class="btn" to="/tasks">Cancel</RouterLink></div>
+      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim() || !category.trim()" @click="create">{{ saving ? "Creating…" : "Create Task" }}</button><RouterLink class="btn" to="/tasks">Cancel</RouterLink></div>
     </template>
     <template v-else>
       <section class="card">
+        <p><strong>Category:</strong> {{ task.category }}</p>
         <div class="task-type-notice">
           <strong>Artifact type:</strong>
           {{ task.artifact_type === "n8n" ? "n8n workflow JSON" : task.artifact_type === "python" ? "Python program" : `${task.shell} script` }}.

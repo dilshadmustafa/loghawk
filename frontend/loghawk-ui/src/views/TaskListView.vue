@@ -49,10 +49,10 @@ onMounted(() => void refresh());
       <p v-else-if="!items.length" class="muted">No Tasks have been created.</p>
       <div v-else class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Latest artifact</th><th>Updated</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Category</th><th>Type</th><th>Latest artifact</th><th>Updated</th><th>Actions</th></tr></thead>
           <tbody>
             <tr v-for="item in items" :key="item.id">
-              <td>{{ item.name }}</td><td><span class="pill">{{ typeLabel(item) }}</span></td>
+              <td>{{ item.name }}</td><td>{{ item.category }}</td><td><span class="pill">{{ typeLabel(item) }}</span></td>
               <td>{{ item.latest_artifact ? `Version ${item.latest_artifact.version}` : "Not generated" }}</td>
               <td>{{ new Date(item.updated_at).toLocaleString() }}</td>
               <td><div class="actions"><RouterLink :to="`/tasks/${item.id}`">View / Continue</RouterLink><button class="btn" :disabled="deletingId === item.id" @click="remove(item)">{{ deletingId === item.id ? "Deleting…" : "Delete" }}</button></div></td>

@@ -5,6 +5,11 @@ from __future__ import annotations
 from loghawk.api.services import task_service, task_store
 
 
+def list_tasks() -> list[dict]:
+    """Return saved Tasks from the shared Web UI SQLite store."""
+    return task_store.list_tasks()
+
+
 def find_task_by_name(name: str) -> dict | None:
     """Find a Task by its case-insensitive name and return its full record."""
     normalized = name.strip().casefold()
@@ -18,10 +23,17 @@ def get_task(task_id: str) -> dict | None:
     return task_store.get_task(task_id)
 
 
-def create_task(name: str, artifact_type: str, shell: str | None = None) -> dict:
+def create_task(
+    name: str, category: str, artifact_type: str, shell: str | None = None
+) -> dict:
     """Create a Task using the same SQLite store as the Web UI."""
     return task_store.create_task(
-        {"name": name.strip(), "artifact_type": artifact_type, "shell": shell}
+        {
+            "name": name.strip(),
+            "category": category.strip(),
+            "artifact_type": artifact_type,
+            "shell": shell,
+        }
     )
 
 

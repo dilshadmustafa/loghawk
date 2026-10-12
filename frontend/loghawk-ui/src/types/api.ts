@@ -20,6 +20,7 @@ export interface TaskArtifact {
 export interface TaskRecord {
   id: string;
   name: string;
+  category: string;
   artifact_type: TaskArtifactType;
   shell: TaskShell | null;
   created_at: string;
@@ -32,6 +33,7 @@ export interface TaskRecord {
 
 export interface TaskInput {
   name: string;
+  category: string;
   artifact_type: TaskArtifactType;
   shell?: TaskShell | null;
 }

@@ -8,24 +8,25 @@ LOG_DIR="${HOME}/.loghawk/logs"
 CONDA_ENV_NAME="venv312"
 MINIFORGE_PREFIX="${MINIFORGE_PREFIX:-$HOME/miniforge3}"
 
+# n8n auto-start is disabled. Configure and start a customer-managed n8n instance separately.
 # Read only n8n settings from .env; keep other LogHawk secrets out of n8n.
-N8N_HOST=localhost
-N8N_PORT=5678
-N8N_PROTOCOL=http
-N8N_SECURE_COOKIE=false
-N8N_WEBHOOK_URL=http://localhost:5678/
-GENERIC_TIMEZONE=Asia/Kolkata
-while IFS='=' read -r key value; do
-    value="${value%$'\r'}"
-    case "$key" in
-        N8N_HOST) N8N_HOST="$value" ;;
-        N8N_PORT) N8N_PORT="$value" ;;
-        N8N_PROTOCOL) N8N_PROTOCOL="$value" ;;
-        N8N_SECURE_COOKIE) N8N_SECURE_COOKIE="$value" ;;
-        N8N_WEBHOOK_URL) N8N_WEBHOOK_URL="$value" ;;
-        GENERIC_TIMEZONE) GENERIC_TIMEZONE="$value" ;;
-    esac
-done < "$ROOT_DIR/.env"
+# N8N_HOST=localhost
+# N8N_PORT=5678
+# N8N_PROTOCOL=http
+# N8N_SECURE_COOKIE=false
+# N8N_WEBHOOK_URL=http://localhost:5678/
+# GENERIC_TIMEZONE=Asia/Kolkata
+# while IFS='=' read -r key value; do
+#     value="${value%$'\r'}"
+#     case "$key" in
+#         N8N_HOST) N8N_HOST="$value" ;;
+#         N8N_PORT) N8N_PORT="$value" ;;
+#         N8N_PROTOCOL) N8N_PROTOCOL="$value" ;;
+#         N8N_SECURE_COOKIE) N8N_SECURE_COOKIE="$value" ;;
+#         N8N_WEBHOOK_URL) N8N_WEBHOOK_URL="$value" ;;
+#         GENERIC_TIMEZONE) GENERIC_TIMEZONE="$value" ;;
+#     esac
+# done < "$ROOT_DIR/.env"
 
 if command -v conda >/dev/null 2>&1; then
     CONDA_BASE="$(conda info --base)"
@@ -108,41 +109,42 @@ if [[ "$TEMPORAL_READY" != true ]]; then
 fi
 echo "Temporal is ready at http://localhost:8233"
 
-echo "============================================================"
-echo "Checking n8n"
-echo "============================================================"
-N8N_RUNNING="$(docker inspect -f '{{.State.Running}}' loghawk-n8n 2>/dev/null || true)"
-if [[ "$N8N_RUNNING" != true ]]; then
-    if docker container inspect loghawk-n8n >/dev/null 2>&1; then
-        docker start loghawk-n8n
-    else
-        docker run -d --name loghawk-n8n --restart unless-stopped \
-            -p 5678:5678 \
-            -v loghawk-n8n-data:/home/node/.n8n \
-            -e "N8N_HOST=$N8N_HOST" \
-            -e "N8N_PORT=$N8N_PORT" \
-            -e "N8N_PROTOCOL=$N8N_PROTOCOL" \
-            -e "N8N_SECURE_COOKIE=$N8N_SECURE_COOKIE" \
-            -e "N8N_WEBHOOK_URL=$N8N_WEBHOOK_URL" \
-            -e "GENERIC_TIMEZONE=$GENERIC_TIMEZONE" \
-            n8nio/n8n:latest
-    fi
-fi
-
-N8N_READY=false
-for _ in {1..30}; do
-    if (echo >/dev/tcp/127.0.0.1/5678) >/dev/null 2>&1; then
-        N8N_READY=true
-        break
-    fi
-    sleep 2
-done
-if [[ "$N8N_READY" != true ]]; then
-    echo "n8n did not become ready on port 5678 within 60 seconds." >&2
-    docker logs --tail 50 loghawk-n8n >&2 || true
-    exit 1
-fi
-echo "n8n is ready at http://localhost:5678"
+# n8n Docker startup and readiness checks are disabled.
+# echo "============================================================"
+# echo "Checking n8n"
+# echo "============================================================"
+# N8N_RUNNING="$(docker inspect -f '{{.State.Running}}' loghawk-n8n 2>/dev/null || true)"
+# if [[ "$N8N_RUNNING" != true ]]; then
+#     if docker container inspect loghawk-n8n >/dev/null 2>&1; then
+#         docker start loghawk-n8n
+#     else
+#         docker run -d --name loghawk-n8n --restart unless-stopped \
+#             -p 5678:5678 \
+#             -v loghawk-n8n-data:/home/node/.n8n \
+#             -e "N8N_HOST=$N8N_HOST" \
+#             -e "N8N_PORT=$N8N_PORT" \
+#             -e "N8N_PROTOCOL=$N8N_PROTOCOL" \
+#             -e "N8N_SECURE_COOKIE=$N8N_SECURE_COOKIE" \
+#             -e "N8N_WEBHOOK_URL=$N8N_WEBHOOK_URL" \
+#             -e "GENERIC_TIMEZONE=$GENERIC_TIMEZONE" \
+#             n8nio/n8n:latest
+#     fi
+# fi
+#
+# N8N_READY=false
+# for _ in {1..30}; do
+#     if (echo >/dev/tcp/127.0.0.1/5678) >/dev/null 2>&1; then
+#         N8N_READY=true
+#         break
+#     fi
+#     sleep 2
+# done
+# if [[ "$N8N_READY" != true ]]; then
+#     echo "n8n did not become ready on port 5678 within 60 seconds." >&2
+#     docker logs --tail 50 loghawk-n8n >&2 || true
+#     exit 1
+# fi
+# echo "n8n is ready at http://localhost:5678"
 
 node_compatible() {
     command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && \
@@ -211,7 +213,7 @@ echo "Web UI: http://localhost:5173"
 echo "Web UI API: http://localhost:8000"
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"
-echo "n8n: http://localhost:5678"
+# echo "n8n: http://localhost:5678"
 echo "Starting Vite in this terminal. Press Ctrl+C to stop the local worker and API too."
 cd "$ROOT_DIR/frontend/loghawk-ui"
 npm run dev

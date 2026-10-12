@@ -10,6 +10,7 @@ TaskShell = Literal["bash", "powershell"]
 
 class TaskWrite(BaseModel):
     name: str
+    category: str = "Uncategorized"
     artifact_type: TaskArtifactType
     shell: TaskShell | None = None
 
@@ -19,6 +20,14 @@ class TaskWrite(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("Task name is required")
+        return value
+
+    @field_validator("category")
+    @classmethod
+    def validate_task_category(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Task category is required")
         return value
 
     @model_validator(mode="after")
