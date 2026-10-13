@@ -1896,7 +1896,7 @@ s3://loghawk-data/quickstart/train/elasticsearch-1.log
 s3://loghawk-data/quickstart/raw/elasticsearch-1.log
 ```
 
-#### To Start Temporal Workflow Through Console
+#### To Start Temporal Workflow Through Console (Optional)
 
 Keep the Temporal server running. In two separate terminals, run the worker first, then start the workflow:
 
@@ -1913,9 +1913,6 @@ The Temporal UI is available at `http://localhost:8233`.
 #### Optional applications
 
 ```text
-Interactive chat — Windows: firsttime_start_chat_assistant.bat
-                   Linux/macOS: bash firsttime_start_chat_assistant.sh
-
 Document upload — Windows: firsttime_start_webUI_doc_upload.bat
                   Linux/macOS: bash firsttime_start_webUI_doc_upload.sh
 ```
