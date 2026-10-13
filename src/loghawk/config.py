@@ -26,6 +26,23 @@ if not LH_DATA_DIR.is_absolute():
 
 LH_DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
 
+def _resolve_database_file_path(setting_name: str, default: str) -> Path:
+    value = os.getenv(setting_name, default).strip() or default
+    path = Path(value)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+LH_CONSOLE_DB_FILE_PATH = _resolve_database_file_path(
+    "LH_CONSOLE_DB_FILE_PATH",
+    "data/db/loghawk_local_hawkconsole.sqlite3",
+)
+LH_SERVER_DB_FILE_PATH = _resolve_database_file_path(
+    "LH_SERVER_DB_FILE_PATH",
+    "data/db/loghawk_webui.sqlite3",
+)
+
 LH_DUCKDB_TABLE_NAME = os.getenv(
     "LH_DUCKDB_TABLE_NAME",
     "convo"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
+# import tempfile
 from pathlib import Path
 
 import loghawk.config as config
@@ -11,8 +11,8 @@ from loghawk.api.services import task_store
 from loghawk.utils.user_identity import get_userid
 
 
-LOCAL_DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_local_hawkconsole.sqlite3"
-WEBUI_DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_webui.sqlite3"
+LOCAL_DB_PATH = config.LH_CONSOLE_DB_FILE_PATH
+# WEBUI_DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_webui.sqlite3"
 _INITIALIZED = False
 # _CHAT_HISTORY_SCHEMA_VERSION = 2
 
@@ -111,36 +111,37 @@ def _migrate_console_schema(connection: sqlite3.Connection) -> None:
 
 
 def initialize_console_database() -> Path:
-    """Copy the Web UI database once, then use the Console-local copy."""
+    """Initialize and use the Console-local database."""
     global _INITIALIZED
     if _INITIALIZED:
         return LOCAL_DB_PATH
 
     LOCAL_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not LOCAL_DB_PATH.exists():
-        if WEBUI_DB_PATH.exists():
-            with tempfile.NamedTemporaryFile(
-                prefix="loghawk_local_hawkconsole_",
-                suffix=".sqlite3",
-                dir=LOCAL_DB_PATH.parent,
-                delete=False,
-            ) as temporary_file:
-                temporary_path = Path(temporary_file.name)
-            try:
-                source = sqlite3.connect(WEBUI_DB_PATH, timeout=15)
-                destination = sqlite3.connect(temporary_path, timeout=15)
-                try:
-                    source.backup(destination)
-                finally:
-                    destination.close()
-                    source.close()
-                temporary_path.replace(LOCAL_DB_PATH)
-            except Exception:
-                temporary_path.unlink(missing_ok=True)
-                raise
-        else:
-            with sqlite3.connect(LOCAL_DB_PATH, timeout=15):
-                pass
+        # Web UI database copy disabled; initialize an empty Console database.
+        # if WEBUI_DB_PATH.exists():
+        #     with tempfile.NamedTemporaryFile(
+        #         prefix="loghawk_local_hawkconsole_",
+        #         suffix=".sqlite3",
+        #         dir=LOCAL_DB_PATH.parent,
+        #         delete=False,
+        #     ) as temporary_file:
+        #         temporary_path = Path(temporary_file.name)
+        #     try:
+        #         source = sqlite3.connect(WEBUI_DB_PATH, timeout=15)
+        #         destination = sqlite3.connect(temporary_path, timeout=15)
+        #         try:
+        #             source.backup(destination)
+        #         finally:
+        #             destination.close()
+        #             source.close()
+        #         temporary_path.replace(LOCAL_DB_PATH)
+        #     except Exception:
+        #         temporary_path.unlink(missing_ok=True)
+        #         raise
+        # else:
+        with sqlite3.connect(LOCAL_DB_PATH, timeout=15):
+            pass
 
     with sqlite3.connect(LOCAL_DB_PATH, timeout=15) as connection:
         _migrate_console_schema(connection)

@@ -12,7 +12,7 @@ import loghawk.config as config
 from loghawk.utils.user_identity import get_userid
 
 
-DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_webui.sqlite3"
+DB_PATH = config.LH_SERVER_DB_FILE_PATH
 _SCHEMA_LOCK = threading.Lock()
 _SCHEMA_READY = False
 
