@@ -10,12 +10,14 @@ PROJECT_ROOT = PACKAGE_ROOT.parent.parent
 
 load_dotenv(PROJECT_ROOT / ".env")
 
-LH_DUCKDB_FILE_PATH = Path(os.getenv("LH_DUCKDB_FILE_PATH"))
-
-if not LH_DUCKDB_FILE_PATH.is_absolute():
-    LH_DUCKDB_FILE_PATH = PROJECT_ROOT / LH_DUCKDB_FILE_PATH
-
-LH_DUCKDB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+_duckdb_file_path = os.getenv("LH_DUCKDB_FILE_PATH", "").strip()
+if _duckdb_file_path:
+    LH_DUCKDB_FILE_PATH = Path(_duckdb_file_path)
+    if not LH_DUCKDB_FILE_PATH.is_absolute():
+        LH_DUCKDB_FILE_PATH = PROJECT_ROOT / LH_DUCKDB_FILE_PATH
+    LH_DUCKDB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+else:
+    LH_DUCKDB_FILE_PATH = Path(":memory:")
 
 LH_DATA_DIR = Path(os.getenv("LH_DATA_DIR"))
 

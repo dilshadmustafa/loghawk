@@ -1,0 +1,10 @@
+python-dotenv
+textual
+duckdb
+lancedb
+litellm
+boto3
+langchain-community
+langchain-core
+langchain-text-splitters
+pdfplumber

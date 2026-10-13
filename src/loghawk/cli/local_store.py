@@ -14,7 +14,7 @@ from loghawk.utils.user_identity import get_userid
 LOCAL_DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_local_hawkconsole.sqlite3"
 WEBUI_DB_PATH = Path(config.LH_DATA_DIR) / "db" / "loghawk_webui.sqlite3"
 _INITIALIZED = False
-_CHAT_HISTORY_SCHEMA_VERSION = 2
+# _CHAT_HISTORY_SCHEMA_VERSION = 2
 
 
 def _quote_identifier(identifier: str) -> str:
@@ -67,42 +67,47 @@ def _migrate_console_schema(connection: sqlite3.Connection) -> None:
             (userid,),
         )
 
-    migration_version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if migration_version < 1:
-        connection.execute("PRAGMA user_version = 1")
-
-    if migration_version < _CHAT_HISTORY_SCHEMA_VERSION and config.LH_DUCKDB_FILE_PATH.exists():
-        import duckdb
-
-        table = _quote_identifier(config.LH_DUCKDB_TABLE_NAME)
-        duckdb_connection = duckdb.connect(
-            str(config.LH_DUCKDB_FILE_PATH), read_only=True
-        )
-        try:
-            table_exists = duckdb_connection.execute(
-                """SELECT 1 FROM information_schema.tables
-                   WHERE table_schema = 'main' AND table_name = ?""",
-                [config.LH_DUCKDB_TABLE_NAME],
-            ).fetchone()
-            if table_exists:
-                rows = duckdb_connection.execute(
-                    f"SELECT role, content, creation_date FROM {table} "
-                    "ORDER BY creation_date"
-                ).fetchall()
-                connection.executemany(
-                    """INSERT INTO llm_conversation_history
-                       (userid, role, content, created_at) VALUES (?, ?, ?, ?)""",
-                    [
-                        (userid, role, content, str(created_at))
-                        for role, content, created_at in rows
-                        if role in {"user", "assistant"}
-                    ],
-                )
-                connection.execute(
-                    f"PRAGMA user_version = {_CHAT_HISTORY_SCHEMA_VERSION}"
-                )
-        finally:
-            duckdb_connection.close()
+    # Legacy DuckDB conversation-history migration. Conversation history has
+    # already been migrated to SQLite, so this is disabled for now.
+    # migration_version = connection.execute("PRAGMA user_version").fetchone()[0]
+    # if migration_version < 1:
+    #     connection.execute("PRAGMA user_version = 1")
+    #
+    # if (
+    #     migration_version < _CHAT_HISTORY_SCHEMA_VERSION
+    #     and config.LH_DUCKDB_FILE_PATH.exists()
+    # ):
+    #     import duckdb
+    #
+    #     table = _quote_identifier(config.LH_DUCKDB_TABLE_NAME)
+    #     duckdb_connection = duckdb.connect(
+    #         str(config.LH_DUCKDB_FILE_PATH), read_only=True
+    #     )
+    #     try:
+    #         table_exists = duckdb_connection.execute(
+    #             """SELECT 1 FROM information_schema.tables
+    #                WHERE table_schema = 'main' AND table_name = ?""",
+    #             [config.LH_DUCKDB_TABLE_NAME],
+    #         ).fetchone()
+    #         if table_exists:
+    #             rows = duckdb_connection.execute(
+    #                 f"SELECT role, content, creation_date FROM {table} "
+    #                 "ORDER BY creation_date"
+    #             ).fetchall()
+    #             connection.executemany(
+    #                 """INSERT INTO llm_conversation_history
+    #                    (userid, role, content, created_at) VALUES (?, ?, ?, ?)""",
+    #                 [
+    #                     (userid, role, content, str(created_at))
+    #                     for role, content, created_at in rows
+    #                     if role in {"user", "assistant"}
+    #                 ],
+    #             )
+    #             connection.execute(
+    #                 f"PRAGMA user_version = {_CHAT_HISTORY_SCHEMA_VERSION}"
+    #             )
+    #     finally:
+    #         duckdb_connection.close()
 
 
 def initialize_console_database() -> Path:

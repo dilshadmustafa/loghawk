@@ -1957,7 +1957,27 @@ Hawk Console is LogHawk’s four-pane terminal interface for Windows, Linux, and
 
 Hawk Console is a standalone application that works independently of other LogHawk components, providing operational intelligence, expert guidance, and assistance with root-cause analysis (RCA).
 
-After running first-time setup and activating the LogHawk environment, start Hawk Console from the repository root:
+#### First-time Hawk Console setup
+
+Python 3.12 or newer is required. From the repository root, run the setup script for your operating system:
+
+**Windows**
+
+```powershell
+.\firsttime_setup_hawkconsole.bat
+.\venv_hawkconsole\Scripts\Activate.ps1
+```
+
+**Linux/macOS**
+
+```sh
+bash firsttime_setup_hawkconsole.sh
+source venv_hawkconsole/bin/activate
+```
+
+These scripts create a separate `venv_hawkconsole` environment and install Hawk Console’s dependencies. They do not start RustFS or Temporal.
+
+With the Hawk Console environment active, start it from the repository root:
 
 ```sh
 hawk
