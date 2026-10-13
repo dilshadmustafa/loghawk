@@ -1955,6 +1955,8 @@ LogHawk uses these settings to connect to the n8n instance when importing a save
 
 Hawk Console is LogHawk’s four-pane terminal interface for Windows, Linux, and macOS.
 
+Hawk Console is a standalone application that works independently of other LogHawk components, providing operational intelligence, expert guidance, and assistance with root-cause analysis (RCA).
+
 After running first-time setup and activating the LogHawk environment, start Hawk Console from the repository root:
 
 ```sh
