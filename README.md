@@ -1924,6 +1924,8 @@ Document upload — Windows: firsttime_start_webUI_doc_upload.bat
 
 The Web UI provides a browser-based way to configure and run LogHawk pipelines:
 
+![LogHawk Web UI showing the Pipelines page](loghawk_webui.jpg)
+
 - Create and manage reusable Config Sets for internal S3 or external AWS S3 inputs.
 - Browse external S3 buckets and folders, and specify a region for each selected source.
 - Add multiple S3 locations for external Train and Detect inputs separately, along with the region for each location.
@@ -1948,6 +1950,41 @@ LogHawk uses these settings to connect to the n8n instance when importing a save
 | `LH_N8N_API_KEY` | n8n API key, created in n8n under **Settings > n8n API**; required to import workflows. |
 
 `N8N_HOST`, `N8N_PORT`, `N8N_PROTOCOL`, `N8N_SECURE_COOKIE`, `N8N_WEBHOOK_URL`, and `GENERIC_TIMEZONE` configure the n8n runtime. They are not substitutes for the LogHawk connection URL and API key.
+
+### Hawk Console
+
+Hawk Console is LogHawk’s four-pane terminal interface for Windows, Linux, and macOS.
+
+After running first-time setup and activating the LogHawk environment, start Hawk Console from the repository root:
+
+```sh
+hawk
+```
+
+![Hawk Console showing its four-pane layout](loghawk_console.jpg)
+
+The layout has an **AI/LLM Terminal** at the upper left, two **Command Terminals** below it, and the **Editor pane** on the right spanning the height of all three terminals.
+
+- **AI/LLM Terminal:** Chat with the configured LiteLLM provider. When indexed LanceDB context is available, use `/rag <question>` to search it. Use `/command <request>` to ask the LLM to propose shell commands, or `/command generate commands based on above discussion` to use the recent conversation.
+- **Command Terminals 1 and 2:** Enter and run commands in either terminal. Command output is also shown in the Editor pane. Both terminals support the task commands below.
+- **Editor pane:** View and edit task artifacts, and manage saved versions.
+
+For an LLM-proposed command, type `YES` or `yes` to run it in Command Terminal 1. Type `E` or `e` to edit it in the Editor pane; after confirming the edits, the command is shown again for confirmation. Type `N` or anything else to cancel.
+
+#### Hawk Console task commands
+
+```text
+/tasknew                 Create a task with AI-assistance in the Editor pane
+/tasklist                List tasks in the Editor pane
+/taskview <taskname>     Load a task artifact into the Editor pane
+/taskrun <taskname>      Load the latest saved version and request confirmation
+```
+
+`/tasknew` supports **Python**, **Shell**, and **n8n** task types, with a task name and category. The Editor pane lets you select a saved version, edit the artifact, explicitly save a new version, download it, or delete a version. Draft changes are not saved automatically.
+
+`/taskrun` asks for confirmation before running Python or Shell task artifacts. Hawk Console does not execute n8n workflow JSON; import it into a customer-managed n8n instance to run it.
+
+Hawk Console stores its local task records and versions in `LH_DATA_DIR/db/loghawk_local_hawkconsole.sqlite3`.
 
 ### LLM Provider References
 
