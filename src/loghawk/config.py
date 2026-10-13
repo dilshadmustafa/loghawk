@@ -88,11 +88,11 @@ if LH_LLM_CODEASSIST_MAX_TOKENS < 1:
     raise ValueError("LH_LLM_CODEASSIST_MAX_TOKENS must be at least 1")
 
 # Number of recent LLM Terminal messages included when drafting commands.
-LH_CLI_COMMAND_CONTEXT_MESSAGES = int(
-    os.getenv("LH_CLI_COMMAND_CONTEXT_MESSAGES", "10")
+LH_CONSOLE_COMMAND_CONTEXT_MESSAGES = int(
+    os.getenv("LH_CONSOLE_COMMAND_CONTEXT_MESSAGES", "10")
 )
-if LH_CLI_COMMAND_CONTEXT_MESSAGES < 0:
-    raise ValueError("LH_CLI_COMMAND_CONTEXT_MESSAGES must be zero or greater")
+if LH_CONSOLE_COMMAND_CONTEXT_MESSAGES < 0:
+    raise ValueError("LH_CONSOLE_COMMAND_CONTEXT_MESSAGES must be zero or greater")
 
 LH_LLM_PROVIDER = os.getenv("LH_LLM_PROVIDER", "ollama").strip().lower()
 if LH_LLM_PROVIDER == "microsoft_foundry":

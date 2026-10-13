@@ -318,7 +318,7 @@ class HawkConsole(App[None]):
                 self.query_one("#llm-output", RichLog).write(
                     f"\nCommand request: {request}\nPreparing a command proposal…\n"
                 )
-                context_limit = config.LH_CLI_COMMAND_CONTEXT_MESSAGES
+                context_limit = config.LH_CONSOLE_COMMAND_CONTEXT_MESSAGES
                 chat_history = (
                     list(self._chat_history[-context_limit:])
                     if context_limit
