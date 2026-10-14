@@ -26,22 +26,18 @@ if not LH_DATA_DIR.is_absolute():
 
 LH_DATA_DIR.parent.mkdir(parents=True, exist_ok=True)
 
-def _resolve_database_file_path(setting_name: str, default: str) -> Path:
-    value = os.getenv(setting_name, default).strip() or default
-    path = Path(value)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-LH_CONSOLE_DB_FILE_PATH = _resolve_database_file_path(
-    "LH_CONSOLE_DB_FILE_PATH",
-    "data/db/loghawk_local_hawkconsole.sqlite3",
-)
-LH_SERVER_DB_FILE_PATH = _resolve_database_file_path(
-    "LH_SERVER_DB_FILE_PATH",
-    "data/db/loghawk_webui.sqlite3",
-)
+LH_CONSOLE_DATABASE_URL = os.getenv(
+    "LH_CONSOLE_DATABASE_URL",
+    "sqlite:///data/db/loghawk_local_hawkconsole.sqlite3",
+).strip()
+LH_SERVER_DATABASE_URL = os.getenv(
+    "LH_SERVER_DATABASE_URL",
+    "sqlite:///data/db/loghawk_webui.sqlite3",
+).strip()
+if not LH_CONSOLE_DATABASE_URL:
+    raise ValueError("LH_CONSOLE_DATABASE_URL must not be blank")
+if not LH_SERVER_DATABASE_URL:
+    raise ValueError("LH_SERVER_DATABASE_URL must not be blank")
 
 LH_DUCKDB_TABLE_NAME = os.getenv(
     "LH_DUCKDB_TABLE_NAME",

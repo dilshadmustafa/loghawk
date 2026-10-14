@@ -26,6 +26,8 @@ s3fs
 temporalio
 fastapi
 uvicorn[standard]
+sqlalchemy>=2.0
+alembic>=1.13
 boto3
 scikit-learn
 pyod

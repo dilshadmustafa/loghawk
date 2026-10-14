@@ -19,7 +19,9 @@ from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
 
 import loghawk.config as config
 from loghawk.cli.command_terminal import CommandShellSession
-from loghawk.cli import command_history, local_store, task_workspace
+from loghawk.cli import command_history2 as command_history
+from loghawk.cli import local_store2 as local_store
+from loghawk.cli import task_workspace2 as task_workspace
 from loghawk.llm import get_llm_client
 from loghawk.utils import lancedbutils2
 

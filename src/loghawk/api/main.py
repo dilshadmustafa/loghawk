@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 
-from loghawk.api.routers.config_sets import router as config_sets_router
+from loghawk.api.routers.config_sets2 import router as config_sets_router
 from loghawk.api.routers.pipeline_runs import router as pipeline_runs_router
-from loghawk.api.routers.pipelines import router as pipelines_router
+from loghawk.api.routers.pipelines2 import router as pipelines_router
 from loghawk.api.routers.storage import router as storage_router
-from loghawk.api.routers.tasks import router as tasks_router
+from loghawk.api.routers.tasks2 import router as tasks_router
 
 
 app = FastAPI(
