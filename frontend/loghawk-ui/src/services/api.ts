@@ -10,6 +10,8 @@ import type {
   PipelineRunStarted,
   PipelineRunStatus,
   RunMode,
+  RagAnswer,
+  RagIngestionJob,
   TaskInput,
   TaskMessageInput,
   TaskRecord,
@@ -29,6 +31,39 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+
+async function requestMultipart<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch(`${API_ROOT}${path}`, { method: "POST", body });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.detail ?? `Request failed (${response.status})`);
+  }
+  return response.json() as Promise<T>;
+}
+
+export const uploadRagDocuments = (files: File[]) => {
+  const body = new FormData();
+  for (const file of files) {
+    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+    body.append("files", file, relativePath || file.name);
+  }
+  return requestMultipart<RagIngestionJob>("/rag/ingestions/upload", body);
+};
+
+export const startRagWebCrawl = (url: string) =>
+  request<RagIngestionJob>("/rag/ingestions/web", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+
+export const getRagIngestion = (jobId: string) =>
+  request<RagIngestionJob>(`/rag/ingestions/${encodeURIComponent(jobId)}`);
+
+export const askRagQuestion = (question: string) =>
+  request<RagAnswer>("/rag/chat", {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
 
 export const getBuckets = () => request<string[]>("/storage/buckets");
 

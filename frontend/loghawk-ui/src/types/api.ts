@@ -1,7 +1,6 @@
 export type RunMode = "train" | "detect" | "train-detect";
 export type PhaseMode = RunMode;
-export type TaskArtifactType = "n8n" | "python" | "shell";
-export type TaskShell = "bash" | "powershell";
+export type TaskArtifactType = "n8n" | "python" | "bash" | "powershell" | "windows-cmd";
 
 export interface TaskMessage {
   id: string;
@@ -20,9 +19,9 @@ export interface TaskArtifact {
 export interface TaskRecord {
   id: string;
   name: string;
+  userid: string | null;
   category: string;
   artifact_type: TaskArtifactType;
-  shell: TaskShell | null;
   created_at: string;
   updated_at: string;
   messages?: TaskMessage[];
@@ -35,7 +34,6 @@ export interface TaskInput {
   name: string;
   category: string;
   artifact_type: TaskArtifactType;
-  shell?: TaskShell | null;
 }
 
 export interface TaskMessageInput {
@@ -125,4 +123,50 @@ export interface PipelineRunStatus {
   workflow_id: string;
   run_id: string | null;
   status: string;
+}
+
+export type RagJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED";
+
+export interface RagIngestionJob {
+  id: string;
+  userid: string | null;
+  kind: "UPLOAD" | "WEB";
+  status: RagJobStatus;
+  source: string;
+  files_total: number;
+  files_processed: number;
+  chunks_indexed: number;
+  error: string | null;
+  warnings: string[];
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface RagAnswer {
+  answer: string;
+  sources: { reference: string; source: string }[];
+}
+
+export type RagJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED";
+
+export interface RagIngestionJob {
+  id: string;
+  userid: string | null;
+  kind: "UPLOAD" | "WEB";
+  status: RagJobStatus;
+  source: string;
+  files_total: number;
+  files_processed: number;
+  chunks_indexed: number;
+  error: string | null;
+  warnings: string[];
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface RagAnswer {
+  answer: string;
+  sources: string[];
 }

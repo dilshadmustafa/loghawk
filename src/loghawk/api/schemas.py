@@ -4,15 +4,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 RunMode = Literal["train", "detect", "train-detect"]
-TaskArtifactType = Literal["n8n", "python", "shell"]
-TaskShell = Literal["bash", "powershell"]
+TaskArtifactType = Literal["n8n", "python", "bash", "powershell", "windows-cmd"]
 
 
 class TaskWrite(BaseModel):
     name: str
     category: str = "Uncategorized"
     artifact_type: TaskArtifactType
-    shell: TaskShell | None = None
 
     @field_validator("name")
     @classmethod
@@ -29,15 +27,6 @@ class TaskWrite(BaseModel):
         if not value:
             raise ValueError("Task category is required")
         return value
-
-    @model_validator(mode="after")
-    def validate_shell(self):
-        if self.artifact_type == "shell" and self.shell is None:
-            raise ValueError("Choose Bash or PowerShell for a shell task")
-        if self.artifact_type != "shell" and self.shell is not None:
-            raise ValueError("Shell target is only valid for shell tasks")
-        return self
-
 
 class TaskMessageWrite(BaseModel):
     content: str

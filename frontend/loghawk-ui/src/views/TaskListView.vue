@@ -22,7 +22,11 @@ async function refresh() {
 }
 
 function typeLabel(item: TaskRecord) {
-  return item.artifact_type === "shell" ? `${item.shell} script` : item.artifact_type;
+  if (item.artifact_type === "windows-cmd") return "Windows CMD";
+  if (item.artifact_type === "bash" || item.artifact_type === "powershell") {
+    return `${item.artifact_type} script`;
+  }
+  return item.artifact_type;
 }
 
 async function remove(item: TaskRecord) {
@@ -40,7 +44,7 @@ onMounted(() => void refresh());
 <template>
   <div class="view">
     <header class="view-header">
-      <div><h1>Tasks</h1><p>Draft n8n workflows, Python programs, and shell scripts with an LLM.</p></div>
+      <div><h1>Tasks</h1><p>Draft Python, Bash, PowerShell, Windows CMD, and n8n artifacts with an LLM.</p></div>
       <RouterLink class="btn primary" to="/tasks/new">Create Task</RouterLink>
     </header>
     <p v-if="error" class="error">{{ error }}</p>
@@ -49,10 +53,10 @@ onMounted(() => void refresh());
       <p v-else-if="!items.length" class="muted">No Tasks have been created.</p>
       <div v-else class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Category</th><th>Type</th><th>Latest artifact</th><th>Updated</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>User ID</th><th>Category</th><th>Type</th><th>Latest artifact</th><th>Updated</th><th>Actions</th></tr></thead>
           <tbody>
             <tr v-for="item in items" :key="item.id">
-              <td>{{ item.name }}</td><td>{{ item.category }}</td><td><span class="pill">{{ typeLabel(item) }}</span></td>
+              <td>{{ item.name }}</td><td>{{ item.userid || "—" }}</td><td>{{ item.category }}</td><td><span class="pill">{{ typeLabel(item) }}</span></td>
               <td>{{ item.latest_artifact ? `Version ${item.latest_artifact.version}` : "Not generated" }}</td>
               <td>{{ new Date(item.updated_at).toLocaleString() }}</td>
               <td><div class="actions"><RouterLink :to="`/tasks/${item.id}`">View / Continue</RouterLink><button class="btn" :disabled="deletingId === item.id" @click="remove(item)">{{ deletingId === item.id ? "Deleting…" : "Delete" }}</button></div></td>

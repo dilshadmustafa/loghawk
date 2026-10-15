@@ -1,10 +1,16 @@
+import asyncio
+import sys
+import traceback
+
 from fastapi import FastAPI
 
 from loghawk.api.routers.config_sets2 import router as config_sets_router
 from loghawk.api.routers.pipeline_runs import router as pipeline_runs_router
 from loghawk.api.routers.pipelines2 import router as pipelines_router
+from loghawk.api.routers.rag import router as rag_router
 from loghawk.api.routers.storage import router as storage_router
 from loghawk.api.routers.tasks2 import router as tasks_router
+from loghawk.api.services.rag_store import fail_interrupted_jobs
 
 
 app = FastAPI(
@@ -34,6 +40,32 @@ app.include_router(
     prefix="/api/v1/tasks",
     tags=["tasks"],
 )
+app.include_router(rag_router, prefix="/api/v1/rag", tags=["rag"])
+
+
+@app.on_event("startup")
+async def install_asyncio_exception_handler() -> None:
+    loop = asyncio.get_running_loop()
+
+    def report_exception(_loop, context) -> None:
+        print(
+            f"Asyncio event-loop exception: {context.get('message', 'unknown error')}",
+            file=sys.stderr,
+            flush=True,
+        )
+        exception = context.get("exception")
+        if exception is not None:
+            traceback.print_exception(
+                type(exception), exception, exception.__traceback__,
+                file=sys.stderr,
+            )
+
+    loop.set_exception_handler(report_exception)
+
+
+@app.on_event("startup")
+def recover_interrupted_rag_jobs() -> None:
+    fail_interrupted_jobs()
 
 
 @app.get("/api/v1/health")

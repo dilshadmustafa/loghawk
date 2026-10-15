@@ -93,7 +93,7 @@ echo
 echo "============================================================"
 echo "Setting up LanceDB"
 echo "============================================================"
-python -m loghawk.admin.setup_lancedb2
+python -m loghawk.admin.setup_console_lancedb
 
 echo
 echo "Hawk Console setup complete."

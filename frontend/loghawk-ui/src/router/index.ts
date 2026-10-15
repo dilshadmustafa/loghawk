@@ -7,6 +7,8 @@ import PipelineFormView from "../views/PipelineFormView.vue";
 import PipelineRunDetailView from "../views/PipelineRunDetailView.vue";
 import TaskListView from "../views/TaskListView.vue";
 import TaskWorkspaceView from "../views/TaskWorkspaceView.vue";
+import RagDocumentUploadView from "../views/RagDocumentUploadView.vue";
+import RagWebScrapeView from "../views/RagWebScrapeView.vue";
 
 export default createRouter({
   history: createWebHistory(),
@@ -23,5 +25,7 @@ export default createRouter({
     { path: "/tasks", name: "tasks", component: TaskListView },
     { path: "/tasks/new", name: "task-create", component: TaskWorkspaceView },
     { path: "/tasks/:id", name: "task-workspace", component: TaskWorkspaceView },
+    { path: "/rag/documents", name: "rag-documents", component: RagDocumentUploadView },
+    { path: "/rag/web-scrape", name: "rag-web-scrape", component: RagWebScrapeView },
   ],
 });

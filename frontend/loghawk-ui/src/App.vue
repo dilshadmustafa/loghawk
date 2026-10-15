@@ -24,6 +24,11 @@
           <RouterLink to="/tasks/new">Create Task</RouterLink>
           <RouterLink to="/tasks">List Tasks</RouterLink>
         </section>
+        <section>
+          <h2>RAG</h2>
+          <RouterLink to="/rag/documents">Document Upload</RouterLink>
+          <RouterLink to="/rag/web-scrape">Web Scrape</RouterLink>
+        </section>
       </nav>
       <p class="sidebar-note">AI decides and explains.<br />Deterministic workflows execute and verify.</p>
     </aside>

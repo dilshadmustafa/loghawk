@@ -23,16 +23,13 @@ def get_task(task_id: str) -> dict | None:
     return task_store.get_task(task_id)
 
 
-def create_task(
-    name: str, category: str, artifact_type: str, shell: str | None = None
-) -> dict:
+def create_task(name: str, category: str, artifact_type: str) -> dict:
     """Create a Task in Hawk Console's local SQLite store."""
     return task_store.create_task(
         {
             "name": name.strip(),
             "category": category.strip(),
             "artifact_type": artifact_type,
-            "shell": shell,
         }
     )
 

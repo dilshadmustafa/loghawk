@@ -27,16 +27,13 @@ def get_task(task_id: str) -> dict | None:
     return task_store.get_task(task_id, _DATABASE_ROLE)
 
 
-def create_task(
-    name: str, category: str, artifact_type: str, shell: str | None = None
-) -> dict:
+def create_task(name: str, category: str, artifact_type: str) -> dict:
     """Create a Task in Hawk Console's local database."""
     return task_store.create_task(
         {
             "name": name.strip(),
             "category": category.strip(),
             "artifact_type": artifact_type,
-            "shell": shell,
         },
         _DATABASE_ROLE,
     )
@@ -57,3 +54,8 @@ def save_artifact(task_id: str, content: str) -> dict | None:
 
 def delete_artifact(task_id: str, artifact_id: str) -> bool:
     return task_store.delete_artifact_version(task_id, artifact_id, _DATABASE_ROLE)
+
+
+def delete_task(task_id: str) -> bool:
+    """Delete a Task and its related data from Hawk Console's local database."""
+    return task_store.delete_task(task_id, _DATABASE_ROLE)

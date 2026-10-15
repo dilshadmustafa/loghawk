@@ -9,7 +9,7 @@ import {
   saveTaskArtifact,
   sendTaskMessage,
 } from "../services/api";
-import type { TaskArtifactType, TaskRecord, TaskShell } from "../types/api";
+import type { TaskArtifactType, TaskRecord } from "../types/api";
 
 const route = useRoute();
 const router = useRouter();
@@ -18,7 +18,6 @@ const task = ref<TaskRecord | null>(null);
 const name = ref("");
 const category = ref("");
 const artifactType = ref<TaskArtifactType>("n8n");
-const shell = ref<TaskShell>("bash");
 const message = ref("");
 const editorContent = ref("");
 const savedBaseline = ref("");
@@ -89,7 +88,6 @@ async function create() {
       name: name.value,
       category: category.value,
       artifact_type: artifactType.value,
-      shell: artifactType.value === "shell" ? shell.value : null,
     });
     await router.replace(`/tasks/${created.id}`);
   } catch (err) {
@@ -184,16 +182,18 @@ async function deleteSelectedVersion() {
 
 function downloadArtifact() {
   if (!task.value || !editorContent.value) return;
-  const extension = task.value.artifact_type === "n8n"
-    ? "json"
-    : task.value.artifact_type === "python"
-      ? "py"
-      : task.value.shell === "powershell" ? "ps1" : "sh";
+  const extension: Record<TaskArtifactType, string> = {
+    n8n: "json",
+    python: "py",
+    bash: "sh",
+    powershell: "ps1",
+    "windows-cmd": "cmd",
+  };
   const safeName = task.value.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "loghawk-task";
   const url = URL.createObjectURL(new Blob([editorContent.value], { type: "text/plain;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${safeName}.${extension}`;
+  link.download = `${safeName}.${extension[task.value.artifact_type]}`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -217,10 +217,7 @@ onMounted(() => void loadTask());
           <label class="field">Task name<input v-model="name" placeholder="e.g. Restart unhealthy service" /></label>
           <label class="field">Category<input v-model="category" placeholder="e.g. Kubernetes" /></label>
           <label class="field">Artifact type
-            <select v-model="artifactType"><option value="n8n">n8n workflow JSON</option><option value="python">Python program</option><option value="shell">Shell script</option></select>
-          </label>
-          <label v-if="artifactType === 'shell'" class="field">Shell target
-            <select v-model="shell"><option value="bash">Bash</option><option value="powershell">PowerShell</option></select>
+            <select v-model="artifactType"><option value="python">Python program</option><option value="bash">Bash</option><option value="powershell">PowerShell</option><option value="windows-cmd">Windows CMD</option><option value="n8n">n8n workflow JSON</option></select>
           </label>
         </div>
       </section>
@@ -231,12 +228,12 @@ onMounted(() => void loadTask());
         <p><strong>Category:</strong> {{ task.category }}</p>
         <div class="task-type-notice">
           <strong>Artifact type:</strong>
-          {{ task.artifact_type === "n8n" ? "n8n workflow JSON" : task.artifact_type === "python" ? "Python program" : `${task.shell} script` }}.
+          {{ task.artifact_type === "n8n" ? "n8n workflow JSON" : task.artifact_type === "python" ? "Python program" : task.artifact_type === "windows-cmd" ? "Windows CMD script" : `${task.artifact_type} script` }}.
           This task type is fixed. To draft a different kind of artifact, create a new task.
         </div>
         <h2>Chat</h2>
         <div class="messages" aria-live="polite">
-          <p v-if="!task.messages?.length" class="muted">Describe what you want the {{ task.artifact_type === 'shell' ? `${task.shell} script` : task.artifact_type }} to do.</p>
+          <p v-if="!task.messages?.length" class="muted">Describe what you want the {{ task.artifact_type === 'windows-cmd' ? 'Windows CMD script' : task.artifact_type === 'n8n' ? 'n8n workflow' : task.artifact_type === 'python' ? 'Python program' : `${task.artifact_type} script` }} to do.</p>
           <article v-for="item in task.messages" :key="item.id" class="message" :class="item.role">
             <strong>{{ item.role === "user" ? "You" : "Assistant" }}</strong><p>{{ item.content }}</p>
           </article>

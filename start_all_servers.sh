@@ -198,7 +198,7 @@ WORKER_LOG="$LOG_DIR/temporal-worker.log"
 API_LOG="$LOG_DIR/webui-api.log"
 "$PYTHON" -m loghawk.workflows.temporal.worker >"$WORKER_LOG" 2>&1 &
 WORKER_PID=$!
-"$PYTHON" -m uvicorn loghawk.api.main:app --app-dir src --host 127.0.0.1 --port 8000 >"$API_LOG" 2>&1 &
+"$PYTHON" -m uvicorn loghawk.api.main:app --app-dir src --host 127.0.0.1 --port 8000 --no-access-log >"$API_LOG" 2>&1 &
 API_PID=$!
 
 cleanup() {

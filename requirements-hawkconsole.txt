@@ -1,12 +1,14 @@
 python-dotenv
 textual
 duckdb
-lancedb
+lancedb==0.40.0
 litellm
 boto3
+beautifulsoup4
 langchain-community
 langchain-core
 langchain-text-splitters
 pdfplumber
+requests
 sqlalchemy>=2.0
 alembic>=1.13

@@ -46,9 +46,8 @@ def _ensure_schema() -> None:
                     userid TEXT NOT NULL,
                     category TEXT NOT NULL DEFAULT 'Uncategorized',
                     artifact_type TEXT NOT NULL CHECK (
-                        artifact_type IN ('n8n', 'python', 'shell')
+                        artifact_type IN ('n8n', 'python', 'bash', 'powershell', 'windows-cmd')
                     ),
-                    shell TEXT CHECK (shell IN ('bash', 'powershell') OR shell IS NULL),
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -198,14 +197,13 @@ def create_task(data: dict) -> dict:
     with _connect() as connection:
         connection.execute(
             """INSERT INTO tasks
-               (id, name, category, artifact_type, shell, created_at, updated_at, userid)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, name, category, artifact_type, created_at, updated_at, userid)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 task_id,
                 data["name"],
                 data.get("category") or "Uncategorized",
                 data["artifact_type"],
-                data.get("shell"),
                 now,
                 now,
                 get_userid(),

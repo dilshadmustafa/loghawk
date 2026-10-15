@@ -46,7 +46,7 @@ echo.
 echo ============================================================
 echo Setting up LanceDB
 echo ============================================================
-"%PYTHON%" -m loghawk.admin.setup_lancedb2
+"%PYTHON%" -m loghawk.admin.setup_console_lancedb
 if errorlevel 1 goto :failed
 
 echo.

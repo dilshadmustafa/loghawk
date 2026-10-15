@@ -16,7 +16,7 @@ SUPPORTED_TEXT_SUFFIXES = {".txt", ".md", ".json", ".jsonl", ".csv"}
 
 
 def connect_database(db_path: str | Path | None = None):
-    path = Path(db_path or config.LH_LANCEDB_FILE_PATH)
+    path = Path(db_path or config.LH_SERVER_LANCEDB_FILE_PATH)
     path.mkdir(parents=True, exist_ok=True)
     return lancedb.connect(str(path))
 

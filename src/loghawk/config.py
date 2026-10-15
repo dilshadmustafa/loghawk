@@ -44,15 +44,32 @@ LH_DUCKDB_TABLE_NAME = os.getenv(
     "convo"
 )
 
-LH_LANCEDB_FILE_PATH = Path(os.getenv("LH_LANCEDB_FILE_PATH"))
+LH_SERVER_LANCEDB_FILE_PATH = Path(
+    os.getenv("LH_SERVER_LANCEDB_FILE_PATH", "data/db/serverlancedb").strip()
+)
 
-if not LH_LANCEDB_FILE_PATH.is_absolute():
-    LH_LANCEDB_FILE_PATH = PROJECT_ROOT / LH_LANCEDB_FILE_PATH
+if not LH_SERVER_LANCEDB_FILE_PATH.is_absolute():
+    LH_SERVER_LANCEDB_FILE_PATH = PROJECT_ROOT / LH_SERVER_LANCEDB_FILE_PATH
 
-LH_LANCEDB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+LH_SERVER_LANCEDB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-LH_LANCEDB_TABLE_NAME = os.getenv(
-    "LH_LANCEDB_TABLE_NAME",
+LH_SERVER_LANCEDB_TABLE_NAME = os.getenv(
+    "LH_SERVER_LANCEDB_TABLE_NAME", "loghawk"
+).strip()
+
+# Compatibility for older shared/server scripts.
+LH_LANCEDB_FILE_PATH = LH_SERVER_LANCEDB_FILE_PATH
+LH_LANCEDB_TABLE_NAME = LH_SERVER_LANCEDB_TABLE_NAME
+
+LH_CONSOLE_LANCEDB_FILE_PATH = Path(
+    os.getenv("LH_CONSOLE_LANCEDB_FILE_PATH", "data/db/locallancedb")
+)
+if not LH_CONSOLE_LANCEDB_FILE_PATH.is_absolute():
+    LH_CONSOLE_LANCEDB_FILE_PATH = PROJECT_ROOT / LH_CONSOLE_LANCEDB_FILE_PATH
+LH_CONSOLE_LANCEDB_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+LH_CONSOLE_LANCEDB_TABLE_NAME = os.getenv(
+    "LH_CONSOLE_LANCEDB_TABLE_NAME",
     "loghawk"
 )
 
@@ -62,6 +79,22 @@ if not LH_DOCS_STORAGE_DIR_PATH.is_absolute():
     LH_DOCS_STORAGE_DIR_PATH = PROJECT_ROOT / LH_DOCS_STORAGE_DIR_PATH
 
 LH_DOCS_STORAGE_DIR_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# RAG Web UI upload and bounded website crawl limits.
+LH_RAG_MAX_UPLOAD_MB = int(os.getenv("LH_RAG_MAX_UPLOAD_MB", "100"))
+LH_RAG_CRAWL_MAX_PAGES = int(os.getenv("LH_RAG_CRAWL_MAX_PAGES", "50"))
+LH_RAG_CRAWL_MAX_DEPTH = int(os.getenv("LH_RAG_CRAWL_MAX_DEPTH", "2"))
+LH_RAG_CRAWL_DELAY_SECONDS = float(os.getenv("LH_RAG_CRAWL_DELAY_SECONDS", "1"))
+LH_RAG_CRAWL_MAX_FILE_MB = int(os.getenv("LH_RAG_CRAWL_MAX_FILE_MB", "25"))
+LH_RAG_CRAWL_MAX_TOTAL_MB = int(os.getenv("LH_RAG_CRAWL_MAX_TOTAL_MB", "100"))
+if LH_RAG_MAX_UPLOAD_MB < 1:
+    raise ValueError("LH_RAG_MAX_UPLOAD_MB must be at least 1")
+if LH_RAG_CRAWL_MAX_PAGES < 1 or LH_RAG_CRAWL_MAX_DEPTH < 0:
+    raise ValueError("RAG crawl page limit must be positive and depth non-negative")
+if LH_RAG_CRAWL_DELAY_SECONDS < 0:
+    raise ValueError("LH_RAG_CRAWL_DELAY_SECONDS must be zero or greater")
+if LH_RAG_CRAWL_MAX_FILE_MB < 1 or LH_RAG_CRAWL_MAX_TOTAL_MB < 1:
+    raise ValueError("RAG crawl file and total size limits must be at least 1 MB")
 
 LH_EMBEDDING_MODEL = os.getenv(
     "LH_EMBEDDING_MODEL",

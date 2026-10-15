@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -16,6 +17,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
+from rich.table import Table
 
 import loghawk.config as config
 from loghawk.cli.command_terminal import CommandShellSession
@@ -23,7 +25,9 @@ from loghawk.cli import command_history2 as command_history
 from loghawk.cli import local_store2 as local_store
 from loghawk.cli import task_workspace2 as task_workspace
 from loghawk.llm import get_llm_client
-from loghawk.utils import lancedbutils2
+from loghawk.rag import ingestion
+from loghawk.utils import lancedbutils3
+from loghawk.cli import console_rag_store
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -44,6 +48,33 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm-delete")
+
+
+class ConfirmDeleteTaskScreen(ModalScreen[bool]):
+    """Confirmation dialog for deleting a Task and its saved data."""
+
+    CSS = """
+    ConfirmDeleteTaskScreen { align: center middle; }
+    #confirm-task-box { width: 72; height: auto; padding: 1 2; border: round $primary; background: $surface; }
+    #confirm-task-box Button { margin: 1 1 0 0; }
+    """
+
+    def __init__(self, task_name: str) -> None:
+        super().__init__()
+        self.task_name = task_name
+
+    def compose(self) -> ComposeResult:
+        with Container(id="confirm-task-box"):
+            yield Static(
+                f'Delete Task "{self.task_name}", its conversation, and all saved '
+                "artifact versions? This cannot be undone."
+            )
+            with Horizontal():
+                yield Button("Delete Task", variant="error", id="confirm-delete-task")
+                yield Button("Cancel", id="cancel-delete-task")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm-delete-task")
 
 
 class DownloadPathScreen(ModalScreen[str | None]):
@@ -135,30 +166,31 @@ class HawkConsole(App[None]):
         self._command_history = {"command-one": [], "command-two": []}
         self._command_history_index = {"command-one": 0, "command-two": 0}
         self._command_history_draft = {"command-one": "", "command-two": ""}
+        self._help_previous_visibility: dict[str, bool] | None = None
 
     def compose(self) -> ComposeResult:
         with Container(id="terminal-column"):
             with Container(id="llm-pane", classes="pane"):
-                yield Static("LLM Terminal · Ctrl+Q to quit, Shift+Ctrl+C/Shift+Ctrl+V to Copy/Paste", classes="pane-title")
+                yield Static("LLM Terminal · /help · Ctrl+Q to quit, Shift+Ctrl+C/Shift+Ctrl+V to Copy/Paste", classes="pane-title")
                 yield RichLog(id="llm-output", wrap=True, markup=False, auto_scroll=True)
                 yield Input(placeholder="Chat with the configured LLM…", id="llm-input")
 
             with Container(id="command-one-pane", classes="pane"):
-                yield Static("Command Terminal 1 · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", classes="pane-title")
+                yield Static("Command Terminal 1 · /help · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", classes="pane-title")
                 yield RichLog(id="command-one-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal():
-                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", id="command-one-input")
+                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", id="command-one-input")
                     yield Button("Stop", id="command-one-stop")
 
             with Container(id="command-two-pane", classes="pane"):
-                yield Static("Command Terminal 2 · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", classes="pane-title")
+                yield Static("Command Terminal 2 · /help · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", classes="pane-title")
                 yield RichLog(id="command-two-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal():
-                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskview <taskname> · /taskrun <taskname>", id="command-two-input")
+                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", id="command-two-input")
                     yield Button("Stop", id="command-two-stop")
 
         with Container(id="editor-pane", classes="pane"):
-            yield Static("Editor · use /taskview <name> or /tasknew", classes="pane-title")
+            yield Static("Editor · /help · use /taskedit <name> or /tasknew", classes="pane-title")
             with Container(id="task-create-pane"):
                 yield Static("Create Task", classes="pane-title")
                 with Container(id="task-create-fields"):
@@ -166,20 +198,19 @@ class HawkConsole(App[None]):
                     yield Input(placeholder="Task name", id="task-name-input")
                     yield Static("Task Type")
                     yield Select(
-                        [("Python", "python"), ("Shell", "shell"), ("n8n", "n8n")],
+                        [
+                            ("Python", "python"),
+                            ("Bash", "bash"),
+                            ("PowerShell", "powershell"),
+                            ("Windows CMD", "windows-cmd"),
+                            ("n8n", "n8n"),
+                        ],
                         value="python",
                         allow_blank=False,
                         id="task-type-select",
                     )
                     yield Static("Category")
                     yield Input(placeholder="Enter a category", id="task-category-input")
-                yield Static("Shell target", id="task-type-shell-label")
-                yield Select(
-                    [("Bash", "bash"), ("PowerShell", "powershell")],
-                    value="bash",
-                    allow_blank=False,
-                    id="task-shell-select",
-                )
                 with Horizontal():
                     yield Button("Create Task", variant="primary", id="create-task")
                     yield Button("Cancel", id="cancel-create-task")
@@ -213,6 +244,10 @@ class HawkConsole(App[None]):
                 with Horizontal(id="command-editor-toolbar"):
                     yield Button("Confirm Changes", variant="primary", id="confirm-command-edits")
                     yield Button("Cancel", id="cancel-command-edits")
+            with Container(id="help-pane"):
+                yield Static("Hawk Console Command Help", classes="pane-title")
+                yield RichLog(id="help-output", wrap=True, markup=False, auto_scroll=True)
+                yield Button("Close Help", id="close-help")
 
     async def on_mount(self) -> None:
         local_store.initialize_console_database()
@@ -254,8 +289,7 @@ class HawkConsole(App[None]):
         self.query_one("#task-list-pane", Container).display = False
         self.query_one("#command-output-mirror", RichLog).display = False
         self.query_one("#command-editor-pane", Container).display = False
-        self.query_one("#task-shell-select", Select).display = False
-        self.query_one("#task-type-shell-label", Static).display = False
+        self.query_one("#help-pane", Container).display = False
         self._load_chat_history()
         self._sync_editor_controls()
 
@@ -274,22 +308,82 @@ class HawkConsole(App[None]):
     def _persist_chat_message(self, role: str, content: str) -> None:
         local_store.save_conversation_message(role, content)
 
-    def _retrieve_context(self, prompt: str) -> str:
-        database = lancedbutils2.connect_database()
-        table = lancedbutils2.open_table(database, config.LH_LANCEDB_TABLE_NAME)
+    def _retrieve_context(self, prompt: str) -> tuple[str, str | None]:
+        requested_names = self._document_names_in_prompt(prompt)
+        database = lancedbutils3.connect_database(
+            config.LH_CONSOLE_LANCEDB_FILE_PATH
+        )
+        table = lancedbutils3.open_table(
+            database,
+            config.LH_CONSOLE_LANCEDB_TABLE_NAME,
+        )
         if table is None:
-            return ""
-        vector = lancedbutils2.embed_texts([prompt])[0]
-        rows = table.search(vector).limit(5).to_list()
+            if requested_names:
+                return "", "No documents are indexed in Hawk Console RAG yet."
+            return "", None
+
+        matching_sources: list[str] = []
+        for name in requested_names:
+            matching_sources.extend(
+                str(item["source_key"])
+                for item in console_rag_store.find_document_by_name(name)
+            )
+        matching_sources = sorted(set(matching_sources))
+        if requested_names and not matching_sources:
+            return (
+                "",
+                "No indexed document matched: "
+                + ", ".join(requested_names)
+                + ". Check the filename or upload the document first.",
+            )
+
+        vector = lancedbutils3.embed_texts([prompt])[0]
+        query = table.search(vector)
+        if requested_names:
+            source_values = ", ".join(
+                "'" + source.replace("'", "''") + "'"
+                for source in matching_sources
+            )
+            query = query.where(
+                f"source IN ({source_values})",
+                prefilter=True,
+            )
+        rows = query.limit(5).to_list()
         chunks = []
         for row in rows:
             if isinstance(row, dict):
                 value = row.get("text") or row.get("content") or row.get("document")
+                source = row.get("source")
             else:
                 value = row
+                source = None
             if value and str(value).strip():
-                chunks.append(str(value).strip())
-        return "\n\n".join(chunks)
+                source_label = f"Source: {source}\n" if source else ""
+                chunks.append(f"{source_label}{str(value).strip()}")
+        if requested_names and not chunks:
+            return (
+                "",
+                "The document was found in the index, but no text chunks "
+                "could be retrieved for that question.",
+            )
+        return "\n\n".join(chunks), None
+
+    @staticmethod
+    def _document_names_in_prompt(prompt: str) -> list[str]:
+        """Find supported document filenames or paths mentioned in a question."""
+        candidates = re.findall(r"""['\"]([^'\"]+)['\"]|([^\s'\"<>|]+)""", prompt)
+        names: list[str] = []
+        for quoted, unquoted in candidates:
+            candidate = (quoted or unquoted).strip(".,!?;:()[]{}<>")
+            basename = candidate.replace("\\", "/").rsplit("/", 1)[-1]
+            if (
+                basename
+                and Path(basename).suffix.lower() in lancedbutils3.SUPPORTED_SUFFIXES
+                and basename.casefold()
+                not in {name.casefold() for name in names}
+            ):
+                names.append(basename)
+        return names
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -300,6 +394,9 @@ class HawkConsole(App[None]):
             self._submit_task_message(text)
             return
         if event.input.id == "llm-input":
+            if text.casefold() == "/help":
+                self._show_help()
+                return
             if self._pending_llm_command is not None:
                 self._confirm_llm_command(text)
                 return
@@ -350,15 +447,186 @@ class HawkConsole(App[None]):
         terminal_id = "command-one" if event.input.id == "command-one-input" else "command-two"
         output_id = f"{terminal_id}-output"
         output = self.query_one(f"#{output_id}", RichLog)
+        if text.casefold() == "/help":
+            self._show_help()
+            output.write("Help displayed in the Editor pane.\n")
+            return
         if terminal_id in self._pending_task_runs:
             self._confirm_task_run(terminal_id, text)
             return
         self._record_command_history(terminal_id, text)
+        if text.startswith("/ragupload") or text.startswith("/ragscrape"):
+            self._handle_console_rag_command(text, output, terminal_id)
+            return
         if text.startswith("/task"):
             self._handle_task_command(text, output, terminal_id)
             return
         output.write(f"$ {text}\n")
         self.run_worker(self._run_command(terminal_id, text), name=f"{terminal_id}-command")
+
+    def _show_help(self) -> None:
+        """Display the command reference without discarding the Editor's current view."""
+        widget_ids = (
+            "task-create-pane",
+            "task-chat-pane",
+            "editor-toolbar",
+            "editor",
+            "editor-status",
+            "task-list-pane",
+            "command-output-mirror",
+            "command-editor-pane",
+        )
+        if self._help_previous_visibility is None:
+            self._help_previous_visibility = {
+                widget_id: self.query_one(f"#{widget_id}").display
+                for widget_id in widget_ids
+            }
+        for widget_id in widget_ids:
+            self.query_one(f"#{widget_id}").display = False
+
+        self.query_one("#help-pane", Container).display = True
+        help_output = self.query_one("#help-output", RichLog)
+        help_output.clear()
+
+        table = Table(show_header=True, header_style="bold", show_lines=True, expand=True)
+        for heading in ("Command", "Parameter", "Terminal", "Description"):
+            table.add_column(heading)
+        rows = (
+            ("/help", "None", "All three", "Show this command reference in the Editor pane."),
+            (
+                "/rag",
+                "<question>",
+                "AI/LLM",
+                "Ask a question using indexed documents. If mentioning filenames, put double quotes around a filename with spaces.",
+            ),
+            ("/command", "<request>", "AI/LLM", "Ask the LLM to propose shell command(s). Review, edit, then confirm before execution."),
+            (
+                "/ragupload",
+                "<file-or-folder-path>",
+                "Command 1 or 2",
+                "Index supported documents. Put double quotes around a file or folder path with spaces. Same path and unchanged content is skipped; matching filename and content at another path is skipped. A same-name file with different content is kept separately; changed content at the same path replaces its indexed chunks.",
+            ),
+            (
+                "/ragscrape",
+                "<url>",
+                "Command 1 or 2",
+                "Crawl same-site pages and linked supported documents. This command takes a URL, not a local filename; encode spaces in a URL as %20. Each normalized URL is visited once per crawl; unchanged content at the same final URL is skipped on later crawls, while changed content replaces its chunks. Identical content at different URLs is not deduplicated.",
+            ),
+            ("/tasknew", "None", "Command 1 or 2", "Open the AI-assisted Task creation form in the Editor pane."),
+            ("/tasklist", "None", "Command 1 or 2", "List saved Tasks in the Editor pane."),
+            ("/taskedit", "<taskname>", "Command 1 or 2", "Load a saved Task into the editable Editor pane. Quote names containing spaces."),
+            ("/taskview", "<taskname>", "Command 1 or 2", "Alias for /taskedit."),
+            ("/taskrun", "<taskname>", "Command 1 or 2", "Load the latest saved version. Confirm with Y/yes to run supported code; n8n workflow artifacts are displayed but are not executed here."),
+            ("/taskdelete", "<taskname>", "Command 1 or 2", "Delete a Task, its conversation, and saved versions after confirmation. Quote names containing spaces."),
+            ("OS command", "<command>", "Command 1 or 2", "Run a native shell command in that terminal."),
+        )
+        for row in rows:
+            table.add_row(*row)
+        help_output.write(table)
+        help_output.write(
+            'Filenames or paths containing spaces: enclose them in double quotes.\n'
+            '  /rag summarize "Science and Sports (Ch 5 to 8).pdf"\n'
+            '  /ragupload "C:\\docs\\Science and Sports (Ch 5 to 8).pdf"\n'
+        )
+        help_output.write(
+            "RAG content handling: document bytes are SHA-256 hashed before indexing. "
+            "URL normalization lowercases the scheme and host, removes fragments, "
+            "and normalizes default HTTP/HTTPS ports. Different URLs with identical "
+            "content remain separate indexed sources."
+        )
+
+    def _close_help(self) -> None:
+        self.query_one("#help-pane", Container).display = False
+        if self._help_previous_visibility is not None:
+            for widget_id, was_visible in self._help_previous_visibility.items():
+                self.query_one(f"#{widget_id}").display = was_visible
+            self._help_previous_visibility = None
+
+    def _handle_console_rag_command(
+        self, command: str, output: RichLog, terminal_id: str
+    ) -> None:
+        try:
+            parts = shlex.split(command, posix=os.name != "nt")
+        except ValueError as exc:
+            output.write(f"Invalid RAG command: {exc}\n")
+            return
+        command_name = parts[0].lower() if parts else ""
+        if command_name == "/ragupload":
+            if len(parts) != 2:
+                output.write("Usage: /ragupload <file-or-folder-path>\n")
+                return
+            path_value = parts[1].strip('"')
+            path = Path(path_value).expanduser()
+            if not path.exists():
+                output.write(f"RAG upload path does not exist: {path}\n")
+                return
+            if path.is_file():
+                files = (
+                    [path]
+                    if path.suffix.lower() in lancedbutils3.SUPPORTED_SUFFIXES
+                    else []
+                )
+            else:
+                files = [
+                    item for item in sorted(path.rglob("*"))
+                    if item.is_file()
+                    and item.suffix.lower() in lancedbutils3.SUPPORTED_SUFFIXES
+                ]
+            if not files:
+                output.write("No supported documents found at that path.\n")
+                return
+            output.write(f"Indexing {len(files)} document(s) into Hawk Console RAG…\n")
+            self._run_console_rag(
+                terminal_id,
+                "UPLOAD",
+                [(str(item), str(item.resolve())) for item in files],
+            )
+            return
+        if command_name == "/ragscrape":
+            if len(parts) != 2:
+                output.write("Usage: /ragscrape <url>\n")
+                return
+            url = parts[1].strip('"')
+            output.write(f"Crawling {url} into Hawk Console RAG…\n")
+            self._run_console_rag(terminal_id, "WEB", url)
+            return
+        output.write("Unknown RAG command. Use /ragupload or /ragscrape.\n")
+
+    @work(thread=True, exclusive=True, group="console-rag")
+    def _run_console_rag(
+        self, terminal_id: str, kind: str, payload: list[tuple[str, str]] | str
+    ) -> None:
+        try:
+            if kind == "UPLOAD":
+                chunks, processed, warnings = ingestion.ingest_file_paths(
+                    payload,
+                    console_rag_store,
+                    lancedb_path=config.LH_CONSOLE_LANCEDB_FILE_PATH,
+                    table_name=config.LH_CONSOLE_LANCEDB_TABLE_NAME,
+                )
+            else:
+                chunks, processed, warnings = ingestion.ingest_website(
+                    payload,
+                    console_rag_store,
+                    lancedb_path=config.LH_CONSOLE_LANCEDB_FILE_PATH,
+                    table_name=config.LH_CONSOLE_LANCEDB_TABLE_NAME,
+                )
+            message = (
+                f"RAG {kind.lower()} completed: {processed} item(s), "
+                f"{chunks} chunk(s) indexed."
+            )
+            if warnings:
+                message += "\n" + "\n".join(warnings)
+        except Exception as exc:
+            message = f"RAG {kind.lower()} failed: {type(exc).__name__}: {exc}"
+        self.app.call_from_thread(
+            self._write_console_rag_output,
+            terminal_id,
+            message,
+        )
+
+    def _write_console_rag_output(self, terminal_id: str, message: str) -> None:
+        self.query_one(f"#{terminal_id}-output", RichLog).write(message + "\n")
 
     def _record_command_history(self, terminal_id: str, command: str) -> None:
         history = self._command_history[terminal_id]
@@ -566,7 +834,14 @@ class HawkConsole(App[None]):
         response_parts: list[str] = []
         try:
             try:
-                context = self._retrieve_context(prompt) if use_rag else ""
+                context = ""
+                if use_rag:
+                    context, retrieval_notice = self._retrieve_context(prompt)
+                    if retrieval_notice:
+                        self.app.call_from_thread(
+                            self._finish_chat, None, retrieval_notice
+                        )
+                        return
             except Exception as exc:
                 context = ""
                 self.app.call_from_thread(
@@ -708,6 +983,33 @@ class HawkConsole(App[None]):
             self._begin_task_creation()
             output.write("Task creation form opened in the Editor pane.\n")
             return
+        if command_name == "/taskdelete":
+            if len(parts) != 2:
+                output.write(
+                    '/taskdelete <taskname> (quote names containing spaces)\n'
+                )
+                return
+            if self._task_chat_busy:
+                output.write(
+                    "Wait for the current Task assistant response before deleting a Task.\n"
+                )
+                return
+            if self.current_task and (
+                self._editor_is_dirty() or self._has_generated_draft
+            ):
+                output.write(
+                    "Save or cancel the current Task edits before deleting a Task.\n"
+                )
+                return
+            task = task_workspace.find_task_by_name(parts[1])
+            if task is None:
+                output.write(f"Task not found: {parts[1]}\n")
+                return
+            self.push_screen(
+                ConfirmDeleteTaskScreen(task["name"]),
+                callback=lambda confirmed: self._delete_task(task, confirmed, output),
+            )
+            return
         if command_name == "/taskrun":
             if len(parts) != 2:
                 output.write('Usage: /taskrun <taskname> (quote names containing spaces)\n')
@@ -747,8 +1049,8 @@ class HawkConsole(App[None]):
                 f"Version {artifact['version']}? (Y/N): "
             )
             return
-        if len(parts) != 2 or command_name != "/taskview":
-            output.write('Usage: /taskview <taskname> (quote names containing spaces)\n')
+        if len(parts) != 2 or command_name not in {"/taskedit", "/taskview"}:
+            output.write('Usage: /taskedit <taskname> (or /taskview; quote names containing spaces)\n')
             return
         if self._task_chat_busy:
             output.write("Wait for the current Task assistant response before switching Tasks.\n")
@@ -766,7 +1068,39 @@ class HawkConsole(App[None]):
         output.write(
             f"Loaded Task: {task['name']} · User ID: {task['userid']} · "
             f"Category: {task['category']} · "
-            f"Type: {task['artifact_type']}\n"
+            f"Type: {self._task_type_label(task)}\n"
+        )
+
+    def _delete_task(self, task: dict, confirmed: bool, output: RichLog) -> None:
+        if not confirmed:
+            output.write("Task deletion canceled.\n")
+            return
+        try:
+            deleted = task_workspace.delete_task(task["id"])
+        except Exception as exc:
+            output.write(f"Could not delete Task {task['name']}: {exc}\n")
+            return
+        if not deleted:
+            output.write(f"Task was not found: {task['name']}\n")
+            return
+
+        if self.current_task and self.current_task["id"] == task["id"]:
+            self.current_task = None
+            self.current_artifact = None
+            self._has_generated_draft = False
+            self.query_one("#task-chat-pane", Container).display = False
+            self.query_one("#task-create-pane", Container).display = False
+            self.query_one("#task-chat-output", RichLog).clear()
+            selector = self.query_one("#version-select", Select)
+            selector.set_options([])
+            selector.clear()
+            self._set_editor_text("")
+            self.query_one("#editor-status", Static).update("No Task loaded.")
+            self._sync_editor_controls()
+
+        output.write(
+            f"Deleted Task: {task['name']} · User ID: {task['userid']} "
+            "(conversation and saved versions deleted).\n"
         )
 
     def _confirm_task_run(self, terminal_id: str, answer: str) -> None:
@@ -809,17 +1143,22 @@ class HawkConsole(App[None]):
     ) -> None:
         output = self.query_one(f"#{terminal_id}-output", RichLog)
         artifact_type = task["artifact_type"]
-        shell = task.get("shell")
-        suffix = ".py" if artifact_type == "python" else (".ps1" if shell == "powershell" else ".sh")
+        suffix = {
+            "python": ".py",
+            "bash": ".sh",
+            "powershell": ".ps1",
+            "windows-cmd": ".cmd",
+        }.get(artifact_type)
+        if suffix is None:
+            output.write(f"Unsupported Task type: {artifact_type}\n")
+            return
         session = self._sessions[terminal_id]
 
         try:
             with tempfile.TemporaryDirectory(prefix="hawk-task-") as temp_dir:
                 artifact_path = Path(temp_dir) / f"task{suffix}"
                 artifact_path.write_text(artifact["content"], encoding="utf-8")
-                command = self._task_execution_command(
-                    artifact_type, shell, artifact_path
-                )
+                command = self._task_execution_command(artifact_type, artifact_path)
                 if not await session.submit(command):
                     output.write("Could not start the Task in this command terminal.\n")
                     return
@@ -829,9 +1168,7 @@ class HawkConsole(App[None]):
             output.write(f"Task run failed: {exc}\n")
 
     @staticmethod
-    def _task_execution_command(
-        artifact_type: str, shell: str | None, artifact_path: Path
-    ) -> str:
+    def _task_execution_command(artifact_type: str, artifact_path: Path) -> str:
         if os.name == "nt":
             quote = lambda value: "'" + str(value).replace("'", "''") + "'"
             path = quote(artifact_path)
@@ -842,13 +1179,20 @@ class HawkConsole(App[None]):
                     f"& {executable} {path}; $taskExitCode = $LASTEXITCODE; "
                     f"{cleanup}; Write-Output ('[Task exit code: ' + $taskExitCode + ']')"
                 )
-            if shell == "bash":
+            if artifact_type == "bash":
                 executable = shutil.which("bash")
                 if not executable:
                     raise RuntimeError("Bash is not installed or not available on PATH.")
                 return (
                     f"& {quote(executable)} {path}; $taskExitCode = $LASTEXITCODE; "
                     f"{cleanup}; Write-Output ('[Task exit code: ' + $taskExitCode + ']')"
+                )
+            if artifact_type == "windows-cmd":
+                executable = quote(os.environ.get("COMSPEC", "cmd.exe"))
+                return (
+                    f"& {executable} /d /c ('\"\"' + {path} + '\"\"'); "
+                    f"$taskExitCode = $LASTEXITCODE; {cleanup}; "
+                    "Write-Output ('[Task exit code: ' + $taskExitCode + ']')"
                 )
             executable = (
                 shutil.which("pwsh")
@@ -870,7 +1214,7 @@ class HawkConsole(App[None]):
                 f"{shlex.quote(sys.executable)} {path}; task_exit_code=$?; "
                 f"{cleanup}; printf '[Task exit code: %s]\\n' \"$task_exit_code\""
             )
-        if shell == "bash":
+        if artifact_type == "bash":
             executable = shutil.which("bash")
             if not executable:
                 raise RuntimeError("Bash is not installed or not available on PATH.")
@@ -878,6 +1222,8 @@ class HawkConsole(App[None]):
                 f"{shlex.quote(executable)} {path}; task_exit_code=$?; {cleanup}; "
                 "printf '[Task exit code: %s]\\n' \"$task_exit_code\""
             )
+        if artifact_type == "windows-cmd":
+            raise RuntimeError("Windows CMD Tasks can only run on Windows.")
         executable = shutil.which("pwsh")
         if not executable:
             raise RuntimeError("PowerShell (pwsh) is not installed or not available on PATH.")
@@ -900,13 +1246,10 @@ class HawkConsole(App[None]):
         self.query_one("#task-name-input", Input).value = ""
         self.query_one("#task-category-input", Input).value = ""
         self.query_one("#task-type-select", Select).value = "python"
-        self.query_one("#task-shell-select", Select).value = "bash"
         version_selector = self.query_one("#version-select", Select)
         version_selector.set_options([])
         version_selector.clear()
         self.query_one("#task-chat-output", RichLog).clear()
-        self.query_one("#task-shell-select", Select).display = False
-        self.query_one("#task-type-shell-label", Static).display = False
         self.query_one("#editor-status", Static).update(
             "Enter Task details, then create it to start the assistant chat."
         )
@@ -925,19 +1268,15 @@ class HawkConsole(App[None]):
             self.query_one("#task-category-input", Input).focus()
             return
         artifact_type = str(self.query_one("#task-type-select", Select).value)
-        shell = (
-            str(self.query_one("#task-shell-select", Select).value)
-            if artifact_type == "shell"
-            else None
-        )
         try:
-            task = task_workspace.create_task(name, category, artifact_type, shell)
+            task = task_workspace.create_task(name, category, artifact_type)
         except Exception as exc:
             self.notify(f"Could not create Task: {exc}", severity="error")
             return
         self._load_task(task)
         self.query_one("#editor-status", Static).update(
-            f"{task['name']} · {category} · {artifact_type} · describe the artifact in Task Chat"
+            f"{task['name']} · {category} · {self._task_type_label(task)} · "
+            "describe the artifact in Task Chat"
         )
 
     def _show_task_list(self, terminal_output: RichLog) -> None:
@@ -985,7 +1324,7 @@ class HawkConsole(App[None]):
                     task_list_output.write(
                         f"{task['name']:<{name_width}}  "
                         f"{str(task.get('userid') or ''):<{userid_width}}  "
-                        f"{task['artifact_type']}"
+                        f"{self._task_type_label(task)}"
                     )
         else:
             task_list_output.write("No Tasks found.")
@@ -1106,7 +1445,7 @@ class HawkConsole(App[None]):
             self._set_editor_text("")
             self.query_one("#editor-status", Static).update(
                 f"Task: {task['name']} · User ID: {task['userid']} · "
-                f"Category: {task['category']} · Type: {task['artifact_type']} · "
+                f"Category: {task['category']} · Type: {self._task_type_label(task)} · "
                 "no saved artifact versions yet"
             )
             selector.clear()
@@ -1120,7 +1459,7 @@ class HawkConsole(App[None]):
             f"Task: {self.current_task['name']} · "
             f"User ID: {self.current_task['userid']} · "
             f"Category: {self.current_task['category']} · "
-            f"Type: {self.current_task['artifact_type']} · Version {artifact['version']}"
+            f"Type: {self._task_type_label(self.current_task)} · Version {artifact['version']}"
         )
 
     def _set_editor_text(self, text: str) -> None:
@@ -1132,11 +1471,6 @@ class HawkConsole(App[None]):
         return self.query_one("#editor", TextArea).text != self._editor_baseline
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "task-type-select":
-            show_shell = event.value == "shell"
-            self.query_one("#task-type-shell-label", Static).display = show_shell
-            self.query_one("#task-shell-select", Select).display = show_shell
-            return
         if event.select.id != "version-select" or self._suppress_version_event:
             return
         if event.select.is_blank or not self.current_task:
@@ -1195,6 +1529,8 @@ class HawkConsole(App[None]):
             self._cancel_task_creation()
         elif event.button.id == "close-task-list":
             self._close_task_list()
+        elif event.button.id == "close-help":
+            self._close_help()
         elif event.button.id == "send-task-message":
             message_input = self.query_one("#task-message-input", Input)
             prompt = message_input.value.strip()
@@ -1286,7 +1622,9 @@ class HawkConsole(App[None]):
         suffix = {
             "n8n": ".json",
             "python": ".py",
-            "shell": ".ps1" if task.get("shell") == "powershell" else ".sh",
+            "bash": ".sh",
+            "powershell": ".ps1",
+            "windows-cmd": ".cmd",
         }.get(task["artifact_type"], ".txt")
         safe_name = "".join(
             character if character.isalnum() or character in "-_." else "-"
@@ -1294,6 +1632,16 @@ class HawkConsole(App[None]):
         ).strip("-.") or "loghawk-task"
         version_label = f"v{version}" if version is not None else "draft"
         return f"{safe_name}-{version_label}{suffix}"
+
+    @staticmethod
+    def _task_type_label(task: dict) -> str:
+        return {
+            "n8n": "n8n",
+            "python": "Python",
+            "bash": "Bash",
+            "powershell": "PowerShell",
+            "windows-cmd": "Windows CMD",
+        }.get(task["artifact_type"], task["artifact_type"])
 
     def _confirm_delete_version(self) -> None:
         if not self.current_task or not self.current_artifact:

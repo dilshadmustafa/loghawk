@@ -26,7 +26,6 @@ def _task_tables(metadata: MetaData) -> dict[str, Table]:
         Column("userid", String, nullable=True),
         Column("category", String, nullable=False, server_default="Uncategorized"),
         Column("artifact_type", String, nullable=False),
-        Column("shell", String, nullable=True),
         Column("created_at", String, nullable=False),
         Column("updated_at", String, nullable=False),
     )
@@ -56,6 +55,53 @@ def _task_tables(metadata: MetaData) -> dict[str, Table]:
 
 CONSOLE_TABLES = _task_tables(CONSOLE_METADATA)
 SERVER_TABLES = _task_tables(SERVER_METADATA)
+
+console_rag_documents = Table(
+    "rag_documents", CONSOLE_METADATA,
+    Column("source_key", String, primary_key=True),
+    Column("userid", String, nullable=True),
+    Column("kind", String, nullable=False),
+    Column("display_name", String, nullable=False),
+    Column("content_sha256", String(64), nullable=False),
+    Column("chunks_indexed", Integer, nullable=False, server_default="0"),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+Index("console_rag_documents_display_name", console_rag_documents.c.display_name)
+Index("console_rag_documents_content_sha256", console_rag_documents.c.content_sha256)
+
+rag_ingestion_jobs = Table(
+    "rag_ingestion_jobs", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("userid", String, nullable=True),
+    Column("kind", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("files_total", Integer, nullable=False, server_default="0"),
+    Column("files_processed", Integer, nullable=False, server_default="0"),
+    Column("chunks_indexed", Integer, nullable=False, server_default="0"),
+    Column("error", Text),
+    Column("warnings_json", Text, nullable=False, server_default="[]"),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("completed_at", String),
+)
+Index("rag_ingestion_jobs_created", rag_ingestion_jobs.c.created_at)
+
+rag_documents = Table(
+    "rag_documents", SERVER_METADATA,
+    Column("source_key", String, primary_key=True),
+    Column("userid", String, nullable=True),
+    Column("kind", String, nullable=False),
+    Column("display_name", String, nullable=False),
+    Column("content_sha256", String(64), nullable=False),
+    Column("chunks_indexed", Integer, nullable=False, server_default="0"),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+Index("rag_documents_display_name", rag_documents.c.display_name)
+Index("rag_documents_content_sha256", rag_documents.c.content_sha256)
 
 Table(
     "cli_command_history", CONSOLE_METADATA,

@@ -31,7 +31,7 @@ x-loghawk-app: &loghawk-app
     LH_LLM_BASE_URL: http://host.docker.internal:11434
     LH_EMBEDDING_BASE_URL: http://host.docker.internal:11434
     LH_DUCKDB_FILE_PATH: /var/lib/loghawk/duckdb/my_database.duckdb
-    LH_LANCEDB_FILE_PATH: /var/lib/loghawk/lancedb
+    LH_SERVER_LANCEDB_FILE_PATH: /var/lib/loghawk/lancedb
   volumes:
     - duckdb-data:/var/lib/loghawk/duckdb
     - lancedb-data:/var/lib/loghawk/lancedb

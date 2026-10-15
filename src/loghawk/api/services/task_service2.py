@@ -43,7 +43,11 @@ def _system_prompt(task: dict) -> str:
         )
         artifact_representation = "string"
     else:
-        shell = "Bash" if task["shell"] == "bash" else "PowerShell"
+        shell = {
+            "bash": "Bash",
+            "powershell": "PowerShell",
+            "windows-cmd": "Windows CMD",
+        }[kind]
         artifact_instructions = (
             f"When providing an artifact, return a complete {shell} script as plain text. "
             "Do not mix shell syntaxes."

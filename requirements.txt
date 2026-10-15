@@ -4,7 +4,7 @@ langchain_community
 langchain_ollama
 pdfplumber
 
-lancedb
+lancedb==0.40.0
 sentence-transformers
 huggingface_hub[hf_xet]
 pydantic #check if already by lancedb
@@ -25,6 +25,7 @@ pyspark==3.5.9
 s3fs
 temporalio
 fastapi
+python-multipart
 uvicorn[standard]
 sqlalchemy>=2.0
 alembic>=1.13

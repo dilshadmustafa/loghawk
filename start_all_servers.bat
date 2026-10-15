@@ -187,7 +187,7 @@ echo ============================================================
 echo Starting LogHawk worker, API, and Vite
 echo ============================================================
 start "LogHawk Temporal Worker" /D "%LOGHAWK_ROOT%" "%PYTHON%" -m loghawk.workflows.temporal.worker
-start "LogHawk Web UI API" /D "%LOGHAWK_ROOT%" "%PYTHON%" -m uvicorn loghawk.api.main:app --app-dir src --host 127.0.0.1 --port 8000
+start "LogHawk Web UI API" /D "%LOGHAWK_ROOT%" "%PYTHON%" -m uvicorn loghawk.api.main:app --app-dir src --host 127.0.0.1 --port 8000 --no-access-log
 start "LogHawk Web UI - Vite" /D "%LOGHAWK_ROOT%\frontend\loghawk-ui" cmd /k "npm run dev"
 
 echo Worker, API, and Vite were started in separate windows.

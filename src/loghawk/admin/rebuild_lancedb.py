@@ -8,8 +8,8 @@ def main() -> None:
     print("=" * 70)
     print("LogHawk - Rebuild LanceDB with LiteLLM embeddings")
     print("=" * 70)
-    print(f"Database: {config.LH_LANCEDB_FILE_PATH}")
-    print(f"Table   : {config.LH_LANCEDB_TABLE_NAME}")
+    print(f"Database: {config.LH_SERVER_LANCEDB_FILE_PATH}")
+    print(f"Table   : {config.LH_SERVER_LANCEDB_TABLE_NAME}")
     print(f"Corpus  : {config.LH_DOCS_STORAGE_DIR_PATH}")
     print(f"Embedding model: {config.LH_EMBEDDING_MODEL}")
 
@@ -18,10 +18,10 @@ def main() -> None:
     db = lancedbutils2.connect_database()
     rows = lancedbutils2.rebuild_table(
         db,
-        config.LH_LANCEDB_TABLE_NAME,
+        config.LH_SERVER_LANCEDB_TABLE_NAME,
         documents,
     )
-    print(f"Rebuilt {config.LH_LANCEDB_TABLE_NAME!r} with {rows} embedded chunks.")
+    print(f"Rebuilt {config.LH_SERVER_LANCEDB_TABLE_NAME!r} with {rows} embedded chunks.")
 
 
 if __name__ == "__main__":
