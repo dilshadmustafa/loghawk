@@ -46,15 +46,15 @@ async def run_stage_a(
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering10
+        pyspark_s3_feature_engineering11
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering10.__file__}"
+        f"{pyspark_s3_feature_engineering11.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering10.run(
+    result = pyspark_s3_feature_engineering11.run(
         sources,
         output_path,
         mapping_root,

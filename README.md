@@ -1786,7 +1786,7 @@ AWS
 
 # Documentation
 
-### Quickstart LogHawk AIOps
+### Quickstart LogHawk AIOps and Web UI
 
 Configure the repository-root `.env` first. Set the S3 endpoint, bucket, batch folder, and phase flags as described in [S3 Select and environment configuration](#s3-select-and-environment-configuration). Keep Ollama available with the configured model for Identity Mapping.
 
@@ -1840,7 +1840,7 @@ bash firsttime_setup.sh
 
 These flags skip service/setup actions, but the script still creates or updates the Conda environment and installs packages. `SKIP_RUSTFS_SETUP=true` also skips bucket creation and sample-data generation/upload.
 
-### LogHawk Web UI
+#### Start the LogHawk Web UI
 
 From the repository root, start RustFS, Temporal, the LogHawk worker, the Web UI API, and the Vue/Vite development server:
 
@@ -1933,6 +1933,7 @@ The Web UI provides a browser-based way to configure and run LogHawk pipelines:
 - Create Tasks to collaborate with the configured LLM on n8n workflow JSON, Python programs, or Bash/PowerShell scripts.
 - Edit generated artifacts and save versions explicitly. Browse version history, select a version, download it, or delete it.
 - Import a saved n8n workflow version into a customer/user-managed n8n instance. Imported workflows remain inactive; review and activate them in n8n.
+- Upload documents and crawl websites for indexing in LanceDB, then ask questions about the indexed content through RAG chat.
 
 The Web UI starts and monitors workflows; processing continues to run in the Temporal worker.
 LogHawk does not execute generated Python or shell artifacts. n8n is an optional, separately Customer-managed integration.
@@ -1984,7 +1985,23 @@ hawk
 
 The layout has an **AI/LLM Terminal** at the upper left, two **Command Terminals** below it, and the **Editor pane** on the right spanning the height of all three terminals.
 
-- **AI/LLM Terminal:** Chat with the configured LiteLLM provider. When indexed LanceDB context is available, use `/rag <question>` to search it. Use `/command <request>` to ask the LLM to propose shell commands, or `/command generate commands based on above discussion` to use the recent conversation.
+- **AI/LLM Terminal:** Chat with the configured LiteLLM provider. Use `/rag <question>` to search indexed LanceDB content, `/ragupload <path>` to index a local file, and `/ragscrape <url>` to index a website. Use `/command <request>` to ask the LLM to propose shell commands, including commands based on recent discussion.
+
+Examples:
+
+```text
+You: help me to troubleshoot kubernetes. i need to get last 3 hours metrics from Prometheus
+/command generate commands based on above discussion
+/command generate the kubectl commands we discussed
+/rag What do my uploaded documents say about kubectl?
+/rag tell about CH.pdf
+/rag ignore previous chat. tell about CH.pdf
+/rag don't use above conversation. tell about CH.pdf
+/rag compare CH.pdf and "Science and Sports (Ch 5 to 8).pdf"
+/ragupload /mnt/c/Users/ACER/Downloads/CH.pdf
+/ragupload "/mnt/c/Users/ACER/Downloads/Science and Sports (Ch 5 to 8).pdf"
+/ragscrape https://economictimes.indiatimes.com/
+```
 - **Command Terminals 1 and 2:** Enter and run commands in either terminal. Command output is also shown in the Editor pane. Both terminals support the task commands below.
 - **Editor pane:** View and edit task artifacts, and manage saved versions.
 

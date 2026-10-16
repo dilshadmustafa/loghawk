@@ -1,0 +1,183 @@
+name: loghawk-fullstack
+
+x-loghawk-app: &loghawk-app
+  image: loghawk-fullstack:local
+  build:
+    context: ../../..
+    dockerfile_inline: |
+      FROM node:22-bookworm-slim AS node-runtime
+
+      FROM python:3.12-slim-bookworm
+      COPY --from=node-runtime /usr/local/ /usr/local/
+
+      RUN apt-get update \
+          && apt-get install -y --no-install-recommends \
+              bash ca-certificates git openjdk-17-jre-headless \
+          && rm -rf /var/lib/apt/lists/* \
+          && JAVA_DIR="$$(dirname "$$(dirname "$$(readlink -f "$$(command -v java)")")")" \
+          && ln -s "$$JAVA_DIR" /opt/java
+
+      ARG LOGHAWK_REPO_URL=https://github.com/dilshadmustafa/loghawk.git
+      ARG LOGHAWK_REF=main
+      RUN git clone --depth 1 --branch "$$LOGHAWK_REF" "$$LOGHAWK_REPO_URL" /app
+
+      WORKDIR /app
+      ENV JAVA_HOME=/opt/java
+      ENV PATH="/opt/venv/bin:/usr/local/bin:$$PATH"
+
+      RUN python -m venv /opt/venv \
+          && /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+          && /opt/venv/bin/pip install --no-cache-dir torch torchvision \
+              --index-url https://download.pytorch.org/whl/cpu \
+          && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt \
+          && /opt/venv/bin/pip install --no-cache-dir -e . \
+          && npm ci --prefix /app/frontend/loghawk-ui
+
+  env_file:
+    - ../../../.env
+  environment:
+    LH_OS_FAMILY: LINUX
+    LH_DATA_DIR: /var/lib/loghawk
+    LH_SERVER_DATABASE_URL: sqlite:////var/lib/loghawk/db/loghawk_webui.sqlite3
+    LH_SERVER_LANCEDB_FILE_PATH: /var/lib/loghawk/serverlancedb
+    LH_TEMPORAL_ADDRESS: temporal:7233
+    LH_S3_ENDPOINT: http://rustfs:9000
+    LH_EXTERNAL_S3_ENDPOINT: http://rustfs:9000
+    LH_S3_ACCESS_KEY_ID: rustfsadmin
+    LH_S3_SECRET_ACCESS_KEY: rustfsadmin
+    LH_S3_REGION: us-east-1
+    LH_S3_INPUT_FILENAMES: "*.*,elasticsearch-*.log,k8slogs-*.log,metrics*,trace*,perf*,health*,status*,heartbeat*"
+    LH_EXTERNAL_S3_ACCESS_KEY_ID: rustfsadmin
+    LH_EXTERNAL_S3_SECRET_ACCESS_KEY: rustfsadmin
+    LH_LLM_BASE_URL: http://host.docker.internal:11434
+    LH_EMBEDDING_BASE_URL: http://host.docker.internal:11434
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rustfs-data:/data
+      - rustfs-logs:/logs
+
+  temporal:
+    image: temporalio/temporal:latest
+    command: server start-dev --ip 0.0.0.0 --db-filename /home/temporal/temporal.db
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal-data:/home/temporal
+
+  rustfs-init:
+    image: public.ecr.aws/aws-cli/aws-cli:latest
+    env_file:
+      - ../../../.env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        export AWS_ACCESS_KEY_ID="$${LH_S3_ACCESS_KEY_ID:-rustfsadmin}"
+        export AWS_SECRET_ACCESS_KEY="$${LH_S3_SECRET_ACCESS_KEY:-rustfsadmin}"
+        export AWS_DEFAULT_REGION="$${LH_S3_REGION:-us-east-1}"
+        bucket="$${LH_S3_BUCKET:-loghawk-data}"
+
+        until aws --endpoint-url http://rustfs:9000 s3api list-buckets >/dev/null 2>&1; do
+          echo "Waiting for RustFS..."
+          sleep 2
+        done
+
+        if aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket "$$bucket" >/dev/null 2>&1; then
+          echo "S3 bucket already exists: $$bucket"
+        else
+          echo "Creating S3 bucket: $$bucket"
+          aws --endpoint-url http://rustfs:9000 s3 mb "s3://$$bucket"
+        fi
+    depends_on:
+      - rustfs
+    restart: "no"
+
+  loghawk-setup:
+    <<: *loghawk-app
+    depends_on:
+      rustfs-init:
+        condition: service_completed_successfully
+    volumes:
+      - server-db:/var/lib/loghawk/db
+      - server-lancedb:/var/lib/loghawk/serverlancedb
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        python -m loghawk.admin.setup_lancedb2
+        python src/loghawk/test/testdata.py
+    restart: "no"
+
+  loghawk:
+    <<: *loghawk-app
+    depends_on:
+      temporal:
+        condition: service_started
+      loghawk-setup:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+      - "5173:5173"
+    volumes:
+      - server-db:/var/lib/loghawk/db
+      - server-lancedb:/var/lib/loghawk/serverlancedb
+    command:
+      - /bin/bash
+      - -ec
+      - |
+        worker_pid=""
+        api_pid=""
+        vite_pid=""
+
+        cleanup() {
+          for pid in "$$worker_pid" "$$api_pid" "$$vite_pid"; do
+            if [ -n "$$pid" ]; then
+              kill "$$pid" 2>/dev/null || true
+            fi
+          done
+          wait || true
+        }
+        trap cleanup EXIT
+
+        python -c '
+        import socket
+        import time
+
+        for attempt in range(120):
+            try:
+                socket.create_connection(("temporal", 7233), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(2)
+        else:
+            raise SystemExit("Temporal did not become ready")
+        '
+
+        python -m loghawk.workflows.temporal.worker &
+        worker_pid=$$!
+
+        python -m uvicorn loghawk.api.main:app \
+          --app-dir src --host 0.0.0.0 --port 8000 --no-access-log &
+        api_pid=$$!
+
+        cd /app/frontend/loghawk-ui
+        npm run dev -- --host 0.0.0.0 --port 5173 &
+        vite_pid=$$!
+
+        wait -n "$$worker_pid" "$$api_pid" "$$vite_pid"
+    restart: unless-stopped
+
+volumes:
+  rustfs-data:
+  rustfs-logs:
+  temporal-data:
+  server-db:
+  server-lancedb:
