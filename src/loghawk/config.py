@@ -10,6 +10,35 @@ PROJECT_ROOT = PACKAGE_ROOT.parent.parent
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+LH_API_SERVER_BIND_URL = os.getenv(
+    "LH_API_SERVER_BIND_URL", "http://127.0.0.1:8000"
+).strip().rstrip("/")
+LH_API_SERVER_URL = os.getenv(
+    "LH_API_SERVER_URL", "http://127.0.0.1:8000"
+).strip().rstrip("/")
+
+for _api_url_name, _api_url in (
+    ("LH_API_SERVER_BIND_URL", LH_API_SERVER_BIND_URL),
+    ("LH_API_SERVER_URL", LH_API_SERVER_URL),
+):
+    _parsed_api_url = urlparse(_api_url)
+    try:
+        _api_url_port = _parsed_api_url.port
+    except ValueError as exc:
+        raise ValueError(f"{_api_url_name} must contain a valid port") from exc
+    if (
+        _parsed_api_url.scheme not in {"http", "https"}
+        or not _parsed_api_url.hostname
+        or _api_url_port is None
+        or _parsed_api_url.path not in {"", "/"}
+        or _parsed_api_url.query
+        or _parsed_api_url.fragment
+    ):
+        raise ValueError(
+            f"{_api_url_name} must be an HTTP(S) URL with host and port, "
+            "for example http://127.0.0.1:8000"
+        )
+
 _duckdb_file_path = os.getenv("LH_DUCKDB_FILE_PATH", "").strip()
 if _duckdb_file_path:
     LH_DUCKDB_FILE_PATH = Path(_duckdb_file_path)

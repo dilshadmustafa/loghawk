@@ -40,6 +40,8 @@ x-loghawk-app: &loghawk-app
     LH_DATA_DIR: /var/lib/loghawk
     LH_SERVER_DATABASE_URL: sqlite:////var/lib/loghawk/db/loghawk_webui.sqlite3
     LH_SERVER_LANCEDB_FILE_PATH: /var/lib/loghawk/serverlancedb
+    LH_API_SERVER_BIND_URL: http://0.0.0.0:8000
+    LH_API_SERVER_URL: http://127.0.0.1:8000
     LH_TEMPORAL_ADDRESS: temporal:7233
     LH_S3_ENDPOINT: http://rustfs:9000
     LH_EXTERNAL_S3_ENDPOINT: http://rustfs:9000
@@ -164,8 +166,7 @@ services:
         python -m loghawk.workflows.temporal.worker &
         worker_pid=$$!
 
-        python -m uvicorn loghawk.api.main:app \
-          --app-dir src --host 0.0.0.0 --port 8000 --no-access-log &
+        python -m loghawk.api.server &
         api_pid=$$!
 
         cd /app/frontend/loghawk-ui

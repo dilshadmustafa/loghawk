@@ -5,7 +5,8 @@ unset NPM_CONFIG_PREFIX npm_config_prefix
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 LOG_DIR="${HOME}/.loghawk/logs"
-CONDA_ENV_NAME="venv312"
+CONDA_ENV_NAME="${LOGHAWK_CONDA_ENV_NAME:-venv312}"
+SETUP_SCRIPT="${LOGHAWK_SETUP_SCRIPT:-firsttime_setup.sh}"
 MINIFORGE_PREFIX="${MINIFORGE_PREFIX:-$HOME/miniforge3}"
 
 # n8n auto-start is disabled. Configure and start a customer-managed n8n instance separately.
@@ -33,7 +34,7 @@ if command -v conda >/dev/null 2>&1; then
 elif [[ -f "$MINIFORGE_PREFIX/etc/profile.d/conda.sh" ]]; then
     CONDA_BASE="$MINIFORGE_PREFIX"
 else
-    echo "Run firsttime_setup.sh before starting LogHawk."
+    echo "Run ${SETUP_SCRIPT} before starting LogHawk."
     exit 1
 fi
 # shellcheck disable=SC1091
@@ -41,7 +42,7 @@ source "$CONDA_BASE/etc/profile.d/conda.sh"
 conda activate "$CONDA_ENV_NAME"
 PYTHON="$(command -v python)"
 if [[ -z "$PYTHON" ]]; then
-    echo "Python was not found in the venv312 Conda environment."
+    echo "Python was not found in the ${CONDA_ENV_NAME} Conda environment."
     exit 1
 fi
 command -v docker >/dev/null || { echo "Docker is required and must be running."; exit 1; }
@@ -198,7 +199,7 @@ WORKER_LOG="$LOG_DIR/temporal-worker.log"
 API_LOG="$LOG_DIR/webui-api.log"
 "$PYTHON" -m loghawk.workflows.temporal.worker >"$WORKER_LOG" 2>&1 &
 WORKER_PID=$!
-"$PYTHON" -m uvicorn loghawk.api.main:app --app-dir src --host 127.0.0.1 --port 8000 --no-access-log >"$API_LOG" 2>&1 &
+"$PYTHON" -m loghawk.api.server >"$API_LOG" 2>&1 &
 API_PID=$!
 
 cleanup() {
@@ -210,7 +211,8 @@ trap cleanup EXIT INT TERM
 echo "Worker log: $WORKER_LOG"
 echo "API log: $API_LOG"
 echo "Web UI: http://localhost:5173"
-echo "Web UI API: http://localhost:8000"
+API_URL="$($PYTHON -c 'from loghawk.config import LH_API_SERVER_URL; print(LH_API_SERVER_URL)')"
+echo "Web UI API: $API_URL"
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"
 # echo "n8n: http://localhost:5678"

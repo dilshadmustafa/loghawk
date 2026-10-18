@@ -1887,6 +1887,12 @@ source "$HOME/miniforge3/etc/profile.d/conda.sh"
 conda activate loghawk-rapids
 ```
 
+To start RustFS, Temporal, the RAPIDS-backed worker, API, and Web UI from the repository root, run:
+
+```sh
+bash start_all_servers_rapids.sh
+```
+
 Configure detector selection in `.env`. For single-detector cuML mode, set `LH_ANOMALY_ALGORITHMS=` and configure `LH_ANOMALY_BACKEND=cuml`, `LH_ANOMALY_ALGORITHM=cuml-isolationforest`, and `LH_ANOMALY_DEVICE=gpu`. When `LH_ANOMALY_ALGORITHMS` is non-empty, that list takes precedence; include `cuml-isolationforest` to use cuML.
 
 With `LH_S3_BATCH_FOLDER=quickstart`, the generated inputs are:
@@ -1896,25 +1902,11 @@ s3://loghawk-data/quickstart/train/elasticsearch-1.log
 s3://loghawk-data/quickstart/raw/elasticsearch-1.log
 ```
 
-#### To Start Temporal Workflow Through Console (Optional)
-
-Keep the Temporal server running. In two separate terminals, run the worker first, then start the workflow:
-
-```text
-Windows worker:  firsttime_start_workflow_terminal_1.bat
-Linux/macOS:     bash firsttime_start_workflow_terminal_1.sh
-
-Windows starter: firsttime_start_workflow_terminal_2.bat
-Linux/macOS:     bash firsttime_start_workflow_terminal_2.sh
-```
-
-The Temporal UI is available at `http://localhost:8233`.
-
 #### Optional applications
 
 ```text
-Document upload — Windows: firsttime_start_webUI_doc_upload.bat
-                  Linux/macOS: bash firsttime_start_webUI_doc_upload.sh
+Document upload — Windows: local_doc_upload_UI.bat
+                  Linux/macOS: bash local_doc_upload_UI.sh
 ```
 
 ### LogHawk Web UI capabilities
@@ -1985,9 +1977,9 @@ hawk
 
 The layout has an **AI/LLM Terminal** at the upper left, two **Command Terminals** below it, and the **Editor pane** on the right spanning the height of all three terminals.
 
-- **AI/LLM Terminal:** Chat with the configured LiteLLM provider. Use `/rag <question>` to search indexed LanceDB content, `/ragupload <path>` to index a local file, and `/ragscrape <url>` to index a website. Use `/command <request>` to ask the LLM to propose shell commands, including commands based on recent discussion.
+- **AI/LLM Terminal:** Chat with the configured LiteLLM provider. Use `/rag <question>` to search indexed LanceDB content. Use `/command <request>` to ask the LLM to propose shell commands, including commands based on recent discussion.
 
-Examples:
+AI/LLM Terminal examples:
 
 ```text
 You: help me to troubleshoot kubernetes. i need to get last 3 hours metrics from Prometheus
@@ -1998,11 +1990,17 @@ You: help me to troubleshoot kubernetes. i need to get last 3 hours metrics from
 /rag ignore previous chat. tell about CH.pdf
 /rag don't use above conversation. tell about CH.pdf
 /rag compare CH.pdf and "Science and Sports (Ch 5 to 8).pdf"
+```
+
+- **Command Terminals 1 and 2:** Enter and run shell commands in either terminal. Use `/ragupload <path>` to index a local file or folder, and `/ragscrape <url>` to index a website. Command output is also shown in the Editor pane. Both terminals support the task commands below.
+
+Command Terminal examples:
+
+```text
 /ragupload /mnt/c/Users/ACER/Downloads/CH.pdf
 /ragupload "/mnt/c/Users/ACER/Downloads/Science and Sports (Ch 5 to 8).pdf"
 /ragscrape https://economictimes.indiatimes.com/
 ```
-- **Command Terminals 1 and 2:** Enter and run commands in either terminal. Command output is also shown in the Editor pane. Both terminals support the task commands below.
 - **Editor pane:** View and edit task artifacts, and manage saved versions.
 
 For an LLM-proposed command, type `YES` or `yes` to run it in Command Terminal 1. Type `E` or `e` to edit it in the Editor pane; after confirming the edits, the command is shown again for confirmation. Type `N` or anything else to cancel.

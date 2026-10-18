@@ -258,7 +258,7 @@ fi
 echo "Setup complete."
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"
-echo "Start the worker and workflow using the firsttime_start_workflow scripts."
+echo "Start LogHawk services and the Web UI with bash start_all_servers.sh."
 conda deactivate
 echo "Activate the environment in a new terminal with:"
 echo "  source \"$CONDA_BASE/etc/profile.d/conda.sh\""

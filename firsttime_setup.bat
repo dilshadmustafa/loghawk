@@ -142,7 +142,7 @@ echo   PowerShell: .\venv312\Scripts\Activate.ps1
 echo   Command Prompt: venv312\Scripts\activate.bat
 echo RustFS console: http://localhost:9001
 echo Temporal UI: http://localhost:8233
-echo Start the worker and workflow using the firsttime_start_workflow scripts.
+echo Start LogHawk services and the Web UI with .\start_all_servers.bat.
 exit /b 0
 
 :failed
