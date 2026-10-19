@@ -1,5 +1,6 @@
 from pathlib import Path
 import fnmatch
+import json
 import os
 import platform
 from urllib.parse import urlparse
@@ -423,10 +424,18 @@ LH_S3_REGION = (
     or "us-east-1"
 )
 
-LH_S3_SELECT_RECORD_FILTER = os.getenv(
-    "LH_S3_SELECT_RECORD_FILTER",
+LH_S3_SELECT_RECORD_FILTER_JSON = os.getenv(
+    "LH_S3_SELECT_RECORD_FILTER_JSON",
     "WARN,ERROR"
 )
+LH_S3_SELECT_RECORD_FILTER_CSV = os.getenv(
+    "LH_S3_SELECT_RECORD_FILTER_CSV",
+    "WARN,ERROR"
+)
+LH_S3_SELECT_RECORD_FILTER = os.getenv(
+    "LH_S3_SELECT_RECORD_FILTER",
+    "",
+).strip()
 
 def _env_bool(name: str, default: str) -> bool:
     value = os.getenv(name, default).strip().lower()
@@ -583,15 +592,132 @@ if bool(LH_EXTERNAL_S3_ACCESS_KEY_ID) != bool(LH_EXTERNAL_S3_SECRET_ACCESS_KEY):
         "LH_EXTERNAL_S3_SECRET_ACCESS_KEY, or leave both blank."
     )
 
-LH_S3_SELECT_RECORD_FILTER_LIST = (
-    []
-    if LH_S3_SELECT_RECORD_FILTER.strip().upper() == "ALL"
-    else [
-        value.strip().upper()
-        for value in LH_S3_SELECT_RECORD_FILTER.split(",")
-        if value.strip()
+def _parse_s3_select_record_filter(value: str) -> list[str]:
+    if value.strip().upper() == "ALL":
+        return []
+    return [
+        item.strip().upper()
+        for item in value.split(",")
+        if item.strip()
     ]
+
+
+LH_S3_SELECT_RECORD_FILTER_JSON_LIST = _parse_s3_select_record_filter(
+    LH_S3_SELECT_RECORD_FILTER_JSON
 )
+LH_S3_SELECT_RECORD_FILTER_CSV_LIST = _parse_s3_select_record_filter(
+    LH_S3_SELECT_RECORD_FILTER_CSV
+)
+
+
+def _parse_s3_select_filter_rules(value: str) -> dict[str, dict[str, list[str]]]:
+    if not value.strip():
+        return {}
+
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "LH_S3_SELECT_RECORD_FILTER must contain a valid JSON object"
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError("LH_S3_SELECT_RECORD_FILTER must be a JSON object")
+
+    rules: dict[str, dict[str, list[str]]] = {}
+    normalized_patterns: set[str] = set()
+    for pattern, columns in parsed.items():
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError(
+                "LH_S3_SELECT_RECORD_FILTER rule names must be non-empty strings"
+            )
+        pattern = pattern.strip()
+        if pattern.casefold() in normalized_patterns:
+            raise ValueError(
+                "LH_S3_SELECT_RECORD_FILTER contains duplicate patterns "
+                f"that differ only by case: {pattern!r}"
+            )
+        normalized_patterns.add(pattern.casefold())
+        if not isinstance(columns, dict):
+            raise ValueError(
+                f"S3 Select filter rule {pattern!r} must map columns to value lists"
+            )
+
+        normalized_columns: dict[str, list[str]] = {}
+        for column, values in columns.items():
+            if not isinstance(column, str) or not column.strip():
+                raise ValueError(
+                    f"S3 Select filter rule {pattern!r} has an empty column name"
+                )
+            if (
+                not isinstance(values, list)
+                or not values
+                or any(not isinstance(item, str) for item in values)
+            ):
+                raise ValueError(
+                    f"S3 Select filter values for {column!r} in rule "
+                    f"{pattern!r} must be a non-empty list of strings"
+                )
+            normalized_columns[column] = values
+        rules[pattern] = normalized_columns
+    return rules
+
+
+LH_S3_SELECT_FILTER_RULES = _parse_s3_select_filter_rules(
+    LH_S3_SELECT_RECORD_FILTER
+)
+
+
+def s3_select_filter_rule_for_path(
+    path: str,
+) -> tuple[str | None, dict[str, list[str]]]:
+    """Resolve an exact filename or wildcard rule, then fall back to default."""
+    filename = urlparse(path).path.rsplit("/", 1)[-1].casefold()
+    matching_patterns = [
+        pattern
+        for pattern in LH_S3_SELECT_FILTER_RULES
+        if pattern.casefold() != "default"
+        and fnmatch.fnmatchcase(filename, pattern.casefold())
+    ]
+    if matching_patterns:
+        selected_pattern = max(
+            enumerate(matching_patterns),
+            key=lambda item: (
+                not any(char in item[1] for char in "*?[]"),
+                sum(char not in "*?[]" for char in item[1]),
+                -item[0],
+            ),
+        )[1]
+        return selected_pattern, LH_S3_SELECT_FILTER_RULES[selected_pattern]
+
+    if "default" in (key.casefold() for key in LH_S3_SELECT_FILTER_RULES):
+        default_key = next(
+            key
+            for key in LH_S3_SELECT_FILTER_RULES
+            if key.casefold() == "default"
+        )
+        return default_key, LH_S3_SELECT_FILTER_RULES[default_key]
+    return None, {}
+
+# Compatibility alias for older versioned modules that still expect a list
+# of severity levels. Active Stage A and Identity Mapping use filter rules.
+LH_S3_SELECT_RECORD_FILTER_LIST = LH_S3_SELECT_RECORD_FILTER_JSON_LIST
+
+
+def s3_select_record_filter_for_path(path: str) -> tuple[str, str, list[str]]:
+    """Return the setting name, configured value, and parsed filter for a path."""
+    filename = urlparse(path).path.rsplit("/", 1)[-1].lower()
+    if filename.endswith(".csv"):
+        return (
+            "LH_S3_SELECT_RECORD_FILTER_CSV",
+            LH_S3_SELECT_RECORD_FILTER_CSV,
+            LH_S3_SELECT_RECORD_FILTER_CSV_LIST,
+        )
+    return (
+        "LH_S3_SELECT_RECORD_FILTER_JSON",
+        LH_S3_SELECT_RECORD_FILTER_JSON,
+        LH_S3_SELECT_RECORD_FILTER_JSON_LIST,
+    )
 
 _SYSTEM_TO_OS_FAMILY = {
     "Windows": "WINDOWS",
@@ -625,7 +751,7 @@ LH_JAVA_HOME = os.getenv("JAVA_HOME", "").strip()
 def main():
     print("LH DUCKDB FILE PATH : ", LH_DUCKDB_FILE_PATH)
     print("LH DUCKDB TABLE NAME : ", LH_DUCKDB_TABLE_NAME)
-    print("LH S3 SELECT RECORD FILTER : ", LH_S3_SELECT_RECORD_FILTER)
+    print("LH S3 SELECT RECORD FILTER RULES : ", LH_S3_SELECT_FILTER_RULES)
 
 if __name__ == '__main__':
     main()

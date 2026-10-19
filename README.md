@@ -165,7 +165,7 @@ The mapping stores source details, identity roles, and field roles:
 
 Mappings use only actual source columns. Existing mappings are controlled by `LH_IDENTITY_MAPPING_SKIP_EXISTING`; `true` reuses an existing mapping and `false` regenerates it. Mapping generation must finish for every file before Stage A starts.
 
-Supported input extensions are `.json`, `.json.gz`, `.jsonl`, `.jsonl.gz`, `.log`, and `.log.gz`. Files whose names begin with `.` or `_` are skipped.
+Supported input extensions are `.json`, `.json.gz`, `.jsonl`, `.jsonl.gz`, `.log`, `.log.gz`, `.csv`, and `.csv.gz`. CSV inputs must have a header row. Files whose names begin with `.` or `_` are skipped.
 
 ### Source-file grouping
 
@@ -642,7 +642,7 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_EXTERNAL_S3SELECT_SUPPORT` | Declare S3 Select supported by external storage | `true` / `false`, default `false` |
 | `LH_S3_SELECT_USE_TRAIN_PHASE` | Enable S3 Select for Train input | `true` / `false`, default `false` |
 | `LH_S3_SELECT_USE_DETECT_PHASE` | Enable S3 Select for Detect input | `true` / `false`, default `false` |
-| `LH_S3_SELECT_RECORD_FILTER` | Log levels to include | Default `WARN,ERROR`; `ALL` includes all levels |
+| `LH_S3_SELECT_RECORD_FILTER` | Filename-pattern filter-in rules mapping columns to allowed values | Unset/blank means no row filter; `{"default":{}}` or omitting `default` leaves files with no matching filename rule unfiltered |
 | `LH_CORRELATION_WINDOW_MINUTES` | Stage C correlation window | Positive integer, default `5` |
 
 Example `.env` settings for internal RustFS and external AWS S3 (keep real credentials local and do not commit secrets):
@@ -672,8 +672,8 @@ LH_S3_SELECT_SUPPORTED=true
 LH_EXTERNAL_S3SELECT_SUPPORT=true
 LH_S3_SELECT_USE_TRAIN_PHASE=true
 LH_S3_SELECT_USE_DETECT_PHASE=true
-LH_S3_SELECT_RECORD_FILTER=WARN,ERROR
-LH_S3_INPUT_FILENAMES=elasticsearch-*.log,k8slogs-*.log,metrics*,trace*,perf*,health*,status*,heartbeat*
+LH_S3_SELECT_RECORD_FILTER='{"default":{},"elasticsearch-*.json":{"level":["WARN","ERROR"]},"invoice-*.csv":{"level":["WARN","ERROR"]},"somelogfile-*.jsonl":{"level":["WARN","ERROR"],"service":["some_service", "another_service"]}}'
+LH_S3_INPUT_FILENAMES="*.*,elasticsearch-*.log,k8slogs-*.log,metrics*,trace*,perf*,health*,status*,heartbeat*"
 LH_S3_SELECT_SKIP_FILENAMES=metrics*,trace*,perf*,health*,status*,heartbeat*
 LH_IDENTITY_MAPPING_SAMPLE_STRATEGY=reservoir
 LH_IDENTITY_MAPPING_SAMPLE_SIZE=10
@@ -684,9 +684,9 @@ LH_CORRELATION_WINDOW_MINUTES=5
 
 When `LH_EXTERNAL_DATA_USE=true`, Identity Mapping and Stage A read inputs from the phase-specific external URLs. The number and order of region entries must match the URLs. For standard AWS S3, leave `LH_EXTERNAL_S3_ENDPOINT` blank; LogHawk builds the regional AWS endpoint from each URL's region. External credentials may be provided with both `LH_EXTERNAL_S3_ACCESS_KEY_ID` and `LH_EXTERNAL_S3_SECRET_ACCESS_KEY`, or left blank to use the AWS credential provider chain. Mapping and feature outputs remain in LogHawk's internal RustFS bucket.
 
-`LH_S3_INPUT_FILENAMES` is a case-insensitive wildcard allowlist applied to discovered filenames in Identity Mapping and Stage A. An empty value processes all supported filenames. `LH_S3_SELECT_SKIP_FILENAMES` bypasses S3 Select for matching filenames; those files still use the normal reader. Supported filename extensions are `.json`, `.jsonl`, `.log`, and their supported `.gz` forms, including `.json.gz`, `.jsonl.gz`, and `.log.gz`. A matching extension does not by itself make an arbitrary content format parseable. For example, Prometheus exposition text is not parsed as structured metrics just because it is stored with a `.log` extension.
+`LH_S3_INPUT_FILENAMES` is a case-insensitive wildcard allowlist applied to discovered filenames in Identity Mapping and Stage A. An empty value processes all supported filenames. `LH_S3_SELECT_SKIP_FILENAMES` bypasses S3 Select for matching filenames; those files still use the normal reader. Supported filename extensions are `.json`, `.jsonl`, `.log`, `.csv`, and their supported `.gz` forms, including `.json.gz`, `.jsonl.gz`, `.log.gz`, and `.csv.gz`. CSV inputs must have a header row. S3 Select is used only for uncompressed JSON, JSONL, and CSV files; compressed inputs use the normal reader. A matching extension does not by itself make an arbitrary content format parseable. For example, Prometheus exposition text is not parsed as structured metrics just because it is stored with a `.log` extension.
 
-S3 Select is used only when the applicable internal or external support flag and phase-use flag are enabled, and the input is an eligible uncompressed JSON/JSONL object not matched by `LH_S3_SELECT_SKIP_FILENAMES`. The record filter is applied during Identity Mapping and Stage A. `WARN` also matches `WARNING`; `ALL` disables severity filtering. If both phase flags are true, Train runs before Detect. At least one phase flag must be true. Train-only fits models; Detect-only requires saved models. Row counts report records returned by the active S3 Select stream and do not trigger an extra count read.
+S3 Select is used only when the applicable internal or external support flag and phase-use flag are enabled, and the input is an eligible uncompressed JSON, JSONL, or headered CSV object not matched by `LH_S3_SELECT_SKIP_FILENAMES`. `LH_S3_SELECT_RECORD_FILTER` is a JSON object whose keys are case-insensitive filename patterns and whose values map actual input column names to lists of allowed string values. A matching filename rule replaces `default`; exact filename matches take precedence over wildcard matches, and the most specific matching wildcard wins. Across columns, conditions are ANDed; values within each column are ORed. String values are compared case-insensitively, and `WARN` also matches `WARNING` for `level`, `severity`, and `log_level` columns. If no filename-specific rule matches, an empty `{"default":{}}` or an omitted `default` means S3 Select returns all records without a row filter. Identity Mapping applies the S3 Select rule before reservoir sampling, then derives the mapping from the filtered sample. Stage A applies the same rule to its input. If both phase flags are true, Train runs before Detect. At least one phase flag must be true. Train-only fits models; Detect-only requires saved models. Row counts report records returned by the active S3 Select stream and do not trigger an extra count read.
 
 ---
 

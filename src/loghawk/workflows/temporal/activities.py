@@ -13,12 +13,12 @@ async def run_identity_mapping(
         f"Starting identity mapping for {phase} sources: {sources}"
     )
 
-    from loghawk.identity_mapping import identity_mapping8
+    from loghawk.identity_mapping import identity_mapping10
 
     activity.logger.info(
-        f"Identity mapping module: {identity_mapping8.__file__}"
+        f"Identity mapping module: {identity_mapping10.__file__}"
     )
-    mapping_paths = identity_mapping8.generate_identity_mappings(
+    mapping_paths = identity_mapping10.generate_identity_mappings(
         sources, mapping_root, phase, external
     )
     activity.logger.info(
@@ -46,15 +46,15 @@ async def run_stage_a(
     )
 
     from loghawk.feature_engineering import (
-        pyspark_s3_feature_engineering11
+        pyspark_s3_feature_engineering13
     )
 
     activity.logger.info(
         f"Stage A module: "
-        f"{pyspark_s3_feature_engineering11.__file__}"
+        f"{pyspark_s3_feature_engineering13.__file__}"
     )
 
-    result = pyspark_s3_feature_engineering11.run(
+    result = pyspark_s3_feature_engineering13.run(
         sources,
         output_path,
         mapping_root,

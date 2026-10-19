@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -79,6 +81,30 @@ def to_jsonl_bytes(rows):
     ).encode("utf-8")
 
 
+def to_csv_bytes(rows):
+    output = io.StringIO(newline="")
+    fieldnames = [
+        "timestamp",
+        "service",
+        "level",
+        "message",
+        "status_code",
+        "exception",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
+
+
+invoice_train_rows = [
+    {**row, "service": "invoice-service"} for row in train_rows
+]
+invoice_raw_rows = [
+    {**row, "service": "invoice-service"} for row in raw_rows
+]
+
+
 s3 = boto3.client(
     "s3",
     endpoint_url=config.LH_S3_ENDPOINT,
@@ -95,19 +121,35 @@ objects = [
     (
         f"{batch}/train/elasticsearch-1.log",
         train_rows,
+        to_jsonl_bytes,
+        "application/x-ndjson",
     ),
     (
         f"{batch}/raw/elasticsearch-1.log",
         raw_rows,
+        to_jsonl_bytes,
+        "application/x-ndjson",
+    ),
+    (
+        f"{batch}/train/invoice-service-1.csv",
+        invoice_train_rows,
+        to_csv_bytes,
+        "text/csv",
+    ),
+    (
+        f"{batch}/raw/invoice-service-1.csv",
+        invoice_raw_rows,
+        to_csv_bytes,
+        "text/csv",
     ),
 ]
 
-for key, rows in objects:
+for key, rows, encode_rows, content_type in objects:
     s3.put_object(
         Bucket=config.LH_S3_BUCKET,
         Key=key,
-        Body=to_jsonl_bytes(rows),
-        ContentType="application/x-ndjson",
+        Body=encode_rows(rows),
+        ContentType=content_type,
     )
     print(
         f"Uploaded s3://{config.LH_S3_BUCKET}/{key} "
