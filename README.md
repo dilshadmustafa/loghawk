@@ -3,7 +3,6 @@ Welcome to LogHawk
 
 <div align="center"><img src="https://raw.githubusercontent.com/dilshadmustafa/loghawk/main/loghawk_logo.jpg" width="50%"></div>
 
-<div align="center"><a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&amp;hosted_button_id=H4V87SN5M2GG2"><img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" alt="Donate with PayPal"></a></div>
 
 Introduction
 -------------
