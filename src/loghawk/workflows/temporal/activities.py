@@ -13,12 +13,12 @@ async def run_identity_mapping(
         f"Starting identity mapping for {phase} sources: {sources}"
     )
 
-    from loghawk.identity_mapping import identity_mapping10
+    from loghawk.identity_mapping import identity_mapping11
 
     activity.logger.info(
-        f"Identity mapping module: {identity_mapping10.__file__}"
+        f"Identity mapping module: {identity_mapping11.__file__}"
     )
-    mapping_paths = identity_mapping10.generate_identity_mappings(
+    mapping_paths = identity_mapping11.generate_identity_mappings(
         sources, mapping_root, phase, external
     )
     activity.logger.info(

@@ -367,6 +367,16 @@ LH_IDENTITY_MAPPING_SKIP_EXISTING = _skip_existing in {
     "true", "1", "yes", "on"
 }
 
+LH_IDENTITY_MAPPING_USE_CACHE_FOR_GROUPS = tuple(
+    dict.fromkeys(
+        group.strip().lower()
+        for group in os.getenv(
+            "LH_IDENTITY_MAPPING_USE_CACHE_FOR_GROUPS", ""
+        ).split(",")
+        if group.strip()
+    )
+)
+
 LH_LOG_DIR = Path(os.getenv("LH_LOG_DIR"))
 
 if not LH_LOG_DIR.is_absolute():

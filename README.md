@@ -164,6 +164,10 @@ The mapping stores source details, identity roles, and field roles:
 
 Mappings use only actual source columns. Existing mappings are controlled by `LH_IDENTITY_MAPPING_SKIP_EXISTING`; `true` reuses an existing mapping and `false` regenerates it. Mapping generation must finish for every file before Stage A starts.
 
+`LH_IDENTITY_MAPPING_USE_CACHE_FOR_GROUPS` optionally enables a shared identity-mapping cache for selected comma-separated groups. On a cache miss, LogHawk samples the first file in the group and generates the mapping; later files reuse it without sampling or calling the LLM. The cache is shared by Train and Detect under `identitymapping/_schema_cache/<group>/`.
+
+**Only enable caching for a group if you ensure that every file in that group has the same schema.** If files in a group may have dynamic or differing schemas, do not include that group in this setting; LogHawk will then use its normal per-file sampling and mapping behavior.
+
 Supported input extensions are `.json`, `.json.gz`, `.jsonl`, `.jsonl.gz`, `.log`, `.log.gz`, `.csv`, and `.csv.gz`. CSV inputs must have a header row. Files whose names begin with `.` or `_` are skipped.
 
 ### Source-file grouping
@@ -634,6 +638,7 @@ Configuration is loaded from the repository-root `.env` file by `src/loghawk/con
 | `LH_TRAIN_PHASE` | Run mapping, Stage A, and model training on `<batch>/train/` | `true` / `false`, default `false` |
 | `LH_DETECT_PHASE` | Run mapping, Stage A, detection, and Stage C on `<batch>/raw/` | `true` / `false`, default `false` |
 | `LH_IDENTITY_MAPPING_SKIP_EXISTING` | Reuse an existing per-file mapping | `true` / `false`, default `false` |
+| `LH_IDENTITY_MAPPING_USE_CACHE_FOR_GROUPS` | Reuse one schema mapping for selected filename groups. Fixed schema within a group. | Comma-separated group names; blank means per-file behavior |
 | `LH_IDENTITY_MAPPING_SAMPLE_STRATEGY` | Mapping sample selection | `reservoir` or `first`, default `reservoir` |
 | `LH_IDENTITY_MAPPING_SAMPLE_SIZE` | Rows retained for mapping | Positive integer, default `10` |
 | `LH_IDENTITY_MAPPING_SAMPLE_SEED` | Reproducible reservoir sample seed | Integer, default `42` |
@@ -678,6 +683,7 @@ LH_IDENTITY_MAPPING_SAMPLE_STRATEGY=reservoir
 LH_IDENTITY_MAPPING_SAMPLE_SIZE=10
 LH_IDENTITY_MAPPING_SAMPLE_SEED=42
 LH_IDENTITY_MAPPING_SKIP_EXISTING=false
+LH_IDENTITY_MAPPING_USE_CACHE_FOR_GROUPS=invoice-service,k8slogs
 LH_CORRELATION_WINDOW_MINUTES=5
 ```
 
