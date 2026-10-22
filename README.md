@@ -1861,7 +1861,36 @@ From the repository root, start RustFS, Temporal, the LogHawk worker, the Web UI
 bash start_all_servers.sh
 ```
 
-When the services are ready, open http://localhost:5173 in your browser to use the LogHawk Web UI.
+When the services are ready, open [http://localhost:5173](http://localhost:5173) in your browser to use the LogHawk Web UI. You can login using userid admin and password admin. Change the password using Account Settings in Web UI.
+
+#### How to schedule LogHawk pipeline run using CronJob
+
+On Linux or macOS, you can use `cron` to start a saved Web UI Pipeline on a schedule. The `run_pipeline_email.sh` launcher defaults to the Pipeline named `pce3` and starts `loghawk.admin.pipeline_cron`. Set `LH_PIPELINE_NAME` in `run_pipeline_email.sh` to run a different saved Pipeline.
+
+Before scheduling it, make sure the LogHawk API, Temporal server, and Temporal worker are running. Configure SMTP in the repository-root `.env` file so LogHawk can email the completion result:
+
+| Variable | Description |
+|---|---|
+| `LH_PIPELINE_EMAIL_SMTP_HOST` | SMTP server hostname. |
+| `LH_PIPELINE_EMAIL_SMTP_PORT` | SMTP server port; defaults to `587`. |
+| `LH_PIPELINE_EMAIL_SMTP_USERNAME` and `LH_PIPELINE_EMAIL_SMTP_PASSWORD` | SMTP credentials, if required by your provider. |
+| `LH_PIPELINE_EMAIL_FROM` | Sender email address. |
+| `LH_PIPELINE_EMAIL_TO` | Recipient; defaults to `devops-team@yourcompany.com`. |
+| `LH_PIPELINE_EMAIL_STARTTLS` | Whether to use STARTTLS; defaults to `true`. |
+
+The launcher uses `LH_PIPELINE_USERID` and `LH_PIPELINE_PASSWORD` from its environment or the values set in `run_pipeline_email.sh`. It defaults to `admin` / `admin` when unset. Change the initial admin password and provide the current credentials to cron. Keep the password private and do not commit it to the repository. The Python environment must also be on cron's `PATH`; cron does not activate Conda or a virtual environment from your interactive shell.
+
+Edit the crontab with `crontab -e` and add an entry like this, replacing the example paths and credentials with your own:
+
+```cron
+PATH=/absolute/path/to/venv312/bin:/usr/local/bin:/usr/bin:/bin
+LH_PIPELINE_NAME=pce3
+LH_PIPELINE_USERID=admin
+LH_PIPELINE_PASSWORD=replace-with-your-password
+*/15 * * * * /absolute/path/to/loghawk/run_pipeline_email.sh >> "$HOME/loghawk-pipeline-cron.log" 2>&1
+```
+
+This runs every 15 minutes according to the machine's local cron timezone. Each invocation skips the run if that Pipeline is already running; otherwise it starts the Pipeline and polls until it completes or fails. On completion, it reads `s3://loghawk-data/somefolder/incidents/correlated_incidents.parquet` and emails the incident data as a CSV attachment only when the output object has changed during that run. Configure the internal S3 endpoint and credentials in `.env` so the script can read the Parquet output.
 
 #### RAPIDS cuML setup with NVIDIA GPU (Optional)
 
