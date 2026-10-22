@@ -180,7 +180,7 @@ echo "============================================================"
 echo "Installing LogHawk Web UI packages"
 echo "============================================================"
 cd "$ROOT_DIR/frontend/loghawk-ui"
-npm install
+npm install --no-audit --no-fund
 cd "$ROOT_DIR"
 
 if [[ -z "${JAVA_HOME:-}" ]]; then

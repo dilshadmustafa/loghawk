@@ -38,7 +38,7 @@ x-loghawk-app: &loghawk-app
   environment:
     LH_OS_FAMILY: LINUX
     LH_DATA_DIR: /var/lib/loghawk
-    LH_SERVER_DATABASE_URL: sqlite:////var/lib/loghawk/db/loghawk_webui.sqlite3
+    LH_SERVER_DATABASE_URL: sqlite:////var/lib/loghawk/db/loghawk_server.sqlite3
     LH_SERVER_LANCEDB_FILE_PATH: /var/lib/loghawk/serverlancedb
     LH_API_SERVER_BIND_URL: http://0.0.0.0:8000
     LH_API_SERVER_URL: http://127.0.0.1:8000
@@ -114,6 +114,17 @@ services:
       - /bin/bash
       - -ec
       - |
+        old_db=/var/lib/loghawk/db/loghawk_webui.sqlite3
+        new_db=/var/lib/loghawk/db/loghawk_server.sqlite3
+        if [ -f "$$old_db" ] && [ ! -e "$$new_db" ]; then
+          mv "$$old_db" "$$new_db"
+          for suffix in -wal -shm; do
+            if [ -e "$$old_db$$suffix" ]; then
+              mv "$$old_db$$suffix" "$$new_db$$suffix"
+            fi
+          done
+          echo "Migrated server database filename to loghawk_server.sqlite3"
+        fi
         python -m loghawk.admin.setup_lancedb2
         python src/loghawk/test/testdata.py
     restart: "no"

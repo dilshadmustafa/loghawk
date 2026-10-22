@@ -18,11 +18,20 @@ import type {
 } from "../types/api";
 
 const API_ROOT = "/api/v1";
+const AUTH_TOKEN_KEY = "loghawk.auth.token";
+
+export const getAuthToken = () => sessionStorage.getItem(AUTH_TOKEN_KEY) || "";
+export const setAuthToken = (token: string) => sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+export const clearAuthToken = () => sessionStorage.removeItem(AUTH_TOKEN_KEY);
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const token = getAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(`${API_ROOT}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -33,13 +42,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestMultipart<T>(path: string, body: FormData): Promise<T> {
-  const response = await fetch(`${API_ROOT}${path}`, { method: "POST", body });
+  const headers = new Headers();
+  const token = getAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_ROOT}${path}`, { method: "POST", body, headers });
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
     throw new Error(result.detail ?? `Request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
+
+export const getAuthStatus = () => request<{ webui_login: boolean; console_login: boolean }>("/auth/status");
+export const login = (userid: string, password: string, client: "webui" | "console" = "webui") =>
+  request<{ access_token: string; user: { userid: string; role: string } }>("/auth/login", {
+    method: "POST", body: JSON.stringify({ userid, password, client }),
+  });
+export const getCurrentUser = () => request<{ userid: string; role: string }>("/auth/me");
+export const logout = () => request<void>("/auth/logout", { method: "POST" });
+export const changePassword = (current_password: string, new_password: string) =>
+  request<{ status: string }>("/auth/change-password", {
+    method: "POST", body: JSON.stringify({ current_password, new_password }),
+  });
+export type AuthUser = { userid: string; role: string; active: boolean; created_at: string; updated_at: string };
+export const getUsers = () => request<AuthUser[]>("/auth/users");
+export const createUser = (userid: string, password: string, role: "User" | "Administrator") =>
+  request<AuthUser>("/auth/users", { method: "POST", body: JSON.stringify({ userid, password, role }) });
+export const deleteUser = (userid: string) =>
+  request<void>(`/auth/users/${encodeURIComponent(userid)}`, { method: "DELETE" });
 
 export const uploadRagDocuments = (files: File[]) => {
   const body = new FormData();

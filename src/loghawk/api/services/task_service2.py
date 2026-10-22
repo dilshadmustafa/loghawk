@@ -140,7 +140,15 @@ def draft_response(task: dict, history: list[dict[str, str]]) -> tuple[str, str 
         artifact is not None and not isinstance(artifact, expected_artifact_type)
     ):
         raise RuntimeError("LLM response has invalid reply or artifact types")
-    return reply, _validate_artifact(task, artifact)
+    if artifact is None:
+        return reply, None
+    if task["artifact_type"] == "n8n":
+        # Display the draft now; validate JSON structure when Save Version is clicked.
+        return reply, json.dumps(artifact, ensure_ascii=False, indent=2)
+    if not artifact.strip():
+        raise RuntimeError("The model returned an empty artifact")
+    # Python syntax validation happens when Save Version is clicked.
+    return reply, artifact
 
 
 def respond_to_message(task_id: str, content: str, database_role: str = "server") -> dict | None:

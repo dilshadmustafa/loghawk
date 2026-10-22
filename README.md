@@ -1918,7 +1918,8 @@ Document upload — Windows: local_doc_upload_UI.bat
 
 The Web UI provides a browser-based way to configure and run LogHawk pipelines:
 
-![LogHawk Web UI showing the Pipelines page](loghawk_webui.jpg)
+![LogHawk Web UI sign-in screen](loghawk_webui_screen1.jpg)
+![LogHawk Web UI Pipelines page](loghawk_webui_screen2.jpg)
 
 - Create and manage reusable Config Sets for internal S3 or external AWS S3 inputs.
 - Browse external S3 buckets and folders, and specify a region for each selected source.
@@ -1931,6 +1932,25 @@ The Web UI provides a browser-based way to configure and run LogHawk pipelines:
 - Edit generated artifacts and save versions explicitly. Browse version history, select a version, download it, or delete it.
 - Import a saved n8n workflow version into a customer/user-managed n8n instance. Imported workflows remain inactive; review and activate them in n8n.
 - Upload documents and crawl websites for indexing in LanceDB, then ask questions about the indexed content through RAG chat.
+
+#### Sign-in, Account Settings, and user management
+
+Sign-in is required to use the Web UI. On first API server startup, LogHawk creates an initial Administrator account:
+
+| User ID | Initial password | Role |
+|---|---|---|
+| `admin` | `admin` | Administrator |
+
+Change the initial password from **Account Settings** after signing in. Administrators can create users and assign the User or Administrator role, and can delete users subject to safeguards against deleting their own account or the last active Administrator. Deleting a user also removes their sessions and Hawk Console history; their tasks and RAG documents remain.
+
+#### API addresses
+
+| Variable | Purpose |
+|---|---|
+| `LH_API_SERVER_BIND_URL` | Address Uvicorn binds to when serving the API. |
+| `LH_API_SERVER_URL` | API address used by the Web UI proxy and signed-in Hawk Console. |
+
+Set these addresses in the `.env` file so the API is reachable from the processes or containers that use it. They may differ when the API binds to one interface but clients reach it through another address.
 
 The Web UI starts and monitors workflows; processing continues to run in the Temporal worker.
 LogHawk does not execute generated Python or shell artifacts. n8n is an optional, separately Customer-managed integration.
@@ -1950,7 +1970,12 @@ LogHawk uses these settings to connect to the n8n instance when importing a save
 
 Hawk Console is LogHawk’s four-pane terminal interface for Windows, Linux, and macOS.
 
-Hawk Console is a standalone application that works independently of other LogHawk components, providing operational intelligence, expert guidance, and assistance with root-cause analysis (RCA).
+Hawk Console is a standalone application that can work independently of other LogHawk components, providing operational intelligence, expert guidance, and assistance with root-cause analysis (RCA).
+
+Hawk Console has two modes:
+
+- **Signed-in mode:** `hawk` opens the sign-in screen. The initial Administrator account is available with user ID `admin` and password `admin`. Change the initial password in Web UI **Account Settings** after signing in. Chat, RAG, task operations, and their histories use authenticated LogHawk API calls.
+- **Local mode:** `hawk --local` starts Hawk Console without signing in and uses its local SQLite database and LanceDB.
 
 #### First-time Hawk Console setup
 
@@ -1978,7 +2003,14 @@ With the Hawk Console environment active, start it from the repository root:
 hawk
 ```
 
-![Hawk Console showing its four-pane layout](loghawk_console.jpg)
+For local mode, start Hawk Console without signing in:
+
+```sh
+hawk --local
+```
+
+![Hawk Console sign-in screen](loghawk_console_screen1.jpg)
+![Signed-in Hawk Console four-pane layout](loghawk_console_screen2.jpg)
 
 The layout has an **AI/LLM Terminal** at the upper left, two **Command Terminals** below it, and the **Editor pane** on the right spanning the height of all three terminals.
 

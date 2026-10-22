@@ -10,6 +10,7 @@ huggingface_hub[hf_xet]
 pydantic #check if already by lancedb
 
 colorama
+textual==8.2.8
 tqdm
 ollama
 litellm

@@ -40,6 +40,14 @@ def read_task(task_id: str) -> dict:
     return task
 
 
+@router.get("/{task_id}/artifacts/{artifact_id}")
+def read_task_artifact(task_id: str, artifact_id: str) -> dict:
+    artifact = task_store.get_artifact_version(task_id, artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Task artifact version not found")
+    return artifact
+
+
 @router.delete("/{task_id}", status_code=204)
 def delete_task(task_id: str) -> None:
     if not task_store.delete_task(task_id):

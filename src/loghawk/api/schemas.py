@@ -7,6 +7,30 @@ RunMode = Literal["train", "detect", "train-detect"]
 TaskArtifactType = Literal["n8n", "python", "bash", "powershell", "windows-cmd"]
 
 
+class LoginRequest(BaseModel):
+    userid: str
+    password: str
+    client: Literal["webui", "console"] = "webui"
+
+
+class UserCreate(BaseModel):
+    userid: str
+    password: str
+    role: Literal["User", "Administrator"] = "User"
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("New password must contain at least 8 characters")
+        return value
+
+
 class TaskWrite(BaseModel):
     name: str
     category: str = "Uncategorized"

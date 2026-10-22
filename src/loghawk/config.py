@@ -62,7 +62,7 @@ LH_CONSOLE_DATABASE_URL = os.getenv(
 ).strip()
 LH_SERVER_DATABASE_URL = os.getenv(
     "LH_SERVER_DATABASE_URL",
-    "sqlite:///data/db/loghawk_webui.sqlite3",
+    "sqlite:///data/db/loghawk_server.sqlite3",
 ).strip()
 if not LH_CONSOLE_DATABASE_URL:
     raise ValueError("LH_CONSOLE_DATABASE_URL must not be blank")

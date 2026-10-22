@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
+import ast
 import json
 import os
 import re
@@ -10,6 +12,8 @@ import shlex
 import shutil
 import sys
 import tempfile
+from datetime import UTC, datetime
+from uuid import uuid4
 from pathlib import Path
 
 from textual import events, work
@@ -21,13 +25,24 @@ from rich.table import Table
 
 import loghawk.config as config
 from loghawk.cli.command_terminal import CommandShellSession
+from loghawk.cli.console_auth import ConsoleLoginApp
 from loghawk.cli import command_history2 as command_history
 from loghawk.cli import local_store2 as local_store
-from loghawk.cli import task_workspace2 as task_workspace
+from loghawk.cli import task_workspace2 as local_task_workspace
+from loghawk.cli.console_api_client import ConsoleApiClient
+from loghawk.cli.console_api_task_workspace import ConsoleApiTaskWorkspace
 from loghawk.llm import get_llm_client
 from loghawk.rag import ingestion
 from loghawk.utils import lancedbutils3
 from loghawk.cli import console_rag_store
+from loghawk.utils.user_identity import set_userid_override
+
+_INPUT_BORDER_CSS = (
+    "Input { border-left: ascii $border-blurred; }\n"
+    "Input:focus { border-left: ascii $border; }\n"
+    if config.LH_OS_FAMILY in {"LINUX", "MAC"}
+    else ""
+)
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -145,10 +160,17 @@ class HawkConsole(App[None]):
     #editor { height: 1fr; border: round $secondary; }
     #command-output-mirror { height: 1fr; }
     Button { min-width: 10; }
-    """
+    """ + _INPUT_BORDER_CSS
 
-    def __init__(self) -> None:
+    def __init__(self, api_token: str | None = None) -> None:
         super().__init__()
+        self._api_client = ConsoleApiClient(api_token) if api_token else None
+        self._task_workspace = (
+            ConsoleApiTaskWorkspace(self._api_client)
+            if self._api_client else local_task_workspace
+        )
+        self._pending_chat_history: list[dict[str, str]] = []
+        self._pending_command_history: list[dict[str, str]] = []
         self.current_task: dict | None = None
         self.current_artifact: dict | None = None
         self._editor_baseline = ""
@@ -240,6 +262,25 @@ class HawkConsole(App[None]):
                 yield Button("Close", id="close-task-list")
             with Container(id="command-editor-pane"):
                 yield Static("Edit Proposed Command", classes="pane-title")
+                with Container(id="command-task-fields"):
+                    yield Static("Task name")
+                    yield Input(placeholder="Task name", id="command-task-name")
+                    yield Static("Type")
+                    yield Select(
+                        [
+                            ("Python", "python"),
+                            ("Bash", "bash"),
+                            ("PowerShell", "powershell"),
+                            ("Windows CMD", "windows-cmd"),
+                            ("n8n", "n8n"),
+                        ],
+                        prompt="Select task type",
+                        allow_blank=True,
+                        id="command-task-type",
+                    )
+                    yield Static("Category")
+                    yield Input(placeholder="Enter a category", id="command-task-category")
+                    yield Button("Quick Save", id="quick-save-command-task")
                 yield TextArea("", id="command-editor", soft_wrap=False)
                 with Horizontal(id="command-editor-toolbar"):
                     yield Button("Confirm Changes", variant="primary", id="confirm-command-edits")
@@ -250,11 +291,16 @@ class HawkConsole(App[None]):
                 yield Button("Close Help", id="close-help")
 
     async def on_mount(self) -> None:
-        local_store.initialize_console_database()
+        if self._api_client is None:
+            local_store.initialize_console_database()
         self.query_one("#llm-output", RichLog).write(
             f"Model: {config.LH_LLM_MODEL}\n"
-            "Chat uses the configured LiteLLM provider and indexed LanceDB context when available.\n"
-            "Ordinary chat uses the LLM directly. Prefix a question with /rag to search LanceDB.\n"
+            + (
+                "Signed-in chat, RAG, Tasks, and history use the authenticated LogHawk API.\n"
+                if self._api_client is not None
+                else "Chat uses the configured LiteLLM provider and local LanceDB context when available.\n"
+            )
+            + "Ordinary chat uses the LLM directly. Prefix a question with /rag to search indexed documents.\n"
             "To request shell command(s), enter /command generate commands based on above discussion "
             "or /command <what to do>.\n"
             "Type YES or yes to run it, E or e to edit it in the Editor pane, "
@@ -272,9 +318,8 @@ class HawkConsole(App[None]):
             )
             self._sessions[terminal_id] = session
             try:
-                self._command_history[terminal_id] = (
-                    command_history.load_history(terminal_id)
-                )
+                if self._api_client is None:
+                    self._command_history[terminal_id] = command_history.load_history(terminal_id)
                 self._command_history_index[terminal_id] = len(
                     self._command_history[terminal_id]
                 )
@@ -291,22 +336,75 @@ class HawkConsole(App[None]):
         self.query_one("#command-editor-pane", Container).display = False
         self.query_one("#help-pane", Container).display = False
         self._load_chat_history()
+        if self._api_client is not None:
+            self.set_interval(300, self._start_history_flush)
         self._sync_editor_controls()
+
+    def _start_history_flush(self) -> None:
+        self.run_worker(self._flush_remote_history, thread=True, name="console-history-sync")
 
     def _load_chat_history(self) -> None:
         try:
-            self._chat_history = local_store.load_conversation_history()
+            if self._api_client is not None:
+                history = self._api_client.get_json("/api/v1/console/history")
+                self._chat_history = [
+                    {"role": item["role"], "content": item["content"]}
+                    for item in history.get("llm_messages", [])
+                    if item.get("role") in {"user", "assistant"}
+                ]
+                for terminal_id in ("command-one", "command-two"):
+                    self._command_history[terminal_id] = [
+                        item["command"] for item in history.get("commands", [])
+                        if item.get("terminal_id") == terminal_id
+                    ][-command_history.MAX_HISTORY_ENTRIES:]
+                    self._command_history_index[terminal_id] = len(self._command_history[terminal_id])
+            else:
+                self._chat_history = local_store.load_conversation_history()
             if self._chat_history:
                 self.query_one("#llm-output", RichLog).write(
-                    f"Loaded {len(self._chat_history)} prior chat messages from SQLite.\n"
+                    f"Loaded {len(self._chat_history)} prior chat messages.\n"
                 )
         except Exception as exc:
             self.query_one("#llm-output", RichLog).write(
-                f"Could not load SQLite chat history: {exc}\n"
+                f"Could not load chat history: {exc}\n"
             )
 
     def _persist_chat_message(self, role: str, content: str) -> None:
-        local_store.save_conversation_message(role, content)
+        if self._api_client is None:
+            local_store.save_conversation_message(role, content)
+        else:
+            self._pending_chat_history.append(
+                {
+                    "id": str(uuid4()), "role": role, "content": content,
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            )
+
+    def _flush_remote_history(self, report_errors: bool = True) -> None:
+        if self._api_client is None or not (
+            self._pending_chat_history or self._pending_command_history
+        ):
+            return
+        chats = list(self._pending_chat_history)
+        commands = list(self._pending_command_history)
+        try:
+            self._api_client.post_json(
+                "/api/v1/console/history",
+                {"llm_messages": chats, "commands": commands},
+            )
+        except Exception as exc:
+            if report_errors and self.is_mounted:
+                self.app.call_from_thread(self._show_history_sync_error, str(exc))
+            return
+        chat_ids = {item["id"] for item in chats}
+        command_ids = {item["id"] for item in commands}
+        self._pending_chat_history = [item for item in self._pending_chat_history if item["id"] not in chat_ids]
+        self._pending_command_history = [item for item in self._pending_command_history if item["id"] not in command_ids]
+
+    def _show_history_sync_error(self, error: str) -> None:
+        self.query_one("#llm-output", RichLog).write(
+            f"Could not sync Console history; it will retry: {error}\n"
+        )
 
     def _retrieve_context(self, prompt: str) -> tuple[str, str | None]:
         requested_names = self._document_names_in_prompt(prompt)
@@ -576,10 +674,18 @@ class HawkConsole(App[None]):
                 output.write("No supported documents found at that path.\n")
                 return
             output.write(f"Indexing {len(files)} document(s) into Hawk Console RAG…\n")
+            if self._api_client is not None:
+                source_root = path if path.is_dir() else path.parent
+                payload = [
+                    (str(item), item.relative_to(source_root).as_posix())
+                    for item in files
+                ]
+            else:
+                payload = [(str(item), str(item.resolve())) for item in files]
             self._run_console_rag(
                 terminal_id,
                 "UPLOAD",
-                [(str(item), str(item.resolve())) for item in files],
+                payload,
             )
             return
         if command_name == "/ragscrape":
@@ -597,7 +703,28 @@ class HawkConsole(App[None]):
         self, terminal_id: str, kind: str, payload: list[tuple[str, str]] | str
     ) -> None:
         try:
-            if kind == "UPLOAD":
+            if self._api_client is not None:
+                if kind == "UPLOAD":
+                    job = self._api_client.upload_rag_files(payload)
+                else:
+                    job = self._api_client.post_json(
+                        "/api/v1/rag/ingestions/web", {"url": payload}
+                    )
+                job = self._api_client.wait_for_ingestion(job["id"])
+                message = (
+                    f"RAG {kind.lower()} {job['status'].lower()}: "
+                    f"{job.get('files_processed', 0)} item(s), "
+                    f"{job.get('chunks_indexed', 0)} chunk(s) indexed."
+                )
+                if job.get("error"):
+                    message += f"\n{job['error']}"
+                if job.get("warnings"):
+                    message += "\n" + "\n".join(job["warnings"])
+                self.app.call_from_thread(
+                    self._write_console_rag_output, terminal_id, message
+                )
+                return
+            elif kind == "UPLOAD":
                 chunks, processed, warnings = ingestion.ingest_file_paths(
                     payload,
                     console_rag_store,
@@ -634,12 +761,20 @@ class HawkConsole(App[None]):
         del history[:-command_history.MAX_HISTORY_ENTRIES]
         self._command_history_index[terminal_id] = len(history)
         self._command_history_draft[terminal_id] = ""
-        try:
-            command_history.save_command(terminal_id, command)
-        except Exception as exc:
-            self.query_one(f"#{terminal_id}-output", RichLog).write(
-                f"Could not persist command history: {exc}\n"
+        if self._api_client is not None:
+            self._pending_command_history.append(
+                {
+                    "id": str(uuid4()), "terminal_id": terminal_id,
+                    "command": command, "created_at": datetime.now(UTC).isoformat(),
+                }
             )
+        else:
+            try:
+                command_history.save_command(terminal_id, command)
+            except Exception as exc:
+                self.query_one(f"#{terminal_id}-output", RichLog).write(
+                    f"Could not persist command history: {exc}\n"
+                )
 
     def on_key(self, event: events.Key) -> None:
         if event.key not in {"up", "down"}:
@@ -679,6 +814,28 @@ class HawkConsole(App[None]):
         self, request: str, chat_history: list[dict[str, str]]
     ) -> None:
         try:
+            if self._api_client is not None:
+                proposal = self._api_client.post_json(
+                    "/api/v1/console/command",
+                    {
+                        "request": request,
+                        "messages": chat_history,
+                        "shell_name": "PowerShell" if os.name == "nt" else "Bash",
+                    },
+                    timeout=300,
+                )
+                command = proposal.get("command")
+                if command is not None and (
+                    not isinstance(command, str) or not command.strip()
+                ):
+                    raise ValueError("The model returned an invalid command.")
+                self.app.call_from_thread(
+                    self._finish_remote_command_proposal,
+                    request,
+                    proposal.get("explanation", ""),
+                    command.strip() if command else None,
+                )
+                return
             shell_name = "PowerShell" if os.name == "nt" else "Bash"
             schema = {
                 "type": "object",
@@ -726,6 +883,20 @@ class HawkConsole(App[None]):
                 self._finish_command_proposal, "", None, str(exc)
             )
 
+    def _finish_remote_command_proposal(
+        self, request: str, explanation: str, command: str | None
+    ) -> None:
+        assistant_message = explanation
+        if command:
+            assistant_message += f"\nProposed command:\n{command}"
+        self._chat_history.extend([
+            {"role": "user", "content": request},
+            {"role": "assistant", "content": assistant_message},
+        ])
+        self._persist_chat_message("user", request)
+        self._persist_chat_message("assistant", assistant_message)
+        self._finish_command_proposal(explanation, command, None)
+
     def _finish_command_proposal(
         self, explanation: str, command: str | None, error: str | None
     ) -> None:
@@ -768,6 +939,7 @@ class HawkConsole(App[None]):
         command = self._pending_llm_command
         self._pending_llm_command = None
         self._awaiting_llm_command_final_confirmation = False
+        self._record_command_history("command-one", command)
         output.write("Sending the approved command to Command Terminal 1.\n")
         self.query_one("#command-one-output", RichLog).write(f"$ {command}\n")
         self.run_worker(
@@ -795,6 +967,9 @@ class HawkConsole(App[None]):
         }
         for widget_id in widget_ids:
             self.query_one(f"#{widget_id}").display = False
+        self.query_one("#command-task-name", Input).value = ""
+        self.query_one("#command-task-type", Select).clear()
+        self.query_one("#command-task-category", Input).value = ""
         self.query_one("#command-editor", TextArea).text = self._pending_llm_command
         editor_pane.display = True
         self.query_one("#llm-input", Input).disabled = True
@@ -823,6 +998,66 @@ class HawkConsole(App[None]):
             "Type YES or yes to run it, or N or anything else to cancel: "
         )
 
+    def _quick_save_command_task(self) -> None:
+        name = self.query_one("#command-task-name", Input).value.strip()
+        artifact_type_select = self.query_one("#command-task-type", Select)
+        category = self.query_one("#command-task-category", Input).value.strip()
+        content = self.query_one("#command-editor", TextArea).text
+
+        if not name:
+            self.notify("Task name is required.", severity="warning")
+            self.query_one("#command-task-name", Input).focus()
+            return
+        if artifact_type_select.is_blank():
+            self.notify("Select a Task type.", severity="warning")
+            artifact_type_select.focus()
+            return
+        if not category:
+            self.notify("Task category is required.", severity="warning")
+            self.query_one("#command-task-category", Input).focus()
+            return
+        if not content.strip():
+            self.notify("Task code cannot be empty.", severity="warning")
+            self.query_one("#command-editor", TextArea).focus()
+            return
+
+        artifact_type = str(artifact_type_select.value)
+        if artifact_type == "python":
+            try:
+                ast.parse(content)
+            except SyntaxError as exc:
+                self.notify(f"Python syntax error: {exc}", severity="error")
+                self.query_one("#command-editor", TextArea).focus()
+                return
+
+        try:
+            task = self._task_workspace.find_task_by_name(name)
+            if task is None:
+                task = self._task_workspace.create_task(name, category, artifact_type)
+            else:
+                existing_category = task.get("category") or "Uncategorized"
+                if task["artifact_type"] != artifact_type:
+                    self.notify(
+                        "This Task name already exists with a different type.",
+                        severity="error",
+                    )
+                    return
+                if existing_category.casefold() != category.casefold():
+                    self.notify(
+                        "This Task name already exists in a different category.",
+                        severity="error",
+                    )
+                    return
+
+            saved_task = self._task_workspace.save_artifact(task["id"], content)
+            if saved_task is None or saved_task.get("latest_artifact") is None:
+                self.notify("Could not save the Task version.", severity="error")
+                return
+            version = saved_task["latest_artifact"]["version"]
+            self.notify(f'Saved "{saved_task["name"]}" as Version {version}.')
+        except Exception as exc:
+            self.notify(f"Could not quick-save Task: {exc}", severity="error")
+
     def _cancel_command_edits(self) -> None:
         self._pending_llm_command = None
         self._awaiting_llm_command_final_confirmation = False
@@ -833,6 +1068,28 @@ class HawkConsole(App[None]):
     def _run_chat(self, prompt: str, use_rag: bool = False) -> None:
         response_parts: list[str] = []
         try:
+            if self._api_client is not None:
+                if use_rag:
+                    result = self._api_client.post_json(
+                        "/api/v1/rag/chat", {"question": prompt}, timeout=300
+                    )
+                    response = result["answer"]
+                else:
+                    messages = [*self._chat_history, {"role": "user", "content": prompt}]
+                    result = self._api_client.post_json(
+                        "/api/v1/console/chat", {"messages": messages}, timeout=300
+                    )
+                    response = result["response"]
+                if not response:
+                    raise RuntimeError("The configured LLM returned an empty response.")
+                self._chat_history.extend([
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response},
+                ])
+                self._persist_chat_message("user", prompt)
+                self._persist_chat_message("assistant", response)
+                self.app.call_from_thread(self._finish_chat, None, response)
+                return
             try:
                 context = ""
                 if use_rag:
@@ -1001,7 +1258,7 @@ class HawkConsole(App[None]):
                     "Save or cancel the current Task edits before deleting a Task.\n"
                 )
                 return
-            task = task_workspace.find_task_by_name(parts[1])
+            task = self._task_workspace.find_task_by_name(parts[1])
             if task is None:
                 output.write(f"Task not found: {parts[1]}\n")
                 return
@@ -1025,7 +1282,7 @@ class HawkConsole(App[None]):
             ):
                 output.write("Save or cancel the current Task edits before running another Task.\n")
                 return
-            task = task_workspace.find_task_by_name(parts[1])
+            task = self._task_workspace.find_task_by_name(parts[1])
             if task is None:
                 output.write(f"Task not found: {parts[1]}\n")
                 return
@@ -1060,7 +1317,7 @@ class HawkConsole(App[None]):
         ):
             output.write("Save or discard the current editor changes before loading another Task.\n")
             return
-        task = task_workspace.find_task_by_name(parts[1])
+        task = self._task_workspace.find_task_by_name(parts[1])
         if task is None:
             output.write(f"Task not found: {parts[1]}\n")
             return
@@ -1076,7 +1333,7 @@ class HawkConsole(App[None]):
             output.write("Task deletion canceled.\n")
             return
         try:
-            deleted = task_workspace.delete_task(task["id"])
+            deleted = self._task_workspace.delete_task(task["id"])
         except Exception as exc:
             output.write(f"Could not delete Task {task['name']}: {exc}\n")
             return
@@ -1269,7 +1526,7 @@ class HawkConsole(App[None]):
             return
         artifact_type = str(self.query_one("#task-type-select", Select).value)
         try:
-            task = task_workspace.create_task(name, category, artifact_type)
+            task = self._task_workspace.create_task(name, category, artifact_type)
         except Exception as exc:
             self.notify(f"Could not create Task: {exc}", severity="error")
             return
@@ -1293,7 +1550,7 @@ class HawkConsole(App[None]):
 
         task_list_output = self.query_one("#task-list-output", RichLog)
         task_list_output.clear()
-        tasks = task_workspace.list_tasks()
+        tasks = self._task_workspace.list_tasks()
         if tasks:
             grouped: dict[str, list[dict]] = {}
             for task in tasks:
@@ -1383,12 +1640,12 @@ class HawkConsole(App[None]):
     @work(thread=True, exclusive=True, group="hawk-task-assistant")
     def _run_task_message(self, task_id: str, prompt: str) -> None:
         try:
-            task = task_workspace.respond_to_message(task_id, prompt)
+            task = self._task_workspace.respond_to_message(task_id, prompt)
             if task is None:
                 raise RuntimeError("Task was deleted before the assistant could respond.")
             self.app.call_from_thread(self._finish_task_message, task, None)
         except Exception as exc:
-            task = task_workspace.get_task(task_id)
+            task = self._task_workspace.get_task(task_id)
             self.app.call_from_thread(self._finish_task_message, task, str(exc))
 
     def _finish_task_message(self, task: dict | None, error: str | None) -> None:
@@ -1482,7 +1739,7 @@ class HawkConsole(App[None]):
             else:
                 event.select.clear()
             return
-        artifact = task_workspace.get_artifact(self.current_task["id"], str(event.value))
+        artifact = self._task_workspace.get_artifact(self.current_task["id"], str(event.value))
         if artifact is not None:
             self._load_artifact(artifact)
             self._sync_editor_controls()
@@ -1547,6 +1804,8 @@ class HawkConsole(App[None]):
             self._confirm_delete_version()
         elif event.button.id == "confirm-command-edits":
             self._confirm_command_edits()
+        elif event.button.id == "quick-save-command-task":
+            self._quick_save_command_task()
         elif event.button.id == "cancel-command-edits":
             self._cancel_command_edits()
         elif event.button.id in {"command-one-stop", "command-two-stop"}:
@@ -1557,7 +1816,7 @@ class HawkConsole(App[None]):
         if not self.current_task:
             return
         try:
-            task = task_workspace.save_artifact(
+            task = self._task_workspace.save_artifact(
                 self.current_task["id"],
                 self.query_one("#editor", TextArea).text,
             )
@@ -1654,8 +1913,8 @@ class HawkConsole(App[None]):
         task_id = self.current_task["id"]
         artifact_id = self.current_artifact["id"]
         deleted_version = self.current_artifact["version"]
-        if task_workspace.delete_artifact(task_id, artifact_id):
-            task = task_workspace.get_task(task_id)
+        if self._task_workspace.delete_artifact(task_id, artifact_id):
+            task = self._task_workspace.get_task(task_id)
             if task:
                 self._load_task(task)
                 self.query_one("#editor-status", Static).update(
@@ -1665,6 +1924,8 @@ class HawkConsole(App[None]):
             self.notify("Artifact version was not found.", severity="error")
 
     async def on_unmount(self) -> None:
+        if self._api_client is not None:
+            self._flush_remote_history(report_errors=False)
         await asyncio.gather(
             *(session.close() for session in self._sessions.values()),
             return_exceptions=True,
@@ -1673,7 +1934,20 @@ class HawkConsole(App[None]):
 
 def main() -> None:
     """Launch the Hawk terminal UI."""
-    HawkConsole().run()
+    parser = argparse.ArgumentParser(prog="hawk")
+    parser.add_argument(
+        "--local", action="store_true",
+        help="Use Console-local SQLite, LanceDB, and RAG without signing in.",
+    )
+    args = parser.parse_args()
+    if not args.local:
+        session = ConsoleLoginApp().run()
+        if not session:
+            return
+        set_userid_override(session["user"]["userid"])
+        HawkConsole(api_token=session["access_token"]).run()
+    else:
+        HawkConsole().run()
 
 
 if __name__ == "__main__":

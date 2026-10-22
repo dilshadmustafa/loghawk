@@ -17,7 +17,7 @@ const taskId = computed(() => typeof route.params.id === "string" ? route.params
 const task = ref<TaskRecord | null>(null);
 const name = ref("");
 const category = ref("");
-const artifactType = ref<TaskArtifactType>("n8n");
+const artifactType = ref<TaskArtifactType>("python");
 const message = ref("");
 const editorContent = ref("");
 const savedBaseline = ref("");

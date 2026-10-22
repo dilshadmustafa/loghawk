@@ -11,6 +11,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    true,
 )
 
 
@@ -102,6 +103,46 @@ rag_documents = Table(
 )
 Index("rag_documents_display_name", rag_documents.c.display_name)
 Index("rag_documents_content_sha256", rag_documents.c.content_sha256)
+
+auth_users = Table(
+    "auth_users", SERVER_METADATA,
+    Column("userid", String, primary_key=True),
+    Column("password_hash", String, nullable=False),
+    Column("role", String, nullable=False, server_default="User"),
+    Column("active", Boolean, nullable=False, server_default=true()),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+auth_sessions = Table(
+    "auth_sessions", SERVER_METADATA,
+    Column("token_hash", String(64), primary_key=True),
+    Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("client", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("revoked_at", String),
+)
+Index("auth_sessions_userid", auth_sessions.c.userid)
+
+console_llm_history = Table(
+    "console_llm_history", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("role", String, nullable=False),
+    Column("content", Text, nullable=False),
+    Column("created_at", String, nullable=False),
+)
+Index("console_llm_history_user_created", console_llm_history.c.userid, console_llm_history.c.created_at)
+
+console_command_history = Table(
+    "console_command_history", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("terminal_id", String, nullable=False),
+    Column("command", Text, nullable=False),
+    Column("created_at", String, nullable=False),
+)
+Index("console_command_history_user_terminal_created", console_command_history.c.userid, console_command_history.c.terminal_id, console_command_history.c.created_at)
 
 Table(
     "cli_command_history", CONSOLE_METADATA,

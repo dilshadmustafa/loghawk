@@ -178,7 +178,7 @@ echo ============================================================
 echo Installing LogHawk Web UI packages
 echo ============================================================
 pushd "%LOGHAWK_ROOT%\frontend\loghawk-ui"
-call npm install
+call npm install --no-audit --no-fund
 if errorlevel 1 (popd& exit /b 1)
 popd
 

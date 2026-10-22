@@ -1,5 +1,5 @@
 python-dotenv
-textual
+textual==8.2.8
 duckdb
 lancedb==0.40.0
 litellm
