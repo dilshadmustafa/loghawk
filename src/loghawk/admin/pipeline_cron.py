@@ -18,7 +18,12 @@ import loghawk.config as config
 
 
 PIPELINE_NAME = os.getenv("LH_PIPELINE_NAME", "pce3").strip() or "pce3"
-INCIDENTS_URL = "s3://loghawk-data/somefolder/incidents/correlated_incidents.parquet"
+PIPELINE_BATCH_S3_URL = os.getenv("LH_PIPELINE_BATCH_S3_URL", "").strip()
+if not PIPELINE_BATCH_S3_URL:
+    raise RuntimeError("LH_PIPELINE_BATCH_S3_URL must be set by run_pipeline_email.sh")
+INCIDENTS_URL = (
+    f"{PIPELINE_BATCH_S3_URL.rstrip('/')}/incidents/correlated_incidents.parquet"
+)
 RECIPIENT = "devops-team@yourcompany.com"
 POLL_INTERVAL_SECONDS = 30
 WAIT_TIMEOUT_SECONDS = 24 * 60 * 60

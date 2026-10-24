@@ -1892,6 +1892,13 @@ LH_PIPELINE_PASSWORD=replace-with-your-password
 
 This runs every 15 minutes according to the machine's local cron timezone. Each invocation skips the run if that Pipeline is already running; otherwise it starts the Pipeline and polls until it completes or fails. On completion, it reads `s3://loghawk-data/somefolder/incidents/correlated_incidents.parquet` and emails the incident data as a CSV attachment only when the output object has changed during that run. Configure the internal S3 endpoint and credentials in `.env` so the script can read the Parquet output.
 
+### Beginner User Guides
+
+Step-by-step guides for getting started with LogHawk:
+
+- [LogHawk Web UI Beginner Guide](Howto_Guides/LogHawk_Web_UI_Beginners_Guide.docx)
+- [Hawk Console Beginner Guide](Howto_Guides/Hawk_Console_Beginners_Guide.docx)
+
 #### RAPIDS cuML setup with NVIDIA GPU (Optional)
 
 Run this setup only if you have an NVIDIA GPU with compute capability 7.0 or higher, are using a supported Linux environment—including supported Linux under WSL2—and specifically want to use RAPIDS cuML for anomaly detection. Refer to NVIDIA’s [installation guide](https://docs.nvidia.com/datascience/install/) and [platform support page](https://docs.nvidia.com/datascience/platform-support/) for supported platforms.
