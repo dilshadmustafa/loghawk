@@ -13,6 +13,8 @@ import shutil
 import sys
 import tempfile
 from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
 from rich.table import Table
 
 import loghawk.config as config
+from loghawk import lhrunner
 from loghawk.cli.command_terminal import CommandShellSession
 from loghawk.cli.console_auth import ConsoleLoginApp
 from loghawk.cli import command_history2 as command_history
@@ -43,6 +46,44 @@ _INPUT_BORDER_CSS = (
     if config.LH_OS_FAMILY in {"LINUX", "MAC"}
     else ""
 )
+
+
+def _parse_api_run_command(command: str, expected: str) -> tuple[str, dict]:
+    """Parse `/task|collect <name> [JSON arguments]` without altering JSON quotes."""
+    match = re.fullmatch(
+        r"\s*(/task|/collect)\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))(?:\s+(.*?))?\s*",
+        command,
+        flags=re.DOTALL,
+    )
+    if match is None or match.group(1).lower() != expected:
+        raise ValueError(
+            f'Usage: {expected} <name> [JSON arguments] (quote names containing spaces)'
+        )
+    name = match.group(2) or match.group(3) or match.group(4)
+    raw_arguments = match.group(5)
+    if not raw_arguments:
+        return name, {}
+    try:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Arguments must be valid JSON: {exc}") from exc
+    if not isinstance(arguments, dict):
+        raise ValueError("Arguments must be a JSON object.")
+    return name, arguments
+
+
+def _format_api_run_result(result: Any) -> str:
+    """Pretty-print JSON emitted by a program without escaping it as nested text."""
+    if isinstance(result, dict):
+        result = dict(result)
+        for key in ("stdout", "stderr"):
+            value = result.get(key)
+            if isinstance(value, str):
+                try:
+                    result[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+    return json.dumps(result, indent=2, ensure_ascii=False, default=str)
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -154,6 +195,10 @@ class HawkConsole(App[None]):
     #task-list-pane { height: 1fr; padding: 0 1; }
     #task-list-output { height: 1fr; }
     #command-editor-pane { height: 1fr; padding: 0 1; }
+    #command-task-fields { height: auto; }
+    .command-task-row { height: auto; }
+    .command-task-field { height: auto; width: 1fr; padding-right: 1; }
+    .command-task-action { height: auto; width: auto; }
     #command-editor { height: 1fr; border: round $secondary; }
     #command-editor-toolbar { height: auto; min-height: 3; }
     #version-select { width: 1fr; }
@@ -198,17 +243,17 @@ class HawkConsole(App[None]):
                 yield Input(placeholder="Chat with the configured LLM…", id="llm-input")
 
             with Container(id="command-one-pane", classes="pane"):
-                yield Static("Command Terminal 1 · /help · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", classes="pane-title")
+                yield Static("Command Terminal 1 · /help · /collect <name> · /collectrun <name> · /task <name> · /taskrun <name> · /tasklist · /tasknew · /taskedit <taskname>", classes="pane-title")
                 yield RichLog(id="command-one-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal():
-                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", id="command-one-input")
+                    yield Input(placeholder="Shell command · /collect <name> · /collectrun <name> · /collectlist · /collectview · /task <name> · /taskrun <name> · /tasklist · /tasknew · /taskedit <taskname>", id="command-one-input")
                     yield Button("Stop", id="command-one-stop")
 
             with Container(id="command-two-pane", classes="pane"):
-                yield Static("Command Terminal 2 · /help · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", classes="pane-title")
+                yield Static("Command Terminal 2 · /help · /collect <name> · /collectrun <name> · /task <name> · /taskrun <name> · /tasklist · /tasknew · /taskedit <taskname>", classes="pane-title")
                 yield RichLog(id="command-two-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal():
-                    yield Input(placeholder="Shell command · /tasklist · /tasknew · /taskedit <taskname> · /taskview <taskname> (alias) · /taskrun <taskname> · /taskdelete <taskname>", id="command-two-input")
+                    yield Input(placeholder="Shell command · /collect <name> · /collectrun <name> · /collectlist · /collectview · /task <name> · /taskrun <name> · /tasklist · /tasknew · /taskedit <taskname>", id="command-two-input")
                     yield Button("Stop", id="command-two-stop")
 
         with Container(id="editor-pane", classes="pane"):
@@ -218,6 +263,8 @@ class HawkConsole(App[None]):
                 with Container(id="task-create-fields"):
                     yield Static("Task name")
                     yield Input(placeholder="Task name", id="task-name-input")
+                    yield Static("Description · what this Task is for")
+                    yield TextArea("", id="task-description-input", soft_wrap=True)
                     yield Static("Task Type")
                     yield Select(
                         [
@@ -231,6 +278,19 @@ class HawkConsole(App[None]):
                         allow_blank=False,
                         id="task-type-select",
                     )
+                    yield Static("Task Kind")
+                    yield Select(
+                        [("General Task", "general"), ("Remediation Task", "remediation"),
+                         ("Rollback Task", "rollback"), ("Collector", "collector")],
+                        value="general", allow_blank=False, id="task-kind-select",
+                    )
+                    yield Static("Execution Policy")
+                    yield Select(
+                        [("Manual", "manual"), ("AI-assisted", "ai-assisted"),
+                         ("Auto-approved", "auto-approved"), ("Disabled", "disabled")],
+                        value="manual", allow_blank=False, id="task-execution-policy-select",
+                    )
+                    yield Static("Auto-approved requires an Administrator or Power User in signed-in mode.")
                     yield Static("Category")
                     yield Input(placeholder="Enter a category", id="task-category-input")
                 with Horizontal():
@@ -238,6 +298,21 @@ class HawkConsole(App[None]):
                     yield Button("Cancel", id="cancel-create-task")
             with Container(id="task-chat-pane"):
                 yield Static("Task Chat", classes="pane-title")
+                yield Static("Task description")
+                yield TextArea("", id="loaded-task-description", soft_wrap=True)
+                yield Button("Save Description", id="save-loaded-task-description")
+                with Horizontal(id="loaded-task-policy-row"):
+                    yield Static("Execution Policy")
+                    yield Select(
+                        [("Manual", "manual"), ("AI-assisted", "ai-assisted"),
+                         ("Auto-approved", "auto-approved"), ("Disabled", "disabled")],
+                        value="manual", allow_blank=False, id="loaded-task-execution-policy",
+                    )
+                    yield Button("Save Policy", id="save-task-execution-policy")
+                yield Static(
+                    "AI-triggered runs are not connected yet. When available, AI may request only an approved and enabled version; Auto-approved skips per-run approval. Local development runs remain available.",
+                    classes="muted",
+                )
                 yield RichLog(id="task-chat-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal(id="task-message-row"):
                     yield Input(placeholder="Describe the artifact you want…", id="task-message-input")
@@ -263,24 +338,48 @@ class HawkConsole(App[None]):
             with Container(id="command-editor-pane"):
                 yield Static("Edit Proposed Command", classes="pane-title")
                 with Container(id="command-task-fields"):
-                    yield Static("Task name")
-                    yield Input(placeholder="Task name", id="command-task-name")
-                    yield Static("Type")
-                    yield Select(
-                        [
-                            ("Python", "python"),
-                            ("Bash", "bash"),
-                            ("PowerShell", "powershell"),
-                            ("Windows CMD", "windows-cmd"),
-                            ("n8n", "n8n"),
-                        ],
-                        prompt="Select task type",
-                        allow_blank=True,
-                        id="command-task-type",
-                    )
-                    yield Static("Category")
-                    yield Input(placeholder="Enter a category", id="command-task-category")
-                    yield Button("Quick Save", id="quick-save-command-task")
+                    with Horizontal(classes="command-task-row"):
+                        with Container(classes="command-task-field"):
+                            yield Static("Task name")
+                            yield Input(placeholder="Task name", id="command-task-name")
+                        with Container(classes="command-task-field"):
+                            yield Static("Type")
+                            yield Select(
+                                [
+                                    ("Python", "python"),
+                                    ("Bash", "bash"),
+                                    ("PowerShell", "powershell"),
+                                    ("Windows CMD", "windows-cmd"),
+                                    ("n8n", "n8n"),
+                                ],
+                                prompt="Select task type",
+                                allow_blank=True,
+                                id="command-task-type",
+                            )
+                    with Container(classes="command-task-field"):
+                        yield Static("Description · what this Task is for")
+                        yield Input("", placeholder="Task description", id="command-task-description")
+                    with Horizontal(classes="command-task-row"):
+                        with Container(classes="command-task-field"):
+                            yield Static("Category")
+                            yield Input(placeholder="Enter a category", id="command-task-category")
+                        with Container(classes="command-task-field"):
+                            yield Static("Task kind")
+                            yield Select(
+                                [("General Task", "general"), ("Remediation Task", "remediation"),
+                                 ("Rollback Task", "rollback"), ("Collector", "collector")],
+                                value="general", allow_blank=False, id="command-task-kind",
+                            )
+                        with Container(classes="command-task-field"):
+                            yield Static("Execution policy")
+                            yield Select(
+                                [("Manual", "manual"), ("AI-assisted", "ai-assisted"),
+                                 ("Auto-approved", "auto-approved"), ("Disabled", "disabled")],
+                                value="manual", allow_blank=False, id="command-task-execution-policy",
+                            )
+                        with Container(classes="command-task-action"):
+                            yield Static("")
+                            yield Button("Quick Save", id="quick-save-command-task")
                 yield TextArea("", id="command-editor", soft_wrap=False)
                 with Horizontal(id="command-editor-toolbar"):
                     yield Button("Confirm Changes", variant="primary", id="confirm-command-edits")
@@ -556,6 +655,9 @@ class HawkConsole(App[None]):
         if text.startswith("/ragupload") or text.startswith("/ragscrape"):
             self._handle_console_rag_command(text, output, terminal_id)
             return
+        if text.startswith("/collect"):
+            self._handle_collector_command(text, output, terminal_id)
+            return
         if text.startswith("/task"):
             self._handle_task_command(text, output, terminal_id)
             return
@@ -598,6 +700,12 @@ class HawkConsole(App[None]):
                 "Ask a question using indexed documents. If mentioning filenames, put double quotes around a filename with spaces.",
             ),
             ("/command", "<request>", "AI/LLM", "Ask the LLM to propose shell command(s). Review, edit, then confirm before execution."),
+            ("/collectlist", "None", "Command 1 or 2 · signed in", "List built-in collectors and custom Tasks with the Collector kind."),
+            ("/collectview", "<collector-name>", "Command 1 or 2 · signed in", "Show a collector's description, argument schema, enabled state, and recent run history."),
+            ("/collect", "<collector-name> [JSON arguments]", "Command 1 or 2 · signed in", "Run a built-in or custom collector through the authenticated API; custom versions must be approved and enabled."),
+            ("/collectrun", "<collector-name> [JSON arguments]", "Command 1 or 2", "Run a built-in or custom collector locally in this Command Terminal; local development runs do not require approval or enabled status."),
+            ("/collectenable", "<collector-name>", "Command 1 or 2 · signed in", "Enable a built-in collector or a custom collector Task version; Users may enable their own Tasks."),
+            ("/collectdisable", "<collector-name>", "Command 1 or 2 · signed in", "Disable a built-in collector or a custom collector Task version; Users may disable their own Tasks."),
             (
                 "/ragupload",
                 "<file-or-folder-path>",
@@ -610,11 +718,12 @@ class HawkConsole(App[None]):
                 "Command 1 or 2",
                 "Crawl same-site pages and linked supported documents. This command takes a URL, not a local filename; encode spaces in a URL as %20. Each normalized URL is visited once per crawl; unchanged content at the same final URL is skipped on later crawls, while changed content replaces its chunks. Identical content at different URLs is not deduplicated.",
             ),
-            ("/tasknew", "None", "Command 1 or 2", "Open the AI-assisted Task creation form in the Editor pane."),
-            ("/tasklist", "None", "Command 1 or 2", "List saved Tasks in the Editor pane."),
-            ("/taskedit", "<taskname>", "Command 1 or 2", "Load a saved Task into the editable Editor pane. Quote names containing spaces."),
+            ("/tasknew", "None", "Command 1 or 2", "Open the Task creation form; choose artifact type, task kind, execution policy, and category."),
+            ("/tasklist", "None", "Command 1 or 2", "List saved Tasks with their execution policy in the Editor pane."),
+            ("/taskedit", "<taskname>", "Command 1 or 2", "Load a saved Task into the Editor pane to edit code and execution policy. Quote names containing spaces."),
             ("/taskview", "<taskname>", "Command 1 or 2", "Alias for /taskedit."),
-            ("/taskrun", "<taskname>", "Command 1 or 2", "Load the latest saved version. Confirm with Y/yes to run supported code; n8n workflow artifacts are displayed but are not executed here."),
+            ("/task", "<taskname> [JSON arguments]", "Command 1 or 2 · signed in", "Run the latest saved Task version through the authenticated API; it must be approved and enabled. n8n workflows are not executed."),
+            ("/taskrun", "<taskname>", "Command 1 or 2", "Load and locally run the latest saved version after confirmation. Local development runs do not require approval or enabled status; n8n is not executed."),
             ("/taskdelete", "<taskname>", "Command 1 or 2", "Delete a Task, its conversation, and saved versions after confirmation. Quote names containing spaces."),
             ("OS command", "<command>", "Command 1 or 2", "Run a native shell command in that terminal."),
         )
@@ -632,6 +741,128 @@ class HawkConsole(App[None]):
             "and normalizes default HTTP/HTTPS ports. Different URLs with identical "
             "content remain separate indexed sources."
         )
+
+    def _handle_collector_command(
+        self, command: str, output: RichLog, terminal_id: str
+    ) -> None:
+        if self._api_client is None and not command.lower().startswith("/collectrun"):
+            output.write("Collector commands require a signed-in Hawk Console session; they are unavailable in --local mode.\n")
+            return
+        parts = command.split(maxsplit=2)
+        command_name = parts[0].lower()
+        if command_name == "/collect":
+            try:
+                collector_name, arguments = _parse_api_run_command(command, "/collect")
+            except ValueError as exc:
+                output.write(f"{exc}\n")
+                return
+            if self._sessions[terminal_id].busy:
+                output.write("Wait for the current command to finish before running a collector.\n")
+                return
+            self._begin_command_output(terminal_id, command)
+            self._run_collector_request(terminal_id, command_name, collector_name, arguments)
+            return
+        if command_name not in {
+            "/collectlist", "/collectview", "/collectrun",
+            "/collectenable", "/collectdisable",
+        }:
+            output.write("Unknown collector command. Use /help.\n")
+            return
+        if command_name in {"/collectlist"}:
+            if len(parts) > 1:
+                output.write("Usage: /collectlist\n")
+                return
+            collector_name, arguments = None, {}
+        elif command_name == "/collectrun":
+            if len(parts) < 2:
+                output.write('Usage: /collectrun <collector-name> [JSON arguments]\nExample: /collectrun prometheus-query {"query":"up"}\n')
+                return
+            collector_name = parts[1]
+            try:
+                arguments = json.loads(parts[2]) if len(parts) == 3 else {}
+            except json.JSONDecodeError as exc:
+                output.write(f"Arguments must be valid JSON: {exc}\n")
+                return
+            if not isinstance(arguments, dict):
+                output.write("Collector arguments must be a JSON object.\n")
+                return
+        else:
+            if len(parts) != 2:
+                output.write(f"Usage: {command_name} <collector-name>\n")
+                return
+            collector_name, arguments = parts[1], {}
+
+        self._begin_command_output(terminal_id, command)
+        self._run_collector_request(terminal_id, command_name, collector_name, arguments)
+
+    @work(thread=True, group="hawk-collectors")
+    def _run_collector_request(
+        self,
+        terminal_id: str,
+        command_name: str,
+        collector_name: str | None,
+        arguments: dict,
+    ) -> None:
+        try:
+            if command_name == "/collectrun":
+                task = self._task_workspace.find_task_by_name(collector_name or "")
+                if task is not None and task.get("task_kind", "general") == "collector":
+                    artifact = task.get("latest_artifact")
+                    if artifact is None:
+                        raise RuntimeError("This collector Task has no saved version.")
+                    result = lhrunner.run_artifact(
+                        task["artifact_type"], artifact["content"], arguments=arguments
+                    )
+                    result.update({"task": task["name"], "version": artifact["version"]})
+                else:
+                    result = lhrunner.run_builtin_collector(collector_name or "", arguments)
+            elif self._api_client is None:
+                raise RuntimeError("This collector command requires a signed-in Hawk Console session.")
+            elif command_name == "/collectlist":
+                result = self._api_client.get_json("/api/v1/console/collectors")
+            elif command_name == "/collectview":
+                result = self._api_client.get_json(f"/api/v1/console/collectors/{collector_name}")
+            elif command_name == "/collect":
+                result = self._api_client.post_json(
+                    f"/api/v1/console/collectors/{quote(collector_name or '', safe='')}/runs",
+                    {"arguments": arguments},
+                    timeout=330,
+                )
+            else:
+                result = self._api_client.put_json(
+                    f"/api/v1/console/collectors/{collector_name}",
+                    {"enabled": command_name == "/collectenable"},
+                )
+            rendered = _format_api_run_result(result)
+        except Exception as exc:
+            rendered = f"Collector request failed: {exc}"
+        self.app.call_from_thread(self._finish_api_run_request, terminal_id, rendered)
+
+    @work(thread=True, group="hawk-task-runs")
+    def _run_api_task(self, terminal_id: str, task_name: str, arguments: dict) -> None:
+        try:
+            task = self._task_workspace.find_task_by_name(task_name)
+            if task is None:
+                raise RuntimeError(f"Task not found: {task_name}")
+            if task.get("artifact_type") == "n8n":
+                raise RuntimeError(
+                    "n8n workflows are not executed by LogHawk; import them into the customer-managed n8n instance."
+                )
+            result = self._api_client.post_json(
+                f"/api/v1/tasks/{task['id']}/runs",
+                {"arguments": arguments},
+                timeout=330,
+            )
+            rendered = _format_api_run_result(result)
+        except Exception as exc:
+            rendered = f"Task API run failed: {exc}"
+        self.app.call_from_thread(self._finish_api_run_request, terminal_id, rendered)
+
+    def _finish_api_run_request(self, terminal_id: str, rendered: str) -> None:
+        label = "Terminal 1" if terminal_id == "command-one" else "Terminal 2"
+        for line in rendered.splitlines():
+            self.query_one(f"#{terminal_id}-output", RichLog).write(line)
+            self.query_one("#command-output-mirror", RichLog).write(f"[{label}] {line}")
 
     def _close_help(self) -> None:
         self.query_one("#help-pane", Container).display = False
@@ -968,20 +1199,24 @@ class HawkConsole(App[None]):
         for widget_id in widget_ids:
             self.query_one(f"#{widget_id}").display = False
         self.query_one("#command-task-name", Input).value = ""
+        self.query_one("#command-task-description", Input).value = ""
         self.query_one("#command-task-type", Select).clear()
         self.query_one("#command-task-category", Input).value = ""
+        self.query_one("#command-task-kind", Select).value = "general"
+        self.query_one("#command-task-execution-policy", Select).value = "manual"
         self.query_one("#command-editor", TextArea).text = self._pending_llm_command
         editor_pane.display = True
         self.query_one("#llm-input", Input).disabled = True
         self.query_one("#command-editor", TextArea).focus()
 
-    def _close_command_editor(self) -> None:
+    def _close_command_editor(self, *, focus_llm: bool = True) -> None:
         self.query_one("#command-editor-pane", Container).display = False
         for widget_id, was_displayed in self._command_editor_visibility.items():
             self.query_one(f"#{widget_id}").display = was_displayed
         self._command_editor_visibility.clear()
         self.query_one("#llm-input", Input).disabled = False
-        self.query_one("#llm-input", Input).focus()
+        if focus_llm:
+            self.query_one("#llm-input", Input).focus()
 
     def _confirm_command_edits(self) -> None:
         command = self.query_one("#command-editor", TextArea).text.strip()
@@ -1001,12 +1236,19 @@ class HawkConsole(App[None]):
     def _quick_save_command_task(self) -> None:
         name = self.query_one("#command-task-name", Input).value.strip()
         artifact_type_select = self.query_one("#command-task-type", Select)
+        task_kind = str(self.query_one("#command-task-kind", Select).value)
+        execution_policy = str(self.query_one("#command-task-execution-policy", Select).value)
         category = self.query_one("#command-task-category", Input).value.strip()
+        description = self.query_one("#command-task-description", Input).value.strip()
         content = self.query_one("#command-editor", TextArea).text
 
         if not name:
             self.notify("Task name is required.", severity="warning")
             self.query_one("#command-task-name", Input).focus()
+            return
+        if not description:
+            self.notify("Task description is required.", severity="warning")
+            self.query_one("#command-task-description", Input).focus()
             return
         if artifact_type_select.is_blank():
             self.notify("Select a Task type.", severity="warning")
@@ -1022,6 +1264,9 @@ class HawkConsole(App[None]):
             return
 
         artifact_type = str(artifact_type_select.value)
+        if task_kind == "collector" and artifact_type == "n8n":
+            self.notify("Collector Tasks must use Python, Bash, PowerShell, or Windows CMD.", severity="error")
+            return
         if artifact_type == "python":
             try:
                 ast.parse(content)
@@ -1033,7 +1278,9 @@ class HawkConsole(App[None]):
         try:
             task = self._task_workspace.find_task_by_name(name)
             if task is None:
-                task = self._task_workspace.create_task(name, category, artifact_type)
+                task = self._task_workspace.create_task(
+                    name, description, category, artifact_type, task_kind, execution_policy
+                )
             else:
                 existing_category = task.get("category") or "Uncategorized"
                 if task["artifact_type"] != artifact_type:
@@ -1047,6 +1294,17 @@ class HawkConsole(App[None]):
                         "This Task name already exists in a different category.",
                         severity="error",
                     )
+                    return
+                if task.get("task_kind", "general") != task_kind:
+                    self.notify("This Task name already exists with a different task kind.", severity="error")
+                    return
+                task = self._task_workspace.set_description(task["id"], description)
+                if task is None:
+                    self.notify("Could not update Task description.", severity="error")
+                    return
+                task = self._task_workspace.set_execution_policy(task["id"], execution_policy)
+                if task is None:
+                    self.notify("Could not update Task execution policy.", severity="error")
                     return
 
             saved_task = self._task_workspace.save_artifact(task["id"], content)
@@ -1117,6 +1375,28 @@ class HawkConsole(App[None]):
                 *self._chat_history,
                 {"role": "user", "content": user_content},
             ]
+            if not use_rag:
+                matching_tasks = local_task_workspace.relevant_tasks(prompt)
+                if matching_tasks:
+                    task_context = "\n".join(
+                        "- "
+                        f"name={task['name']}; description={task.get('description', '')}; "
+                        f"category={task.get('category', '')}; kind={task.get('task_kind', 'general')}; "
+                        f"type={task.get('artifact_type', '')}; policy={task.get('execution_policy', 'manual')}; "
+                        f"latest_version={(task.get('latest_artifact') or {}).get('version', 'none')}; "
+                        f"approval_status={'approved' if (task.get('latest_artifact') or {}).get('approved') else 'not approved'}; "
+                        f"enabled_status={'enabled' if (task.get('latest_artifact') or {}).get('enabled') else 'disabled'}"
+                        for task in matching_tasks
+                    )
+                    messages.insert(0, {
+                        "role": "system",
+                        "content": (
+                            "Potentially relevant saved LogHawk Tasks are listed below. Use them to answer "
+                            "questions about existing tasks or recommend a suitable task. Do not claim "
+                            "to run, approve, enable, or modify a task. State its execution policy and "
+                            "latest-version approval/enabled status when relevant.\n" + task_context
+                        ),
+                    })
             client = get_llm_client()
             candidates = [config.LH_LLM_MODEL, *config.LH_LLM_FALLBACK_MODELS]
             last_error: Exception | None = None
@@ -1170,6 +1450,13 @@ class HawkConsole(App[None]):
             self._active_command_outputs.discard(terminal_id)
 
     def _begin_command_output(self, terminal_id: str, command: str) -> None:
+        if self.query_one("#command-editor-pane", Container).display:
+            self._pending_llm_command = None
+            self._awaiting_llm_command_final_confirmation = False
+            self._close_command_editor(focus_llm=False)
+            self.query_one("#llm-output", RichLog).write(
+                "Pending /command proposal canceled because a Command Terminal command was run.\n"
+            )
         mirror = self.query_one("#command-output-mirror", RichLog)
         if not mirror.display:
             mirror.clear()
@@ -1211,6 +1498,21 @@ class HawkConsole(App[None]):
             output.write(f"Invalid /task command: {exc}\n")
             return
         command_name = parts[0].lower() if parts else ""
+        if command_name == "/task":
+            if self._api_client is None:
+                output.write("/task requires a signed-in Hawk Console session; use /taskrun for local development.\n")
+                return
+            try:
+                task_name, arguments = _parse_api_run_command(command, "/task")
+            except ValueError as exc:
+                output.write(f"{exc}\n")
+                return
+            if self._sessions[terminal_id].busy:
+                output.write("Wait for the current command to finish before running a Task.\n")
+                return
+            self._begin_command_output(terminal_id, command)
+            self._run_api_task(terminal_id, task_name, arguments)
+            return
         if command_name == "/tasklist":
             if len(parts) != 1:
                 output.write("Usage: /tasklist\n")
@@ -1409,18 +1711,19 @@ class HawkConsole(App[None]):
         if suffix is None:
             output.write(f"Unsupported Task type: {artifact_type}\n")
             return
-        session = self._sessions[terminal_id]
-
         try:
-            with tempfile.TemporaryDirectory(prefix="hawk-task-") as temp_dir:
-                artifact_path = Path(temp_dir) / f"task{suffix}"
-                artifact_path.write_text(artifact["content"], encoding="utf-8")
-                command = self._task_execution_command(artifact_type, artifact_path)
-                if not await session.submit(command):
-                    output.write("Could not start the Task in this command terminal.\n")
-                    return
-                while session.busy:
-                    await asyncio.sleep(0.1)
+            result = await asyncio.to_thread(
+                lhrunner.run_artifact, artifact_type, artifact["content"]
+            )
+            label = "Terminal 1" if terminal_id == "command-one" else "Terminal 2"
+            for stream_name in ("stdout", "stderr"):
+                stream = result.get(stream_name) or ""
+                for line in stream.splitlines():
+                    output.write(line)
+                    self.query_one("#command-output-mirror", RichLog).write(f"[{label}] {line}")
+            result_line = f"[Task exit code: {result.get('exit_code')}]"
+            output.write(result_line)
+            self.query_one("#command-output-mirror", RichLog).write(f"[{label}] {result_line}")
         except Exception as exc:
             output.write(f"Task run failed: {exc}\n")
 
@@ -1501,8 +1804,11 @@ class HawkConsole(App[None]):
         self.query_one("#editor", TextArea).display = True
         self.query_one("#editor-status", Static).display = True
         self.query_one("#task-name-input", Input).value = ""
+        self.query_one("#task-description-input", TextArea).text = ""
         self.query_one("#task-category-input", Input).value = ""
         self.query_one("#task-type-select", Select).value = "python"
+        self.query_one("#task-kind-select", Select).value = "general"
+        self.query_one("#task-execution-policy-select", Select).value = "manual"
         version_selector = self.query_one("#version-select", Select)
         version_selector.set_options([])
         version_selector.clear()
@@ -1515,24 +1821,36 @@ class HawkConsole(App[None]):
 
     def _create_task(self) -> None:
         name = self.query_one("#task-name-input", Input).value.strip()
+        description = self.query_one("#task-description-input", TextArea).text.strip()
         category = self.query_one("#task-category-input", Input).value.strip()
         if not name:
             self.notify("Task name is required.", severity="warning")
             self.query_one("#task-name-input", Input).focus()
+            return
+        if not description:
+            self.notify("Task description is required.", severity="warning")
+            self.query_one("#task-description-input", TextArea).focus()
             return
         if not category:
             self.notify("Task category is required.", severity="warning")
             self.query_one("#task-category-input", Input).focus()
             return
         artifact_type = str(self.query_one("#task-type-select", Select).value)
+        task_kind = str(self.query_one("#task-kind-select", Select).value)
+        execution_policy = str(self.query_one("#task-execution-policy-select", Select).value)
+        if task_kind == "collector" and artifact_type == "n8n":
+            self.notify("Collector Tasks must use Python, Bash, PowerShell, or Windows CMD.", severity="error")
+            return
         try:
-            task = self._task_workspace.create_task(name, category, artifact_type)
+            task = self._task_workspace.create_task(
+                name, description, category, artifact_type, task_kind, execution_policy
+            )
         except Exception as exc:
             self.notify(f"Could not create Task: {exc}", severity="error")
             return
         self._load_task(task)
         self.query_one("#editor-status", Static).update(
-            f"{task['name']} · {category} · {self._task_type_label(task)} · "
+            f"{task['name']} · {task['category']} · {self._task_type_label(task)} · "
             "describe the artifact in Task Chat"
         )
 
@@ -1570,18 +1888,20 @@ class HawkConsole(App[None]):
                 )
                 task_list_output.write("")
                 task_list_output.write(f"Category: {category}")
+                kind_width = max(len("Task Kind"), max(len(task.get("task_kind", "general")) for task in category_tasks))
                 task_list_output.write(
-                    f"{'Task Name':<{name_width}}  "
-                    f"{'User ID':<{userid_width}}  Task Type"
+                    f"{'Task Name':<{name_width}}  {'User ID':<{userid_width}}  "
+                    f"{'Task Type':<14}  {'Task Kind':<14}  Execution Policy"
                 )
                 task_list_output.write(
-                    f"{'-' * name_width}  {'-' * userid_width}  ---------"
+                    f"{'-' * name_width}  {'-' * userid_width}  {'-' * 14}  {'-' * kind_width}  ----------------"
                 )
                 for task in category_tasks:
                     task_list_output.write(
                         f"{task['name']:<{name_width}}  "
                         f"{str(task.get('userid') or ''):<{userid_width}}  "
-                        f"{self._task_type_label(task)}"
+                        f"{self._task_type_label(task):<14}  {task.get('task_kind', 'general'):<14}  "
+                        f"{task.get('execution_policy', 'manual')}"
                     )
         else:
             task_list_output.write("No Tasks found.")
@@ -1614,6 +1934,7 @@ class HawkConsole(App[None]):
     def _cancel_task_creation(self) -> None:
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#task-description-input", TextArea).text = ""
         self.query_one("#task-category-input", Input).value = ""
         self._set_editor_text("")
         self._sync_editor_controls()
@@ -1668,6 +1989,37 @@ class HawkConsole(App[None]):
             )
         self._sync_editor_controls()
 
+    def _save_task_execution_policy(self) -> None:
+        if not self.current_task:
+            return
+        policy = str(self.query_one("#loaded-task-execution-policy", Select).value)
+        try:
+            task = self._task_workspace.set_execution_policy(self.current_task["id"], policy)
+            if task is None:
+                self.notify("Could not update Task execution policy.", severity="error")
+                return
+            self._load_task(task)
+            self.notify(f"Execution policy set to {policy}.")
+        except Exception as exc:
+            self.notify(f"Could not update Task execution policy: {exc}", severity="error")
+
+    def _save_loaded_task_description(self) -> None:
+        if not self.current_task:
+            return
+        description = self.query_one("#loaded-task-description", TextArea).text.strip()
+        if not description:
+            self.notify("Task description is required.", severity="warning")
+            return
+        try:
+            task = self._task_workspace.set_description(self.current_task["id"], description)
+            if task is None:
+                self.notify("Could not update Task description.", severity="error")
+                return
+            self._load_task(task)
+            self.notify("Task description saved.")
+        except Exception as exc:
+            self.notify(f"Could not update Task description: {exc}", severity="error")
+
     def _render_task_messages(self, task: dict) -> None:
         output = self.query_one("#task-chat-output", RichLog)
         output.clear()
@@ -1678,9 +2030,11 @@ class HawkConsole(App[None]):
     def _load_task(self, task: dict) -> None:
         self._close_task_list()
         self.current_task = task
+        self.query_one("#loaded-task-description", TextArea).text = task.get("description", "")
         self._has_generated_draft = False
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = True
+        self.query_one("#loaded-task-execution-policy", Select).value = task.get("execution_policy", "manual")
         self.query_one("#command-output-mirror", RichLog).display = False
         self.query_one("#editor-toolbar", Horizontal).display = True
         self.query_one("#editor", TextArea).display = True
@@ -1728,6 +2082,17 @@ class HawkConsole(App[None]):
         return self.query_one("#editor", TextArea).text != self._editor_baseline
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "task-kind-select" and event.value == "collector":
+            artifact_type = self.query_one("#task-type-select", Select)
+            if artifact_type.value == "n8n":
+                artifact_type.value = "python"
+            return
+        if event.select.id == "task-type-select" and event.value == "n8n":
+            task_kind = self.query_one("#task-kind-select", Select)
+            if task_kind.value == "collector":
+                event.select.value = "python"
+                self.notify("Collector Tasks cannot use n8n workflow artifacts.", severity="warning")
+            return
         if event.select.id != "version-select" or self._suppress_version_event:
             return
         if event.select.is_blank or not self.current_task:
@@ -1746,6 +2111,8 @@ class HawkConsole(App[None]):
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id == "editor":
+            self._sync_editor_controls()
+        elif event.text_area.id == "task-description-input" and self.is_mounted:
             self._sync_editor_controls()
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -1776,6 +2143,7 @@ class HawkConsole(App[None]):
         self.query_one("#version-select", Select).disabled = not has_task
         self.query_one("#create-task", Button).disabled = not bool(
             self.query_one("#task-name-input", Input).value.strip()
+            and self.query_one("#task-description-input", TextArea).text.strip()
             and self.query_one("#task-category-input", Input).value.strip()
         )
 
@@ -1794,6 +2162,10 @@ class HawkConsole(App[None]):
             if prompt:
                 message_input.value = ""
                 self._submit_task_message(prompt)
+        elif event.button.id == "save-task-execution-policy":
+            self._save_task_execution_policy()
+        elif event.button.id == "save-loaded-task-description":
+            self._save_loaded_task_description()
         elif event.button.id == "cancel-edit":
             self._cancel_edit()
         elif event.button.id == "save-version":

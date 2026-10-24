@@ -147,8 +147,8 @@ def create_user(userid: str, password: str, role: str) -> dict:
         raise ValueError("User ID must contain between 1 and 128 characters")
     if len(password) < 8:
         raise ValueError("Password must contain at least 8 characters")
-    if role not in {"User", "Administrator"}:
-        raise ValueError("Role must be User or Administrator")
+    if role not in {"User", "Power User", "Administrator"}:
+        raise ValueError("Role must be User, Power User, or Administrator")
     now = _stamp(_now())
     with connect("server") as db:
         db.execute(

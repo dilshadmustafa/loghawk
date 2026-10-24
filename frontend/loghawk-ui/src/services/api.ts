@@ -13,6 +13,8 @@ import type {
   RagAnswer,
   RagIngestionJob,
   TaskInput,
+  TaskArtifact,
+  TaskExecutionPolicyInput,
   TaskMessageInput,
   TaskRecord,
 } from "../types/api";
@@ -66,7 +68,7 @@ export const changePassword = (current_password: string, new_password: string) =
   });
 export type AuthUser = { userid: string; role: string; active: boolean; created_at: string; updated_at: string };
 export const getUsers = () => request<AuthUser[]>("/auth/users");
-export const createUser = (userid: string, password: string, role: "User" | "Administrator") =>
+export const createUser = (userid: string, password: string, role: "User" | "Power User" | "Administrator") =>
   request<AuthUser>("/auth/users", { method: "POST", body: JSON.stringify({ userid, password, role }) });
 export const deleteUser = (userid: string) =>
   request<void>(`/auth/users/${encodeURIComponent(userid)}`, { method: "DELETE" });
@@ -144,7 +146,9 @@ export const getExternalRegions = () =>
 export const getExternalFolders = (bucket: string, region: string, prefix = "") =>
   request<string[]>(`/storage/external/folders?bucket=${encodeURIComponent(bucket)}&region=${encodeURIComponent(region)}&prefix=${encodeURIComponent(prefix)}`);
 
-export const getTasks = () => request<TaskRecord[]>("/tasks");
+export const getTasks = (query = "") => request<TaskRecord[]>(
+  `/tasks${query ? `?q=${encodeURIComponent(query)}` : ""}`,
+);
 export const createTask = (data: TaskInput) =>
   request<TaskRecord>("/tasks", {
     method: "POST",
@@ -152,12 +156,28 @@ export const createTask = (data: TaskInput) =>
   });
 export const getTask = (id: string) =>
   request<TaskRecord>(`/tasks/${encodeURIComponent(id)}`);
+export const setTaskExecutionPolicy = (id: string, data: TaskExecutionPolicyInput) =>
+  request<TaskRecord>(`/tasks/${encodeURIComponent(id)}/execution-policy`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+export const setTaskDescription = (id: string, description: string) =>
+  request<TaskRecord>(`/tasks/${encodeURIComponent(id)}/description`, {
+    method: "PUT",
+    body: JSON.stringify({ description }),
+  });
 export const deleteTask = (id: string) =>
   request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 export const saveTaskArtifact = (id: string, content: string) =>
   request<TaskRecord>(`/tasks/${encodeURIComponent(id)}/artifacts`, {
     method: "POST",
     body: JSON.stringify({ content }),
+  });
+export const approveTaskArtifact = (taskId: string, artifactId: string) =>
+  request<TaskArtifact>(`/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/approve`, { method: "POST" });
+export const setTaskArtifactEnabled = (taskId: string, artifactId: string, enabled: boolean) =>
+  request<TaskArtifact>(`/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/enabled`, {
+    method: "PUT", body: JSON.stringify({ enabled }),
   });
 export const deleteTaskArtifact = (taskId: string, artifactId: string) =>
   request<TaskRecord>(

@@ -255,6 +255,8 @@ else
     echo "Skipping Temporal server startup."
 fi
 
+bash "$ROOT_DIR/setup_tools.sh"
+
 echo "Setup complete."
 echo "RustFS console: http://localhost:9001"
 echo "Temporal UI: http://localhost:8233"

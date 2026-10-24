@@ -12,5 +12,6 @@ data/*
 .vscode
 loghawk.egg-info
 node_modules
+.env_tools
 
 

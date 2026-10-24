@@ -1,6 +1,8 @@
 export type RunMode = "train" | "detect" | "train-detect";
 export type PhaseMode = RunMode;
 export type TaskArtifactType = "n8n" | "python" | "bash" | "powershell" | "windows-cmd";
+export type TaskKind = "general" | "remediation" | "rollback" | "collector";
+export type TaskExecutionPolicy = "manual" | "ai-assisted" | "auto-approved" | "disabled";
 
 export interface TaskMessage {
   id: string;
@@ -14,13 +16,20 @@ export interface TaskArtifact {
   version: number;
   content: string;
   created_at: string;
+  approved: boolean;
+  enabled: boolean;
+  approved_by: string | null;
+  approved_at: string | null;
 }
 
 export interface TaskRecord {
   id: string;
   name: string;
+  description: string;
   userid: string | null;
   category: string;
+  task_kind: TaskKind;
+  execution_policy: TaskExecutionPolicy;
   artifact_type: TaskArtifactType;
   created_at: string;
   updated_at: string;
@@ -32,8 +41,19 @@ export interface TaskRecord {
 
 export interface TaskInput {
   name: string;
+  description: string;
   category: string;
+  task_kind: TaskKind;
+  execution_policy: TaskExecutionPolicy;
   artifact_type: TaskArtifactType;
+}
+
+export interface TaskDescriptionInput {
+  description: string;
+}
+
+export interface TaskExecutionPolicyInput {
+  execution_policy: TaskExecutionPolicy;
 }
 
 export interface TaskMessageInput {

@@ -95,6 +95,8 @@ echo "Setting up LanceDB"
 echo "============================================================"
 python -m loghawk.admin.setup_console_lancedb
 
+bash "$ROOT_DIR/setup_tools.sh"
+
 echo
 echo "Hawk Console setup complete."
 echo "Activate with:"

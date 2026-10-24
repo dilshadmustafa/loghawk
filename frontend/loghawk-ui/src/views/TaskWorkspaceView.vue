@@ -3,21 +3,31 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   createTask,
+  approveTaskArtifact,
   deleteTaskArtifact,
   getTask,
   importTaskToN8n,
   saveTaskArtifact,
   sendTaskMessage,
+  setTaskArtifactEnabled,
+  getCurrentUser,
+  setTaskExecutionPolicy,
+  setTaskDescription,
 } from "../services/api";
-import type { TaskArtifactType, TaskRecord } from "../types/api";
+import type { TaskArtifactType, TaskExecutionPolicy, TaskKind, TaskRecord } from "../types/api";
 
 const route = useRoute();
 const router = useRouter();
 const taskId = computed(() => typeof route.params.id === "string" ? route.params.id : "");
 const task = ref<TaskRecord | null>(null);
 const name = ref("");
+const description = ref("");
+const descriptionDraft = ref("");
 const category = ref("");
 const artifactType = ref<TaskArtifactType>("python");
+const taskKind = ref<TaskKind>("general");
+const executionPolicy = ref<TaskExecutionPolicy>("manual");
+const currentUser = ref<{ userid: string; role: string } | null>(null);
 const message = ref("");
 const editorContent = ref("");
 const savedBaseline = ref("");
@@ -26,6 +36,7 @@ const hasGeneratedDraft = ref(false);
 const loading = ref(false);
 const saving = ref(false);
 const savingArtifact = ref(false);
+const savingExecutionPolicy = ref(false);
 const deletingArtifact = ref(false);
 const sending = ref(false);
 const importingToN8n = ref(false);
@@ -40,6 +51,17 @@ const hasArtifactToEdit = computed(() =>
 const selectedVersion = computed(() =>
   task.value?.artifacts?.find((artifact) => artifact.id === selectedVersionId.value) ?? null,
 );
+const canManageTask = computed(() => Boolean(task.value && currentUser.value && (
+  ["Administrator", "Power User"].includes(currentUser.value.role)
+  || task.value.userid === currentUser.value.userid
+)));
+const canSetAutoApproved = computed(() =>
+  ["Administrator", "Power User"].includes(currentUser.value?.role || ""),
+);
+
+watch(taskKind, (kind) => {
+  if (kind === "collector" && artifactType.value === "n8n") artifactType.value = "python";
+});
 
 async function importSavedVersionToN8n() {
   if (
@@ -64,10 +86,13 @@ async function importSavedVersionToN8n() {
 }
 
 async function loadTask() {
+  try { currentUser.value = await getCurrentUser(); } catch { currentUser.value = null; }
   if (!taskId.value) { task.value = null; return; }
   loading.value = true;
   try {
     task.value = await getTask(taskId.value);
+    executionPolicy.value = task.value.execution_policy || "manual";
+    descriptionDraft.value = task.value.description || "";
     savedBaseline.value = task.value.latest_artifact?.content ?? "";
     editorContent.value = savedBaseline.value;
     selectedVersionId.value = task.value.latest_artifact?.id ?? "";
@@ -86,7 +111,10 @@ async function create() {
   try {
     const created = await createTask({
       name: name.value,
+      description: description.value,
       category: category.value,
+      task_kind: taskKind.value,
+      execution_policy: executionPolicy.value,
       artifact_type: artifactType.value,
     });
     await router.replace(`/tasks/${created.id}`);
@@ -95,6 +123,52 @@ async function create() {
   } finally {
     saving.value = false;
   }
+}
+
+async function saveDescription() {
+  if (!task.value || !descriptionDraft.value.trim()) return;
+  saving.value = true;
+  error.value = "";
+  try {
+    task.value = await setTaskDescription(task.value.id, descriptionDraft.value);
+    descriptionDraft.value = task.value.description;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not update Task description";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function saveExecutionPolicy() {
+  if (!task.value || executionPolicy.value === task.value.execution_policy) return;
+  savingExecutionPolicy.value = true;
+  error.value = "";
+  try {
+    task.value = await setTaskExecutionPolicy(task.value.id, {
+      execution_policy: executionPolicy.value,
+    });
+    executionPolicy.value = task.value.execution_policy;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Could not update execution policy";
+  } finally {
+    savingExecutionPolicy.value = false;
+  }
+}
+
+async function approveSelectedVersion() {
+  if (!task.value || !selectedVersion.value || hasUnsavedChanges.value) return;
+  try {
+    await approveTaskArtifact(task.value.id, selectedVersion.value.id);
+    await loadTask();
+  } catch (err) { error.value = err instanceof Error ? err.message : "Could not approve version"; }
+}
+
+async function toggleSelectedVersion() {
+  if (!task.value || !selectedVersion.value || hasUnsavedChanges.value) return;
+  try {
+    await setTaskArtifactEnabled(task.value.id, selectedVersion.value.id, !selectedVersion.value.enabled);
+    await loadTask();
+  } catch (err) { error.value = err instanceof Error ? err.message : "Could not update version status"; }
 }
 
 async function send() {
@@ -215,17 +289,48 @@ onMounted(() => void loadTask());
       <section class="card">
         <div class="form-grid">
           <label class="field">Task name<input v-model="name" placeholder="e.g. Restart unhealthy service" /></label>
+          <label class="field">Description · what this Task is for<textarea v-model="description" rows="3" placeholder="Describe the purpose, inputs, and outcome so users and the assistant can find the right Task." /></label>
           <label class="field">Category<input v-model="category" placeholder="e.g. Kubernetes" /></label>
           <label class="field">Artifact type
             <select v-model="artifactType"><option value="python">Python program</option><option value="bash">Bash</option><option value="powershell">PowerShell</option><option value="windows-cmd">Windows CMD</option><option value="n8n">n8n workflow JSON</option></select>
           </label>
+          <label class="field">Task kind
+            <select v-model="taskKind"><option value="general">General Task</option><option value="remediation">Remediation Task</option><option value="rollback">Rollback Task</option><option value="collector">Collector</option></select>
+          </label>
+          <label class="field">Execution policy
+            <select v-model="executionPolicy">
+              <option value="manual">Manual</option>
+              <option value="ai-assisted">AI-assisted</option>
+              <option value="auto-approved" :disabled="!canSetAutoApproved">Auto-approved</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
         </div>
       </section>
-      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim() || !category.trim()" @click="create">{{ saving ? "Creating…" : "Create Task" }}</button><RouterLink class="btn" to="/tasks">Cancel</RouterLink></div>
+      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim() || !description.trim() || !category.trim()" @click="create">{{ saving ? "Creating…" : "Create Task" }}</button><RouterLink class="btn" to="/tasks">Cancel</RouterLink></div>
     </template>
     <template v-else>
       <section class="card">
         <p><strong>Category:</strong> {{ task.category }}</p>
+        <div class="field task-description-field">
+          <label for="task-description">Description · what this Task is for</label>
+          <textarea id="task-description" v-model="descriptionDraft" rows="3" />
+          <button class="btn" :disabled="saving || !descriptionDraft.trim() || descriptionDraft === task.description" @click="saveDescription">{{ saving ? "Saving…" : "Save Description" }}</button>
+        </div>
+        <div class="form-grid execution-policy-setting">
+          <label class="field">Execution policy
+            <select v-model="executionPolicy">
+              <option value="manual">Manual</option>
+              <option value="ai-assisted">AI-assisted</option>
+              <option value="auto-approved" :disabled="!canSetAutoApproved">Auto-approved</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+          <button class="btn" :disabled="savingExecutionPolicy || executionPolicy === task.execution_policy" @click="saveExecutionPolicy">
+            {{ savingExecutionPolicy ? "Saving…" : "Save Execution Policy" }}
+          </button>
+          <p class="muted">AI-triggered runs are not connected yet. When available, AI may request only the existing approved and enabled version. Auto-approved removes per-run approval; it does not let AI change the Task code. Local development commands remain available for testing.</p>
+        </div>
         <div class="task-type-notice">
           <strong>Artifact type:</strong>
           {{ task.artifact_type === "n8n" ? "n8n workflow JSON" : task.artifact_type === "python" ? "Python program" : task.artifact_type === "windows-cmd" ? "Windows CMD script" : `${task.artifact_type} script` }}.
@@ -256,7 +361,7 @@ onMounted(() => void loadTask());
             @click="selectVersion(version)"
           >
             <span>Version {{ version.version }}</span>
-            <small>{{ new Date(version.created_at).toLocaleString() }}</small>
+            <small>{{ new Date(version.created_at).toLocaleString() }} · {{ version.approved ? "Approved" : "Pending approval" }} · {{ version.enabled ? "Enabled" : "Disabled" }}</small>
           </button>
         </div>
       </section>
@@ -287,6 +392,11 @@ onMounted(() => void loadTask());
           </div>
         </div>
         <label class="field artifact-field">Code<textarea v-model="editorContent" rows="20" spellcheck="false" /></label>
+        <div v-if="selectedVersion && !hasGeneratedDraft" class="actions policy-actions">
+          <button v-if="!selectedVersion.approved && ['Administrator', 'Power User'].includes(currentUser?.role || '')" class="btn" :disabled="hasUnsavedChanges" @click="approveSelectedVersion">Approve Version</button>
+          <button v-if="canManageTask" class="btn" :disabled="hasUnsavedChanges" @click="toggleSelectedVersion">{{ selectedVersion.enabled ? "Disable Version" : "Enable Version" }}</button>
+          <span>API execution requires an approved and enabled version.</span>
+        </div>
         <div class="actions">
           <button class="btn primary" :disabled="savingArtifact || !hasUnsavedChanges || !editorContent.trim()" @click="saveVersion">{{ savingArtifact ? "Saving…" : "Save Version" }}</button>
           <button class="btn" :disabled="savingArtifact || !hasUnsavedChanges" @click="cancelEdit">Cancel</button>
@@ -311,6 +421,7 @@ onMounted(() => void loadTask());
 .message p { margin: .35rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer { display: grid; gap: .75rem; }
 textarea { width: 100%; padding: .7rem .75rem; color: #e8edf2; background: #17232d; border: 1px solid #344553; border-radius: .45rem; resize: vertical; }
+.task-description-field { display: grid; gap: .5rem; max-width: 60rem; }
 .artifact-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .artifact-header h2 { margin-bottom: 0; }
 .artifact-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
@@ -319,5 +430,7 @@ textarea { width: 100%; padding: .7rem .75rem; color: #e8edf2; background: #1723
 .version-button { display: grid; gap: .25rem; padding: .6rem .75rem; color: #d8e1e7; background: #17232d; border: 1px solid #344553; border-radius: .45rem; text-align: left; cursor: pointer; }
 .version-button.selected { border-color: #6bd7bb; box-shadow: 0 0 0 1px #6bd7bb; }
 .version-button small { color: #aebbc7; }
+.policy-actions { align-items: center; }
+.policy-actions span { color: #aebbc7; font-size: .9rem; }
 @media (max-width: 520px) { .artifact-header { align-items: flex-start; flex-direction: column; } }
 </style>

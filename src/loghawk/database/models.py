@@ -11,6 +11,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false,
     true,
 )
 
@@ -24,8 +25,11 @@ def _task_tables(metadata: MetaData) -> dict[str, Table]:
         "tasks", metadata,
         Column("id", String, primary_key=True),
         Column("name", String, nullable=False, unique=True),
+        Column("description", Text, nullable=False, server_default=""),
         Column("userid", String, nullable=True),
         Column("category", String, nullable=False, server_default="Uncategorized"),
+        Column("task_kind", String, nullable=False, server_default="general"),
+        Column("execution_policy", String, nullable=False, server_default="manual"),
         Column("artifact_type", String, nullable=False),
         Column("created_at", String, nullable=False),
         Column("updated_at", String, nullable=False),
@@ -49,6 +53,10 @@ def _task_tables(metadata: MetaData) -> dict[str, Table]:
         Column("content", Text, nullable=False),
         Column("created_at", String, nullable=False),
         Column("deleted_at", String, nullable=True),
+        Column("approved", Boolean, nullable=False, server_default=false()),
+        Column("enabled", Boolean, nullable=False, server_default=false()),
+        Column("approved_by", String, nullable=True),
+        Column("approved_at", String, nullable=True),
         UniqueConstraint("task_id", "version", name="uq_task_artifacts_task_version"),
     )
     return {"tasks": tasks, "task_messages": messages, "task_artifacts": artifacts}
@@ -123,6 +131,51 @@ auth_sessions = Table(
     Column("revoked_at", String),
 )
 Index("auth_sessions_userid", auth_sessions.c.userid)
+
+collector_registry = Table(
+    "collector_registry", SERVER_METADATA,
+    Column("name", String, primary_key=True),
+    Column("version", String, nullable=False),
+    Column("display_name", String, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("arguments_schema_json", Text, nullable=False),
+    Column("approved", Boolean, nullable=False, server_default=true()),
+    Column("enabled", Boolean, nullable=False, server_default=true()),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+collector_runs = Table(
+    "collector_runs", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("collector_name", String, ForeignKey("collector_registry.name"), nullable=False),
+    Column("collector_version", String, nullable=False),
+    Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False),
+    Column("argument_keys_json", Text, nullable=False),
+    Column("result_summary", Text),
+    Column("error_type", String),
+    Column("started_at", String, nullable=False),
+    Column("completed_at", String),
+)
+Index("collector_runs_user_started", collector_runs.c.userid, collector_runs.c.started_at)
+Index("collector_runs_name_started", collector_runs.c.collector_name, collector_runs.c.started_at)
+
+task_runs = Table(
+    "task_runs", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("task_id", String, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False),
+    Column("artifact_id", String, nullable=False),
+    Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("status", String, nullable=False),
+    Column("exit_code", Integer),
+    Column("stdout", Text),
+    Column("stderr", Text),
+    Column("error_type", String),
+    Column("started_at", String, nullable=False),
+    Column("completed_at", String),
+)
+Index("task_runs_user_started", task_runs.c.userid, task_runs.c.started_at)
+Index("task_runs_task_started", task_runs.c.task_id, task_runs.c.started_at)
 
 console_llm_history = Table(
     "console_llm_history", SERVER_METADATA,

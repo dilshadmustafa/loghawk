@@ -1,10 +1,12 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 RunMode = Literal["train", "detect", "train-detect"]
 TaskArtifactType = Literal["n8n", "python", "bash", "powershell", "windows-cmd"]
+TaskKind = Literal["general", "remediation", "rollback", "collector"]
+TaskExecutionPolicy = Literal["manual", "ai-assisted", "auto-approved", "disabled"]
 
 
 class LoginRequest(BaseModel):
@@ -16,7 +18,7 @@ class LoginRequest(BaseModel):
 class UserCreate(BaseModel):
     userid: str
     password: str
-    role: Literal["User", "Administrator"] = "User"
+    role: Literal["User", "Power User", "Administrator"] = "User"
 
 
 class PasswordChange(BaseModel):
@@ -33,8 +35,17 @@ class PasswordChange(BaseModel):
 
 class TaskWrite(BaseModel):
     name: str
+    description: str
     category: str = "Uncategorized"
+    task_kind: TaskKind = "general"
+    execution_policy: TaskExecutionPolicy = "manual"
     artifact_type: TaskArtifactType
+
+    @model_validator(mode="after")
+    def validate_task_kind(self):
+        if self.task_kind == "collector" and self.artifact_type == "n8n":
+            raise ValueError("Collector Tasks must use Python, Bash, PowerShell, or Windows CMD artifacts.")
+        return self
 
     @field_validator("name")
     @classmethod
@@ -44,12 +55,36 @@ class TaskWrite(BaseModel):
             raise ValueError("Task name is required")
         return value
 
+    @field_validator("description")
+    @classmethod
+    def validate_task_description(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Task description is required")
+        return value
+
     @field_validator("category")
     @classmethod
     def validate_task_category(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("Task category is required")
+        return value.upper()
+
+
+class TaskExecutionPolicyWrite(BaseModel):
+    execution_policy: TaskExecutionPolicy
+
+
+class TaskDescriptionWrite(BaseModel):
+    description: str
+
+    @field_validator("description")
+    @classmethod
+    def validate_task_description(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Task description is required")
         return value
 
 class TaskMessageWrite(BaseModel):
@@ -85,6 +120,15 @@ class TaskArtifactImport(BaseModel):
         if not value:
             raise ValueError("Save a Task version before importing it")
         return value
+
+
+class TaskArtifactEnabled(BaseModel):
+    enabled: bool
+
+
+class TaskRunRequest(BaseModel):
+    artifact_id: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExternalS3Source(BaseModel):

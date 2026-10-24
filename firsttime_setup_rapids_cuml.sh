@@ -253,6 +253,8 @@ fi
 
 conda deactivate
 
+bash "$ROOT_DIR/setup_tools.sh"
+
 echo
 echo "NVIDIA GPU setup complete."
 echo "Activate the environment in each new terminal with:"

@@ -20,7 +20,8 @@ def _connect(database_role: str = "server"):
 
 def _artifact(connection, task_id: str) -> dict | None:
     row = connection.execute(
-        """SELECT id, version, content, created_at FROM task_artifacts
+        """SELECT id, version, content, created_at, approved, enabled,
+                  approved_by, approved_at FROM task_artifacts
            WHERE task_id = ? AND deleted_at IS NULL
            ORDER BY version DESC LIMIT 1""",
         (task_id,),
@@ -30,7 +31,8 @@ def _artifact(connection, task_id: str) -> dict | None:
 
 def _artifacts(connection, task_id: str) -> list[dict]:
     rows = connection.execute(
-        """SELECT id, version, content, created_at FROM task_artifacts
+        """SELECT id, version, content, created_at, approved, enabled,
+                  approved_by, approved_at FROM task_artifacts
            WHERE task_id = ? AND deleted_at IS NULL ORDER BY version DESC""",
         (task_id,),
     ).fetchall()
@@ -53,12 +55,36 @@ def _task(connection, row, *, include_messages: bool) -> dict:
     return result
 
 
-def list_tasks(database_role: str = "server") -> list[dict]:
+def list_tasks(database_role: str = "server", query: str = "") -> list[dict]:
     with _connect(database_role) as connection:
         rows = connection.execute(
             "SELECT * FROM tasks ORDER BY updated_at DESC, name COLLATE NOCASE"
         ).fetchall()
-        return [_task(connection, row, include_messages=False) for row in rows]
+        tasks = [_task(connection, row, include_messages=False) for row in rows]
+    if not query.strip():
+        return tasks
+    terms = [term.casefold() for term in query.split() if len(term) > 2]
+    if not terms:
+        terms = [query.casefold()]
+    scored = []
+    for task in tasks:
+        fields = {
+            "name": str(task.get("name") or "").casefold(),
+            "description": str(task.get("description") or "").casefold(),
+            "category": str(task.get("category") or "").casefold(),
+            "task_kind": str(task.get("task_kind") or "").casefold(),
+        }
+        score = sum(
+            (4 if term in fields["name"] else 0)
+            + (3 if term in fields["description"] else 0)
+            + (2 if term in fields["category"] else 0)
+            + (1 if term in fields["task_kind"] else 0)
+            for term in terms
+        )
+        if score:
+            scored.append((score, task))
+    scored.sort(key=lambda item: (-item[0], item[1]["name"].casefold()))
+    return [task for _, task in scored]
 
 
 def get_task(task_id: str, database_role: str = "server") -> dict | None:
@@ -72,7 +98,8 @@ def get_task(task_id: str, database_role: str = "server") -> dict | None:
 def get_artifact_version(task_id: str, artifact_id: str, database_role: str = "server") -> dict | None:
     with _connect(database_role) as connection:
         row = connection.execute(
-            """SELECT id, version, content, created_at FROM task_artifacts
+            """SELECT id, version, content, created_at, approved, enabled,
+                      approved_by, approved_at FROM task_artifacts
                WHERE task_id = ? AND id = ? AND deleted_at IS NULL""",
             (task_id, artifact_id),
         ).fetchone()
@@ -103,13 +130,17 @@ def create_task(data: dict, database_role: str = "server") -> dict:
     with _connect(database_role) as connection:
         connection.execute(
             """INSERT INTO tasks
-               (id, name, category, artifact_type, created_at, updated_at, userid)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (id, name, category, task_kind, execution_policy, artifact_type,
+                description, created_at, updated_at, userid)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task_id,
                 data["name"],
-                data.get("category") or "Uncategorized",
+                (data.get("category") or "Uncategorized").strip().upper(),
+                data.get("task_kind") or "general",
+                data.get("execution_policy") or "manual",
                 data["artifact_type"],
+                data.get("description", "").strip(),
                 now,
                 now,
                 get_userid(),
@@ -118,6 +149,32 @@ def create_task(data: dict, database_role: str = "server") -> dict:
     task = get_task(task_id, database_role)
     assert task is not None
     return task
+
+
+def set_task_description(
+    task_id: str, description: str, database_role: str = "server"
+) -> dict | None:
+    with _connect(database_role) as connection:
+        connection.execute(
+            "UPDATE tasks SET description = ?, updated_at = ? WHERE id = ?",
+            (description.strip(), _now(), task_id),
+        )
+    return get_task(task_id, database_role)
+
+
+def relevant_tasks(query: str, database_role: str = "server", limit: int = 5) -> list[dict]:
+    return list_tasks(database_role, query)[:limit]
+
+
+def set_task_execution_policy(
+    task_id: str, execution_policy: str, database_role: str = "server"
+) -> dict | None:
+    with _connect(database_role) as connection:
+        connection.execute(
+            "UPDATE tasks SET execution_policy = ?, updated_at = ? WHERE id = ?",
+            (execution_policy, _now(), task_id),
+        )
+    return get_task(task_id, database_role)
 
 
 def add_message(task_id: str, role: str, content: str, database_role: str = "server") -> dict | None:
@@ -168,15 +225,16 @@ def save_artifact(task_id: str, content: str, database_role: str = "server") -> 
         artifact_id = uuid4().hex
         connection.execute(
             """INSERT INTO task_artifacts
-               (id, task_id, version, content, created_at, userid)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (artifact_id, task_id, version, content, now, get_userid()),
+               (id, task_id, version, content, created_at, userid, approved, enabled)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (artifact_id, task_id, version, content, now, get_userid(), False, False),
         )
         connection.execute(
             "UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id)
         )
         saved = connection.execute(
-            """SELECT id, version, content, created_at FROM task_artifacts
+            """SELECT id, version, content, created_at, approved, enabled,
+                      approved_by, approved_at FROM task_artifacts
                WHERE id = ?""",
             (artifact_id,),
         ).fetchone()
@@ -187,3 +245,48 @@ def save_artifact(task_id: str, content: str, database_role: str = "server") -> 
     finally:
         connection.close()
     return dict(saved)
+
+
+def set_artifact_policy(
+    task_id: str, artifact_id: str, *, approved: bool | None = None,
+    enabled: bool | None = None, approved_by: str | None = None,
+    database_role: str = "server",
+) -> dict | None:
+    updates = []
+    values = []
+    if approved is not None:
+        updates.extend(("approved = ?", "approved_by = ?", "approved_at = ?"))
+        values.extend((approved, approved_by if approved else None, _now() if approved else None))
+    if enabled is not None:
+        updates.append("enabled = ?")
+        values.append(enabled)
+    if not updates:
+        return get_artifact_version(task_id, artifact_id, database_role)
+    values.extend((task_id, artifact_id))
+    with _connect(database_role) as connection:
+        connection.execute(
+            f"UPDATE task_artifacts SET {', '.join(updates)} "
+            "WHERE task_id = ? AND id = ? AND deleted_at IS NULL", values
+        )
+    return get_artifact_version(task_id, artifact_id, database_role)
+
+
+def start_task_run(task_id: str, artifact_id: str, userid: str) -> tuple[str, str]:
+    run_id, started_at = uuid4().hex, _now()
+    with _connect("server") as connection:
+        connection.execute(
+            """INSERT INTO task_runs (id, task_id, artifact_id, userid, status, started_at)
+               VALUES (?, ?, ?, ?, 'RUNNING', ?)""",
+            (run_id, task_id, artifact_id, userid, started_at),
+        )
+    return run_id, started_at
+
+
+def finish_task_run(run_id: str, result: dict) -> None:
+    with _connect("server") as connection:
+        connection.execute(
+            """UPDATE task_runs SET status = ?, exit_code = ?, stdout = ?, stderr = ?,
+                      error_type = ?, completed_at = ? WHERE id = ?""",
+            (result["status"], result.get("exit_code"), result.get("stdout"),
+             result.get("stderr"), result.get("error_type"), _now(), run_id),
+        )

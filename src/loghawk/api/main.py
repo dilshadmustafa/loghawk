@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from loghawk.api.routers.config_sets2 import router as config_sets_router
 from loghawk.api.routers.auth import require_authenticated_user, router as auth_router
 from loghawk.api.routers.console import router as console_router
+from loghawk.api.routers.collectors import router as collectors_router
 from loghawk.api.routers.pipeline_runs import router as pipeline_runs_router
 from loghawk.api.routers.pipelines2 import router as pipelines_router
 from loghawk.api.routers.rag import router as rag_router
@@ -15,6 +16,7 @@ from loghawk.api.routers.tasks2 import router as tasks_router
 from loghawk.api.services.rag_store import fail_interrupted_jobs
 from loghawk.api.services.auth_service import initialize_auth
 from loghawk.api.services import auth_service
+from loghawk.collectors.registry import ensure_registered as ensure_collectors_registered
 from loghawk.utils.user_identity import set_userid_override, reset_userid_override
 
 
@@ -28,6 +30,7 @@ _authenticated = [Depends(require_authenticated_user)]
 
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(console_router, prefix="/api/v1/console", tags=["console"])
+app.include_router(collectors_router, prefix="/api/v1/console/collectors", tags=["collectors"])
 app.include_router(
     storage_router, prefix="/api/v1/storage", tags=["storage"],
     dependencies=_authenticated,
@@ -104,6 +107,11 @@ def recover_interrupted_rag_jobs() -> None:
 @app.on_event("startup")
 def seed_administrator() -> None:
     initialize_auth()
+
+
+@app.on_event("startup")
+def seed_collector_registry() -> None:
+    ensure_collectors_registered()
 
 
 @app.get("/api/v1/health")

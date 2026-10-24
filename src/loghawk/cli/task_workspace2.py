@@ -9,9 +9,13 @@ from loghawk.api.services import task_store2 as task_store
 _DATABASE_ROLE = "console"
 
 
-def list_tasks() -> list[dict]:
+def list_tasks(query: str = "") -> list[dict]:
     """Return saved Tasks from Hawk Console's local database."""
-    return task_store.list_tasks(_DATABASE_ROLE)
+    return task_store.list_tasks(_DATABASE_ROLE, query)
+
+
+def relevant_tasks(query: str, limit: int = 5) -> list[dict]:
+    return task_store.relevant_tasks(query, _DATABASE_ROLE, limit)
 
 
 def find_task_by_name(name: str) -> dict | None:
@@ -27,16 +31,30 @@ def get_task(task_id: str) -> dict | None:
     return task_store.get_task(task_id, _DATABASE_ROLE)
 
 
-def create_task(name: str, category: str, artifact_type: str) -> dict:
+def create_task(
+    name: str, description: str, category: str, artifact_type: str, task_kind: str = "general",
+    execution_policy: str = "manual",
+) -> dict:
     """Create a Task in Hawk Console's local database."""
     return task_store.create_task(
         {
             "name": name.strip(),
+            "description": description.strip(),
             "category": category.strip(),
+            "task_kind": task_kind,
+            "execution_policy": execution_policy,
             "artifact_type": artifact_type,
         },
         _DATABASE_ROLE,
     )
+
+
+def set_description(task_id: str, description: str) -> dict | None:
+    return task_store.set_task_description(task_id, description, _DATABASE_ROLE)
+
+
+def set_execution_policy(task_id: str, execution_policy: str) -> dict | None:
+    return task_store.set_task_execution_policy(task_id, execution_policy, _DATABASE_ROLE)
 
 
 def respond_to_message(task_id: str, content: str) -> dict | None:

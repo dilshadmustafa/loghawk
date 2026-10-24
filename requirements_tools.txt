@@ -1,0 +1,5 @@
+# Optional dependencies for the read-only collectors.
+python-dotenv
+requests
+kubernetes
+prometheus-client

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from loghawk.cli.console_api_client import ConsoleApiClient
 
 
@@ -9,8 +11,9 @@ class ConsoleApiTaskWorkspace:
     def __init__(self, client: ConsoleApiClient):
         self.client = client
 
-    def list_tasks(self) -> list[dict]:
-        return self.client.get_json("/api/v1/tasks")
+    def list_tasks(self, query: str = "") -> list[dict]:
+        suffix = f"?{urlencode({'q': query})}" if query else ""
+        return self.client.get_json(f"/api/v1/tasks{suffix}")
 
     def find_task_by_name(self, name: str) -> dict | None:
         normalized = name.strip().casefold()
@@ -27,10 +30,26 @@ class ConsoleApiTaskWorkspace:
                 return None
             raise
 
-    def create_task(self, name: str, category: str, artifact_type: str) -> dict:
+    def create_task(
+        self, name: str, description: str, category: str, artifact_type: str,
+        task_kind: str = "general", execution_policy: str = "manual",
+    ) -> dict:
         return self.client.post_json(
             "/api/v1/tasks",
-            {"name": name, "category": category, "artifact_type": artifact_type},
+            {"name": name, "description": description, "category": category, "task_kind": task_kind,
+             "execution_policy": execution_policy, "artifact_type": artifact_type},
+        )
+
+
+    def set_description(self, task_id: str, description: str) -> dict:
+        return self.client.put_json(
+            f"/api/v1/tasks/{task_id}/description", {"description": description}
+        )
+
+    def set_execution_policy(self, task_id: str, execution_policy: str) -> dict:
+        return self.client.put_json(
+            f"/api/v1/tasks/{task_id}/execution-policy",
+            {"execution_policy": execution_policy},
         )
 
     def respond_to_message(self, task_id: str, content: str) -> dict | None:

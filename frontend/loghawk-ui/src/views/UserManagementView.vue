@@ -3,7 +3,7 @@ import { onMounted, ref } from "vue";
 import { createUser, deleteUser, getCurrentUser, getUsers, type AuthUser } from "../services/api";
 
 const users = ref<AuthUser[]>([]);
-const userid = ref(""); const password = ref(""); const confirmPassword = ref(""); const role = ref<"User" | "Administrator">("User");
+const userid = ref(""); const password = ref(""); const confirmPassword = ref(""); const role = ref<"User" | "Power User" | "Administrator">("User");
 const error = ref(""); const success = ref(""); const busy = ref(false); const deletingUserid = ref("");
 const currentUserid = ref("");
 async function refresh() {
@@ -50,7 +50,7 @@ onMounted(() => { void refresh().catch((err) => { error.value = err instanceof E
     <form class="card form-grid" @submit.prevent="submit">
       <label class="field">User ID<input v-model="userid" autocomplete="off" required /></label>
       <label class="field">Initial password<input v-model="password" type="password" minlength="8" required /></label>
-      <label class="field">Role<select v-model="role"><option>User</option><option>Administrator</option></select></label>
+      <label class="field">Role<select v-model="role"><option>User</option><option>Power User</option><option>Administrator</option></select></label>
       <label class="field">Confirm password<input v-model="confirmPassword" type="password" minlength="8" required /></label>
       <p v-if="confirmPassword && password !== confirmPassword" class="error" style="grid-column:1/-1">Passwords do not match.</p>
       <p class="muted" style="grid-column:1/-1">Users can change their password from Account Settings after signing in.</p>

@@ -49,6 +49,9 @@ echo ============================================================
 "%PYTHON%" -m loghawk.admin.setup_console_lancedb
 if errorlevel 1 goto :failed
 
+call "%~dp0setup_tools.bat"
+if errorlevel 1 goto :failed
+
 echo.
 echo Hawk Console setup complete.
 echo Activate with:

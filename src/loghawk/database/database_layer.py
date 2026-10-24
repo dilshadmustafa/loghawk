@@ -190,9 +190,16 @@ def migrate_existing_schema(connection, role: str) -> None:
     metadata.create_all(connection)
     inspector = inspect(connection)
     additions = {
-        "tasks": {"userid": "VARCHAR", "category": "VARCHAR DEFAULT 'Uncategorized'"},
+        "tasks": {
+            "userid": "VARCHAR", "category": "VARCHAR DEFAULT 'Uncategorized'",
+            "task_kind": "VARCHAR DEFAULT 'general'",
+        },
         "task_messages": {"userid": "VARCHAR"},
-        "task_artifacts": {"userid": "VARCHAR", "deleted_at": "VARCHAR"},
+        "task_artifacts": {
+            "userid": "VARCHAR", "deleted_at": "VARCHAR",
+            "approved": "BOOLEAN DEFAULT FALSE", "enabled": "BOOLEAN DEFAULT FALSE",
+            "approved_by": "VARCHAR", "approved_at": "VARCHAR",
+        },
     }
     if role == "console":
         additions.update({

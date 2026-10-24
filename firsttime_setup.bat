@@ -136,6 +136,9 @@ docker-compose -f src\loghawk\admin\temporal-docker-compose.yml up -d
 if errorlevel 1 goto :failed
 )
 
+call "%~dp0setup_tools.bat"
+if errorlevel 1 goto :failed
+
 echo Setup complete.
 echo Activate the environment:
 echo   PowerShell: .\venv312\Scripts\Activate.ps1

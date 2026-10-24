@@ -35,6 +35,9 @@ class ConsoleApiClient:
     def post_json(self, path: str, body: dict, *, timeout: int = 60) -> Any:
         return self._request("POST", path, json=body, timeout=timeout).json()
 
+    def put_json(self, path: str, body: dict) -> Any:
+        return self._request("PUT", path, json=body).json()
+
     def delete(self, path: str) -> bool:
         response = self._request("DELETE", path)
         return response.status_code in {200, 202, 204}
