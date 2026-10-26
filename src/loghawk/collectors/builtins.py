@@ -7,9 +7,12 @@ DEFINITIONS = {
     "prometheus-query": {
         "version": "1",
         "display_name": "Prometheus query",
-        "description": "Run a bounded, read-only instant PromQL query.",
+        "description": "Query Prometheus metrics, including Kubernetes metrics, using PromQL. Examples: up, node_cpu_seconds_total, kube_pod_info. Do not pass shell commands such as kubectl.",
         "arguments_schema": {
-            "query": {"type": "string", "required": True, "max_length": 2000},
+            "query": {
+                "type": "string", "required": True, "max_length": 2000,
+                "description": "A PromQL expression, not a shell command. Example: rate(node_cpu_seconds_total[5m]).",
+            },
         },
     },
     "kubernetes-pods": {

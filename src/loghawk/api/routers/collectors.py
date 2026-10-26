@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from loghawk.api.routers.auth import require_console_user
+from loghawk.api.schemas import TaskExecutionPolicyWrite
 from loghawk.collectors import registry as collector_registry
 from loghawk.api.services import task_store2, task_runner
 
@@ -36,8 +37,8 @@ def list_collectors() -> list[dict]:
         custom.append({
             "name": task["name"], "display_name": task["name"],
             "version": str(artifact.get("version", 0)),
-            "description": f"Custom collector Task in category {task.get('category', 'Uncategorized')}.",
-            "arguments_schema": {"arguments": {"type": "object", "required": False}},
+            "description": task.get("description", ""),
+            "arguments_schema": artifact.get("arguments_schema"),
             "approved": bool(artifact.get("approved")),
             "enabled": bool(artifact.get("enabled")),
             "execution_policy": task.get("execution_policy", "manual"),
@@ -65,7 +66,7 @@ def get_collector(name: str) -> dict:
             "execution_policy": task.get("execution_policy", "manual"),
             "approved": bool(artifact.get("approved")),
             "enabled": bool(artifact.get("enabled")),
-            "description": f"Custom collector Task in category {task.get('category', 'Uncategorized')}.",
+            "description": task.get("description", ""),
         }
     return collector
 
@@ -127,3 +128,13 @@ def run_collector(name: str, body: CollectorRunRequest, user: dict = Depends(req
             status_code=502,
             detail="Collector execution failed. Check the API server log for details.",
         ) from exc
+
+
+@router.put("/{name}/execution-policy")
+def set_execution_policy(name: str, body: TaskExecutionPolicyWrite,
+                         user: dict = Depends(require_console_user)) -> dict:
+    if user["role"] not in {"Administrator", "Power User"}:
+        raise HTTPException(status_code=403, detail="Only Administrators and Power Users can set built-in collector policies.")
+    if not collector_registry.set_execution_policy(name, body.execution_policy):
+        raise HTTPException(status_code=404, detail="Built-in collector not found. Edit custom collector policies through Tasks.")
+    return collector_registry.get_collector(name)

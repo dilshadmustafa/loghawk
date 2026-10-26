@@ -5,8 +5,8 @@ from __future__ import annotations
 from uuid import UUID
 from typing import Literal
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, StrictBool
 
 from loghawk.api.routers.auth import require_console_user
 from loghawk.database.database_layer import connect
@@ -20,6 +20,7 @@ router = APIRouter(dependencies=[Depends(require_console_user)])
 
 class ChatRequest(BaseModel):
     messages: list[dict[str, str]] = Field(min_length=1)
+    review_arguments: StrictBool = True
 
 
 class CommandRequest(BaseModel):
@@ -48,49 +49,12 @@ class HistoryBatch(BaseModel):
 
 
 @router.post("/chat")
-def chat(body: ChatRequest) -> dict[str, str]:
-    candidates = [config.LH_LLM_MODEL, *config.LH_LLM_FALLBACK_MODELS]
-    last_error = None
-    for model in dict.fromkeys(item for item in candidates if item):
-        try:
-            messages = list(body.messages)
-            latest_user_message = next(
-                (item.get("content", "") for item in reversed(messages)
-                 if item.get("role") == "user"),
-                "",
-            )
-            matching_tasks = task_store.relevant_tasks(latest_user_message)
-            if matching_tasks:
-                details = []
-                for task in matching_tasks:
-                    artifact = task.get("latest_artifact") or {}
-                    approval = "none" if artifact.get("version") is None else (
-                        "approved" if artifact.get("approved") else "not approved"
-                    )
-                    enabled = "enabled" if artifact.get("enabled") else "disabled"
-                    details.append(
-                        f"- name={task['name']}; description={task.get('description', '')}; "
-                        f"category={task.get('category', '')}; kind={task.get('task_kind', 'general')}; "
-                        f"type={task.get('artifact_type', '')}; policy={task.get('execution_policy', 'manual')}; "
-                        f"latest_version={artifact.get('version', 'none')}; "
-                        f"approval_status={approval}; enabled_status={enabled}"
-                    )
-                messages.insert(0, {
-                    "role": "system",
-                    "content": (
-                        "Potentially relevant saved LogHawk Tasks are listed below. Use them to answer "
-                        "questions about existing tasks or to recommend a suitable task. Do not claim "
-                        "to run, approve, enable, or modify a task. State its execution policy and "
-                        "latest-version approval/enabled status when relevant.\n" + "\n".join(details)
-                    ),
-                })
-            response = get_llm_client().complete(
-                messages, model=model, temperature=0.3
-            )
-            return {"response": response}
-        except Exception as exc:
-            last_error = exc
-    raise RuntimeError(f"Configured LLM request failed: {last_error}")
+def chat(body: ChatRequest, user: dict = Depends(require_console_user)) -> dict:
+    from loghawk.api.services import assistant_chat_service
+    return assistant_chat_service.chat(
+        body.messages, user["userid"], origin_software="console",
+        review_arguments=body.review_arguments,
+    )
 
 
 @router.post("/command")
@@ -172,3 +136,22 @@ def save_history(body: HistoryBatch, user: dict = Depends(require_console_user))
                 (user["userid"], item.terminal_id, user["userid"], item.terminal_id),
             )
     return {"saved_llm_messages": saved_chats, "saved_commands": saved_commands}
+
+
+class ToolConfirmation(BaseModel):
+    confirmation_id: str = Field(min_length=1, max_length=64)
+    approved: StrictBool
+    arguments: dict[str, object] | None = None
+
+
+@router.post("/chat/{request_id}/confirm")
+def confirm_collector(request_id: str, body: ToolConfirmation,
+                      user: dict = Depends(require_console_user)) -> dict:
+    from loghawk.api.services import collector_tool_service
+    try:
+        return collector_tool_service.resume(request_id, user["userid"], body.confirmation_id, body.approved, origin_software="console", arguments=body.arguments)
+    except collector_tool_service.ArgumentReviewError as exc:
+        raise HTTPException(status_code=422, detail=str(exc),
+                            headers={"X-LogHawk-Execution": "not-started"}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -26,6 +26,13 @@ export const getAuthToken = () => sessionStorage.getItem(AUTH_TOKEN_KEY) || "";
 export const setAuthToken = (token: string) => sessionStorage.setItem(AUTH_TOKEN_KEY, token);
 export const clearAuthToken = () => sessionStorage.removeItem(AUTH_TOKEN_KEY);
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public executionNotStarted = false) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -37,7 +44,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail ?? `Request failed (${response.status})`);
+    throw new ApiError(
+      typeof body.detail === "string" ? body.detail : `Request failed (${response.status})`,
+      response.status, response.headers.get("X-LogHawk-Execution") === "not-started",
+    );
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -168,10 +178,10 @@ export const setTaskDescription = (id: string, description: string) =>
   });
 export const deleteTask = (id: string) =>
   request<void>(`/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
-export const saveTaskArtifact = (id: string, content: string) =>
+export const saveTaskArtifact = (id: string, content: string, arguments_schema: Record<string, unknown> | null = null) =>
   request<TaskRecord>(`/tasks/${encodeURIComponent(id)}/artifacts`, {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, arguments_schema }),
   });
 export const approveTaskArtifact = (taskId: string, artifactId: string) =>
   request<TaskArtifact>(`/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/approve`, { method: "POST" });
@@ -201,3 +211,28 @@ export const importTaskToN8n = (id: string, artifactId: string) =>
 
 export const externalSourceUrl = (source: ExternalS3Source) =>
   `s3://${source.bucket}/${source.folder ? `${source.folder.replace(/^\/+|\/+$/g, "")}/` : ""}`;
+
+export const sendRcaMessage = (messages: import("../types/api").RcaMessage[], reviewArguments = true) =>
+  request<import("../types/api").RcaAnswer>("/rca/chat", {
+    method: "POST", body: JSON.stringify({ messages, review_arguments: reviewArguments }),
+  });
+export const confirmRcaCollector = (requestId: string, confirmationId: string, approved: boolean, reviewedArguments?: Record<string, unknown>) =>
+  request<import("../types/api").RcaAnswer>(`/rca/chat/${encodeURIComponent(requestId)}/confirm`, {
+    method: "POST", body: JSON.stringify({ confirmation_id: confirmationId, approved, arguments: reviewedArguments }),
+  });
+
+export const getBuiltinCollectors = () =>
+  request<import("../types/api").BuiltinCollector[]>("/builtin-collectors");
+export const setBuiltinCollectorEnabled = (name: string, enabled: boolean) =>
+  request<{ name: string; enabled: boolean }>(`/builtin-collectors/${encodeURIComponent(name)}/enabled`, {
+    method: "PUT", body: JSON.stringify({ enabled }),
+  });
+export const setBuiltinCollectorPolicy = (name: string, execution_policy: import("../types/api").TaskExecutionPolicy) =>
+  request<{ name: string; execution_policy: import("../types/api").TaskExecutionPolicy }>(`/builtin-collectors/${encodeURIComponent(name)}/execution-policy`, {
+    method: "PUT", body: JSON.stringify({ execution_policy }),
+  });
+
+export const setBuiltinCollectorApproved = (name: string, approved: boolean) =>
+  request<{ name: string; approved: boolean }>(`/builtin-collectors/${encodeURIComponent(name)}/approved`, {
+    method: "PUT", body: JSON.stringify({ approved }),
+  });

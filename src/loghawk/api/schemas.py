@@ -100,6 +100,7 @@ class TaskMessageWrite(BaseModel):
 
 
 class TaskArtifactWrite(BaseModel):
+    arguments_schema: dict | None = None
     content: str
 
     @field_validator("content")

@@ -23,10 +23,18 @@ def query(promql: str) -> dict:
         headers=headers,
         timeout=20,
     )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get("status") != "success":
-        raise RuntimeError("Prometheus returned an unsuccessful query response.")
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    if not response.ok or payload.get("status") != "success":
+        error_type = str(payload.get("errorType", "unknown"))[:100]
+        detail = str(payload.get("error", "No structured Prometheus error details were returned."))[:1000]
+        # Do not include headers, credentials or arbitrary HTML response bodies.
+        # The AI execution service redacts this error before model/audit exposure.
+        raise RuntimeError(f"Prometheus HTTP {response.status_code} — {error_type}: {detail}")
     data = payload.get("data", {})
     results = data.get("result", []) if isinstance(data, dict) else []
     return {

@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
+import BuiltinCollectorsView from "../views/BuiltinCollectorsView.vue";
+import RcaChatView from "../views/RcaChatView.vue";
 import PipelineRunsView from "../views/PipelineRunsView.vue";
 import ConfigSetListView from "../views/ConfigSetListView.vue";
 import ConfigSetFormView from "../views/ConfigSetFormView.vue";
@@ -17,6 +19,8 @@ import { clearAuthToken, getAuthStatus, getAuthToken, getCurrentUser } from "../
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: "/builtin-collectors", name: "builtin-collectors", component: BuiltinCollectorsView, meta: { requiresAuth: true } },
+    { path: "/rca/chat", name: "rca-chat", component: RcaChatView, meta: { requiresAuth: true } },
     { path: "/login", name: "login", component: LoginView },
     { path: "/account", name: "account", component: AccountSettingsView, meta: { requiresAuth: true } },
     { path: "/users", name: "users", component: UserManagementView, meta: { requiresAuth: true, requiresAdmin: true } },

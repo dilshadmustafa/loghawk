@@ -60,9 +60,19 @@ class ConsoleApiTaskWorkspace:
     def get_artifact(self, task_id: str, artifact_id: str) -> dict | None:
         return self.client.get_json(f"/api/v1/tasks/{task_id}/artifacts/{artifact_id}")
 
-    def save_artifact(self, task_id: str, content: str) -> dict | None:
+    def save_artifact(self, task_id: str, content: str, *, arguments_schema: dict | None = None) -> dict | None:
         return self.client.post_json(
-            f"/api/v1/tasks/{task_id}/artifacts", {"content": content}
+            f"/api/v1/tasks/{task_id}/artifacts", {"content": content, "arguments_schema": arguments_schema}
+        )
+
+    def approve_artifact(self, task_id: str, artifact_id: str) -> dict:
+        return self.client.post_json(
+            f"/api/v1/tasks/{task_id}/artifacts/{artifact_id}/approve", {}
+        )
+
+    def set_artifact_enabled(self, task_id: str, artifact_id: str, enabled: bool) -> dict:
+        return self.client.put_json(
+            f"/api/v1/tasks/{task_id}/artifacts/{artifact_id}/enabled", {"enabled": enabled}
         )
 
     def delete_artifact(self, task_id: str, artifact_id: str) -> bool:

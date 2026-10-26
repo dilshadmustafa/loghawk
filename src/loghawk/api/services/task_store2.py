@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -18,25 +19,32 @@ def _connect(database_role: str = "server"):
     return connect(database_role)
 
 
+def _decode_artifact(row) -> dict:
+    result = dict(row)
+    raw = result.pop("arguments_schema_json", None)
+    result["arguments_schema"] = json.loads(raw) if raw else None
+    return result
+
+
 def _artifact(connection, task_id: str) -> dict | None:
     row = connection.execute(
         """SELECT id, version, content, created_at, approved, enabled,
-                  approved_by, approved_at FROM task_artifacts
+                  approved_by, approved_at, arguments_schema_json FROM task_artifacts
            WHERE task_id = ? AND deleted_at IS NULL
            ORDER BY version DESC LIMIT 1""",
         (task_id,),
     ).fetchone()
-    return dict(row) if row else None
+    return _decode_artifact(row) if row else None
 
 
 def _artifacts(connection, task_id: str) -> list[dict]:
     rows = connection.execute(
         """SELECT id, version, content, created_at, approved, enabled,
-                  approved_by, approved_at FROM task_artifacts
+                  approved_by, approved_at, arguments_schema_json FROM task_artifacts
            WHERE task_id = ? AND deleted_at IS NULL ORDER BY version DESC""",
         (task_id,),
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [_decode_artifact(row) for row in rows]
 
 
 def _task(connection, row, *, include_messages: bool) -> dict:
@@ -99,11 +107,11 @@ def get_artifact_version(task_id: str, artifact_id: str, database_role: str = "s
     with _connect(database_role) as connection:
         row = connection.execute(
             """SELECT id, version, content, created_at, approved, enabled,
-                      approved_by, approved_at FROM task_artifacts
+                      approved_by, approved_at, arguments_schema_json FROM task_artifacts
                WHERE task_id = ? AND id = ? AND deleted_at IS NULL""",
             (task_id, artifact_id),
         ).fetchone()
-    return dict(row) if row else None
+    return _decode_artifact(row) if row else None
 
 
 def delete_task(task_id: str, database_role: str = "server") -> bool:
@@ -212,7 +220,7 @@ def get_messages(task_id: str, database_role: str = "server") -> list[dict[str, 
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
 
-def save_artifact(task_id: str, content: str, database_role: str = "server") -> dict:
+def save_artifact(task_id: str, content: str, database_role: str = "server", *, arguments_schema: dict | None = None) -> dict:
     now = _now()
     connection = _connect(database_role)
     try:
@@ -225,16 +233,17 @@ def save_artifact(task_id: str, content: str, database_role: str = "server") -> 
         artifact_id = uuid4().hex
         connection.execute(
             """INSERT INTO task_artifacts
-               (id, task_id, version, content, created_at, userid, approved, enabled)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (artifact_id, task_id, version, content, now, get_userid(), False, False),
+               (id, task_id, version, content, created_at, userid, approved, enabled, arguments_schema_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (artifact_id, task_id, version, content, now, get_userid(), False, False,
+             json.dumps(arguments_schema, sort_keys=True) if arguments_schema is not None else None),
         )
         connection.execute(
             "UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id)
         )
         saved = connection.execute(
             """SELECT id, version, content, created_at, approved, enabled,
-                      approved_by, approved_at FROM task_artifacts
+                      approved_by, approved_at, arguments_schema_json FROM task_artifacts
                WHERE id = ?""",
             (artifact_id,),
         ).fetchone()
@@ -244,7 +253,7 @@ def save_artifact(task_id: str, content: str, database_role: str = "server") -> 
         raise
     finally:
         connection.close()
-    return dict(saved)
+    return _decode_artifact(saved)
 
 
 def set_artifact_policy(

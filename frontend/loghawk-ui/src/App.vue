@@ -80,16 +80,25 @@ const navGroups = [
     links: [
       { label: "Create Task", to: "/tasks/new" },
       { label: "List Tasks", to: "/tasks" },
+      { label: "Create Collector", to: "/tasks/new?kind=collector" },
+      { label: "List Collectors", to: "/tasks?kind=collector" },
+      { label: "Built-in Collectors", to: "/builtin-collectors" },
+      { label: "Create Remediation Task", to: "/tasks/new?kind=remediation" },
+      { label: "List Remediation Tasks", to: "/tasks?kind=remediation" },
+      { label: "Create Rollback Task", to: "/tasks/new?kind=rollback" },
+      { label: "List Rollback Tasks", to: "/tasks?kind=rollback" },
     ],
   },
+  { id: "rca", label: "AI-Assisted RCA", short: "RCA", links: [{ label: "RCA Chat", to: "/rca/chat" }] },
   { id: "account", label: "Account", short: "A", links: [] },
 ];
 const selectedGroup = ref(groupForPath(route.path));
 const activeGroup = computed(() => navGroups.find((group) => group.id === selectedGroup.value) ?? navGroups[0]);
 
 function groupForPath(path: string) {
+  if (path.startsWith("/rca/")) return "rca";
   if (path.startsWith("/rag/")) return "rag";
-  if (path.startsWith("/tasks")) return "tasks";
+  if (path.startsWith("/tasks") || path.startsWith("/builtin-collectors")) return "tasks";
   if (path === "/account" || path === "/users" || path === "/login") return "account";
   return "config-pipelines";
 }
@@ -130,7 +139,7 @@ button, select, input { font: inherit; }
 .nav-group-button.selected { color: #071a19; background: #6bd7bb; border-color: #6bd7bb; }
 .nav-group-icon { width: 1.8rem; height: 1.8rem; display: grid; place-items: center; border: 1px solid currentColor; border-radius: .45rem; font-size: .72rem; font-weight: 800; }
 .nav-group-label { font-size: .67rem; font-weight: 650; line-height: 1.2; overflow-wrap: anywhere; }
-.sidebar { min-width: 0; display: flex; flex-direction: column; gap: 1.5rem; padding: 1.25rem .75rem; }
+.sidebar { overflow-y: auto; min-width: 0; display: flex; flex-direction: column; gap: 1.5rem; padding: 1.25rem .75rem; }
 .brand { display: block; text-decoration: none; }
 .brand-logo { display: block; width: 100%; max-width: 216px; height: auto; object-fit: contain; }
 .link-panel { display: grid; align-content: start; gap: .45rem; }

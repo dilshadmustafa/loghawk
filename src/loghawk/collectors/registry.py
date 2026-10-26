@@ -45,7 +45,7 @@ def list_collectors() -> list[dict]:
     with connect("server") as db:
         rows = db.execute(
             """SELECT name, version, display_name, description,
-                      arguments_schema_json, approved, enabled, updated_at
+                      arguments_schema_json, approved, enabled, execution_policy, updated_at
                FROM collector_registry ORDER BY name"""
         ).fetchall()
     return [_deserialize_definition(row) for row in rows]
@@ -56,7 +56,7 @@ def get_collector(name: str) -> dict | None:
     with connect("server") as db:
         row = db.execute(
             """SELECT name, version, display_name, description,
-                      arguments_schema_json, approved, enabled, updated_at
+                      arguments_schema_json, approved, enabled, execution_policy, updated_at
                FROM collector_registry WHERE name = ?""",
             (name,),
         ).fetchone()
@@ -75,6 +75,13 @@ def get_collector(name: str) -> dict | None:
 def _deserialize_definition(row) -> dict:
     result = dict(row)
     result["arguments_schema"] = json.loads(result.pop("arguments_schema_json"))
+    # Refresh documentation for the installed version without altering stored permissions.
+    definition = _DEFINITIONS.get(result["name"])
+    if definition and str(definition["version"]) == str(result["version"]):
+        result["description"] = definition["description"]
+        for name, spec in definition["arguments_schema"].items():
+            if name in result["arguments_schema"] and "description" in spec:
+                result["arguments_schema"][name]["description"] = spec["description"]
     result["enabled"] = bool(result["enabled"])
     result["approved"] = bool(result["approved"])
     return result
@@ -90,10 +97,40 @@ def set_enabled(name: str, enabled: bool) -> bool:
     return result.rowcount > 0
 
 
-def run_collector(name: str, arguments: dict, userid: str) -> dict:
+def set_approved(name: str, approved: bool) -> bool:
+    ensure_registered()
+    with connect("server") as db:
+        result = db.execute(
+            "UPDATE collector_registry SET approved = ?, updated_at = ? WHERE name = ?",
+            (approved, _now(), name),
+        )
+    return result.rowcount > 0
+
+
+def set_execution_policy(name: str, policy: str) -> bool:
+    if policy not in {"manual", "ai-assisted", "auto-approved", "disabled"}:
+        raise ValueError("Unknown execution policy")
+    ensure_registered()
+    with connect("server") as db:
+        result = db.execute(
+            "UPDATE collector_registry SET execution_policy = ?, updated_at = ? WHERE name = ?",
+            (policy, _now(), name),
+        )
+    return result.rowcount > 0
+
+
+def run_collector(name: str, arguments: dict, userid: str, *, timeout: float = 60,
+                  expected_version: str | None = None) -> dict:
     collector = get_collector(name)
     if collector is None:
         raise KeyError(name)
+    if collector.get("execution_policy") == "disabled":
+        raise PermissionError("Collector execution policy is disabled.")
+    if expected_version is not None and (
+        str(collector["version"]) != expected_version
+        or str(_DEFINITIONS.get(name, {}).get("version")) != expected_version
+    ):
+        raise PermissionError("Collector version has changed.")
     if not collector["enabled"]:
         raise PermissionError("This collector is disabled by an Administrator.")
     if not collector["approved"]:
@@ -113,7 +150,7 @@ def run_collector(name: str, arguments: dict, userid: str) -> dict:
     try:
         from loghawk.lhrunner import run_builtin_collector
 
-        result = run_builtin_collector(name, normalized)
+        result = run_builtin_collector(name, normalized, timeout=timeout)
     except Exception as exc:
         logger.exception("Read-only collector %s failed", name)
         with connect("server") as db:

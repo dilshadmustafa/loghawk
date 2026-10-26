@@ -12,6 +12,7 @@ export interface TaskMessage {
 }
 
 export interface TaskArtifact {
+  arguments_schema?: Record<string, unknown> | null;
   id: string;
   version: number;
   content: string;
@@ -168,25 +169,50 @@ export interface RagAnswer {
   sources: { reference: string; source: string }[];
 }
 
-export type RagJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED";
-
-export interface RagIngestionJob {
-  id: string;
-  userid: string | null;
-  kind: "UPLOAD" | "WEB";
-  status: RagJobStatus;
-  source: string;
-  files_total: number;
-  files_processed: number;
-  chunks_indexed: number;
-  error: string | null;
-  warnings: string[];
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
+export interface RcaMessage { role: "user" | "assistant"; content: string; }
+export interface RcaExecutionSummary {
+  request_id: string;
+  request_status: string;
+  discovery_calls: number;
+  succeeded: number;
+  failed: number;
+  rejected: number;
+  cancelled: number;
+  running: number;
+  awaiting_confirmation: boolean;
+  summary: string;
+  events: {
+    collector: string;
+    version: string;
+    status: string;
+    run_id: string | null;
+    reason: string | null;
+    arguments?: Record<string, unknown> | null;
+    evidence?: string | null;
+  }[];
+}
+export interface RcaAnswer {
+  execution?: RcaExecutionSummary;
+  response: string;
+  status?: string;
+  request_id?: string;
+  pending?: {
+    collector: string;
+    version: string | number;
+    arguments: Record<string, unknown>;
+    review_arguments?: boolean;
+    confirmation_id: string;
+  };
 }
 
-export interface RagAnswer {
-  answer: string;
-  sources: string[];
+export interface BuiltinCollector {
+  name: string;
+  display_name: string;
+  description: string;
+  version: string;
+  approved: boolean;
+  enabled: boolean;
+  execution_policy: TaskExecutionPolicy;
+  arguments_schema: Record<string, unknown>;
+  updated_at: string;
 }

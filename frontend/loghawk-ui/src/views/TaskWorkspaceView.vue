@@ -26,11 +26,43 @@ const descriptionDraft = ref("");
 const category = ref("");
 const artifactType = ref<TaskArtifactType>("python");
 const taskKind = ref<TaskKind>("general");
+watch(
+  () => [taskId.value, route.query.kind],
+  () => {
+    if (taskId.value) return;
+    const kind = route.query.kind;
+    taskKind.value = kind === "collector" || kind === "remediation" || kind === "rollback"
+      ? kind : "general";
+  },
+  { immediate: true },
+);
+const createLabel = computed(() => ({
+  general: "Create Task",
+  collector: "Create Collector",
+  remediation: "Create Remediation Task",
+  rollback: "Create Rollback Task",
+}[taskKind.value]));
+const listKind = computed(() => task.value?.task_kind ?? taskKind.value);
+const listUrl = computed(() => listKind.value === "general"
+  ? "/tasks" : `/tasks?kind=${listKind.value}`,
+);
+const listLabel = computed(() => ({
+  general: "Tasks",
+  collector: "Collectors",
+  remediation: "Remediation Tasks",
+  rollback: "Rollback Tasks",
+}[listKind.value]));
 const executionPolicy = ref<TaskExecutionPolicy>("manual");
 const currentUser = ref<{ userid: string; role: string } | null>(null);
 const message = ref("");
 const editorContent = ref("");
 const savedBaseline = ref("");
+const schemaText = ref("");
+const schemaBaseline = ref("");
+function loadSchema(schema?: Record<string, unknown> | null) {
+  schemaBaseline.value = schema ? JSON.stringify(schema, null, 2) : "{}";
+  schemaText.value = schemaBaseline.value;
+}
 const selectedVersionId = ref("");
 const hasGeneratedDraft = ref(false);
 const loading = ref(false);
@@ -43,7 +75,7 @@ const importingToN8n = ref(false);
 const importedWorkflow = ref<{ name: string; url: string } | null>(null);
 const error = ref("");
 const hasUnsavedChanges = computed(() =>
-  hasGeneratedDraft.value || editorContent.value !== savedBaseline.value,
+  hasGeneratedDraft.value || editorContent.value !== savedBaseline.value || schemaText.value !== schemaBaseline.value,
 );
 const hasArtifactToEdit = computed(() =>
   hasGeneratedDraft.value || Boolean(selectedVersionId.value),
@@ -94,6 +126,7 @@ async function loadTask() {
     executionPolicy.value = task.value.execution_policy || "manual";
     descriptionDraft.value = task.value.description || "";
     savedBaseline.value = task.value.latest_artifact?.content ?? "";
+    loadSchema(task.value.latest_artifact?.arguments_schema);
     editorContent.value = savedBaseline.value;
     selectedVersionId.value = task.value.latest_artifact?.id ?? "";
     hasGeneratedDraft.value = false;
@@ -198,9 +231,11 @@ async function saveVersion() {
   savingArtifact.value = true;
   error.value = "";
   try {
-    task.value = await saveTaskArtifact(task.value.id, editorContent.value);
+    const schema = schemaText.value.trim() ? JSON.parse(schemaText.value) : {};
+    task.value = await saveTaskArtifact(task.value.id, editorContent.value, schema);
     const latest = task.value.latest_artifact;
     savedBaseline.value = latest?.content ?? "";
+    loadSchema(latest?.arguments_schema);
     editorContent.value = savedBaseline.value;
     selectedVersionId.value = latest?.id ?? "";
     hasGeneratedDraft.value = false;
@@ -212,6 +247,7 @@ async function saveVersion() {
 }
 
 function cancelEdit() {
+  schemaText.value = schemaBaseline.value;
   editorContent.value = savedBaseline.value;
   hasGeneratedDraft.value = false;
 }
@@ -224,6 +260,7 @@ function selectVersion(version: NonNullable<TaskRecord["latest_artifact"]>) {
   ) return;
   selectedVersionId.value = version.id;
   savedBaseline.value = version.content;
+  loadSchema(version.arguments_schema);
   editorContent.value = version.content;
   hasGeneratedDraft.value = false;
 }
@@ -245,6 +282,7 @@ async function deleteSelectedVersion() {
     const latest = task.value.latest_artifact;
     selectedVersionId.value = latest?.id ?? "";
     savedBaseline.value = latest?.content ?? "";
+    loadSchema(latest?.arguments_schema);
     editorContent.value = savedBaseline.value;
     hasGeneratedDraft.value = false;
   } catch (err) {
@@ -280,8 +318,8 @@ onMounted(() => void loadTask());
 <template>
   <div class="view">
     <header class="view-header">
-      <div><h1>{{ task ? task.name : "Create Task" }}</h1><p>Collaborate with the configured LLM to draft an artifact. Nothing is executed or activated.</p></div>
-      <RouterLink class="btn" to="/tasks">Back to Tasks</RouterLink>
+      <div><h1>{{ task ? task.name : createLabel }}</h1><p>Collaborate with the configured LLM to draft an artifact. Nothing is executed or activated.</p></div>
+      <RouterLink class="btn" :to="listUrl">Back to {{ listLabel }}</RouterLink>
     </header>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="loading" class="muted">Loading Task…</p>
@@ -307,7 +345,7 @@ onMounted(() => void loadTask());
           </label>
         </div>
       </section>
-      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim() || !description.trim() || !category.trim()" @click="create">{{ saving ? "Creating…" : "Create Task" }}</button><RouterLink class="btn" to="/tasks">Cancel</RouterLink></div>
+      <div class="actions"><button class="btn primary" :disabled="saving || !name.trim() || !description.trim() || !category.trim()" @click="create">{{ saving ? "Creating…" : createLabel }}</button><RouterLink class="btn" :to="listUrl">Cancel</RouterLink></div>
     </template>
     <template v-else>
       <section class="card">
@@ -329,7 +367,7 @@ onMounted(() => void loadTask());
           <button class="btn" :disabled="savingExecutionPolicy || executionPolicy === task.execution_policy" @click="saveExecutionPolicy">
             {{ savingExecutionPolicy ? "Saving…" : "Save Execution Policy" }}
           </button>
-          <p class="muted">AI-triggered runs are not connected yet. When available, AI may request only the existing approved and enabled version. Auto-approved removes per-run approval; it does not let AI change the Task code. Local development commands remain available for testing.</p>
+          <p class="muted">Collector tool calling is available in signed-in Hawk Console when enabled on the server. When available, AI may request only the existing approved and enabled version. Auto-approved removes per-run approval; it does not let AI change the Task code. Local development commands remain available for testing.</p>
         </div>
         <div class="task-type-notice">
           <strong>Artifact type:</strong>
@@ -390,6 +428,11 @@ onMounted(() => void loadTask());
               @click="deleteSelectedVersion"
             >{{ deletingArtifact ? "Deleting…" : "Delete" }}</button>
           </div>
+        </div>
+        <div>
+          <label class="field">Arguments schema JSON (optional; saved with version)<textarea v-model="schemaText" rows="6" spellcheck="false" /></label>
+          <p class="muted">Blank or {} means this version accepts no arguments. Use object properties, required fields, and additionalProperties: false for inputs. Saving code or schema creates a new version requiring approval and enablement.</p>
+          <p class="muted">No arguments: {"type":"object","properties":{},"additionalProperties":false}</p>
         </div>
         <label class="field artifact-field">Code<textarea v-model="editorContent" rows="20" spellcheck="false" /></label>
         <div v-if="selectedVersion && !hasGeneratedDraft" class="actions policy-actions">

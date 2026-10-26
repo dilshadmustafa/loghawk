@@ -171,6 +171,31 @@ LH_LLM_TIMEOUT_SECONDS = int(os.getenv("LH_LLM_TIMEOUT_SECONDS", "300"))
 if LH_LLM_TIMEOUT_SECONDS < 1:
     raise ValueError("LH_LLM_TIMEOUT_SECONDS must be at least 1")
 
+_tool_calling_enabled = os.getenv("LH_LLM_TOOL_CALLING_ENABLED", "false").strip().lower()
+if _tool_calling_enabled not in {"true", "false"}:
+    raise ValueError("LH_LLM_TOOL_CALLING_ENABLED must be true or false")
+LH_LLM_TOOL_CALLING_ENABLED = _tool_calling_enabled == "true"
+LH_LLM_TOOL_MODEL = os.getenv("LH_LLM_TOOL_MODEL", "qwen3:4b-instruct").strip()
+if LH_LLM_TOOL_CALLING_ENABLED and not LH_LLM_TOOL_MODEL:
+    raise ValueError("LH_LLM_TOOL_MODEL must not be blank when tool calling is enabled")
+
+
+def _tool_calling_positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer >= 1") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be an integer >= 1")
+    return value
+
+
+LH_LLM_TOOL_CONTEXT_LENGTH = _tool_calling_positive_int("LH_LLM_TOOL_CONTEXT_LENGTH", 4096)
+LH_LLM_TOOL_MAX_TOKENS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_TOKENS", 1024)
+LH_LLM_TOOL_MAX_CALLS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_CALLS", 3)
+LH_LLM_TOOL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_TIMEOUT_SECONDS", 120)
+LH_LLM_TOOL_MAX_RESULT_CHARS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_RESULT_CHARS", 6000)
+
 _raw_llm_fallback_models = os.getenv("LH_LLM_FALLBACK_MODELS", "").strip()
 if _raw_llm_fallback_models:
     LH_LLM_FALLBACK_MODELS = tuple(

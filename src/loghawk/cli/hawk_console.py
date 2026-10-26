@@ -21,8 +21,9 @@ from pathlib import Path
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
+from textual.content import Content
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
+from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static, TextArea
 from rich.table import Table
 
 import loghawk.config as config
@@ -84,6 +85,93 @@ def _format_api_run_result(result: Any) -> str:
                 except json.JSONDecodeError:
                     pass
     return json.dumps(result, indent=2, ensure_ascii=False, default=str)
+
+
+class TickCheckbox(Checkbox):
+    BUTTON_INNER = "✓"
+
+    @property
+    def _button(self) -> Content:
+        # Explicit brackets remain visible independently of panel shading.
+        bracket_style = self.get_visual_style("toggle--label")
+        mark_style = self.get_visual_style("toggle--button")
+        return Content.assemble(
+            ("[", bracket_style),
+            (self.BUTTON_INNER if self.value else " ", mark_style),
+            ("]", bracket_style),
+        )
+
+
+class CollectorArgumentReviewScreen(ModalScreen[dict]):
+    """One editable input review; code approval remains a separate server policy."""
+
+    CSS = """
+    CollectorArgumentReviewScreen { align: center middle; }
+    #collector-review-box { width: 90%; max-width: 110; height: 85%; padding: 1 2; border: ascii $primary; background: $surface; }
+    #collector-review-arguments { height: 1fr; margin: 1 0; }
+    #collector-review-error { height: auto; max-height: 6; overflow-y: auto; }
+    #collector-review-actions { height: 3; }
+    #collector-review-actions Button { margin-right: 1; }
+    """
+
+    def __init__(self, pending: dict) -> None:
+        super().__init__()
+        self.pending = pending
+        self.blocked = False
+        self.sending = False
+
+    def compose(self) -> ComposeResult:
+        review_arguments = self.pending.get("review_arguments", True)
+        title = "Review input arguments" if review_arguments else "Confirm collector execution"
+        with Container(id="collector-review-box"):
+            yield Static(f"{title}: {self.pending['collector']} | Version {self.pending['version']}", markup=False)
+            yield Static(
+                "This reviews arguments only, not collector code approval. Leave masked values unchanged to retain them."
+                if review_arguments else
+                "The AI-assisted execution policy requires confirmation. Input arguments are read-only."
+            )
+            yield TextArea(json.dumps(self.pending["arguments"], indent=2, ensure_ascii=False),
+                           id="collector-review-arguments", soft_wrap=True, read_only=not review_arguments)
+            yield Static("", id="collector-review-error", markup=False)
+            with Horizontal(id="collector-review-actions"):
+                yield Button("Confirm & Execute", variant="primary", id="collector-review-confirm")
+                yield Button("Cancel", id="collector-review-cancel")
+
+    def set_sending(self, sending: bool) -> None:
+        self.sending = sending
+        self.query_one("#collector-review-arguments", TextArea).disabled = sending or self.blocked
+        self.query_one("#collector-review-confirm", Button).disabled = sending or self.blocked
+        self.query_one("#collector-review-cancel", Button).disabled = sending
+
+    def show_error(self, error: str, correctable: bool) -> None:
+        self.blocked = not correctable
+        notice = error if correctable else error + "\nOutcome may be uncertain. Check execution audit records before starting another request."
+        self.query_one("#collector-review-error", Static).update(notice)
+        self.set_sending(False)
+        if self.blocked:
+            self.query_one("#collector-review-cancel", Button).label = "Close"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if self.sending:
+            return
+        approved = event.button.id == "collector-review-confirm"
+        if self.blocked:
+            if not approved:
+                self.dismiss({"response": "Argument review closed after an API error. Check execution audit records before retrying."})
+            return
+        arguments = None
+        if approved:
+            try:
+                arguments = json.loads(self.query_one("#collector-review-arguments", TextArea).text)
+                if not isinstance(arguments, dict):
+                    raise ValueError("Arguments must be a JSON object.")
+            except ValueError as exc:
+                self.show_error(str(exc), True)
+                return
+        self.query_one("#collector-review-error", Static).update("Processing…")
+        self.set_sending(True)
+        self.app._confirm_collector_call(self.pending, approved, arguments, self)
 
 
 class ConfirmDeleteScreen(ModalScreen[bool]):
@@ -185,11 +273,40 @@ class HawkConsole(App[None]):
     }
     .pane-title { text-style: bold; height: 1; }
     #editor-pane { width: 1.25fr; height: 1fr; }
+    #rca-output-pane { height: 1fr; }
+    #rca-output-text { height: 1fr; }
+    #rca-output-toolbar { height: auto; min-height: 3; }
+    #llm-chat-toolbar { height: auto; min-height: 3; }
+    #new-chat { margin-right: 1; }
+    #new-chat, #show-rca-output {
+        background: #0078d4;
+        color: #ffffff;
+    }
+    #new-chat:hover, #show-rca-output:hover {
+        background: #106ebe;
+    }
+    #new-chat:disabled, #show-rca-output:disabled {
+        background: #24445e;
+        color: #a0aab4;
+    }
     #llm-output, #command-one-output, #command-two-output { height: 1fr; }
     #editor-toolbar { height: auto; min-height: 3; }
     #task-create-pane { height: auto; padding: 0 1; }
     #task-create-fields { height: auto; }
-    #task-chat-pane { height: 1fr; min-height: 8; }
+    #task-chat-pane { height: 1fr; min-height: 8; overflow-y: auto; }
+    #loaded-task-description-row { height: 5; }
+    #loaded-task-description { width: 1fr; height: 5; }
+    #save-loaded-task-description { width: auto; margin-left: 1; }
+    #loaded-task-policy-row { height: auto; min-height: 3; }
+    #loaded-task-execution-policy { width: 1fr; }
+    #save-task-execution-policy { width: auto; margin-left: 1; }
+    #loaded-task-version-actions { height: auto; min-height: 3; }
+    #approve-loaded-version { margin-left: 1; }
+    #loaded-version-status { height: auto; }
+    #task-chat-pane > Static { height: auto; }
+    #task-chat-output { min-height: 3; }
+    #collector-schema-pane { height: auto; }
+    #collector-arguments-schema { height: 6; }
     #task-chat-output { height: 1fr; }
     #task-message-row { height: auto; }
     #task-list-pane { height: 1fr; padding: 0 1; }
@@ -207,9 +324,10 @@ class HawkConsole(App[None]):
     Button { min-width: 10; }
     """ + _INPUT_BORDER_CSS
 
-    def __init__(self, api_token: str | None = None) -> None:
+    def __init__(self, api_token: str | None = None, api_user: dict | None = None) -> None:
         super().__init__()
         self._api_client = ConsoleApiClient(api_token) if api_token else None
+        self._api_user = dict(api_user or {})
         self._task_workspace = (
             ConsoleApiTaskWorkspace(self._api_client)
             if self._api_client else local_task_workspace
@@ -219,6 +337,7 @@ class HawkConsole(App[None]):
         self.current_task: dict | None = None
         self.current_artifact: dict | None = None
         self._editor_baseline = ""
+        self._schema_baseline = ""
         self._suppress_version_event = False
         self._has_generated_draft = False
         self._task_chat_busy = False
@@ -226,6 +345,7 @@ class HawkConsole(App[None]):
         self._chat_history: list[dict[str, str]] = []
         self._chat_busy = False
         self._pending_llm_command: str | None = None
+        self._pending_collector_call: dict | None = None
         self._awaiting_llm_command_final_confirmation = False
         self._command_editor_visibility: dict[str, bool] = {}
         self._sessions: dict[str, CommandShellSession] = {}
@@ -234,6 +354,8 @@ class HawkConsole(App[None]):
         self._command_history_index = {"command-one": 0, "command-two": 0}
         self._command_history_draft = {"command-one": "", "command-two": ""}
         self._help_previous_visibility: dict[str, bool] | None = None
+        self._latest_rca_output = ""
+        self._rca_previous_visibility: dict[str, bool] | None = None
 
     def compose(self) -> ComposeResult:
         with Container(id="terminal-column"):
@@ -241,6 +363,9 @@ class HawkConsole(App[None]):
                 yield Static("LLM Terminal · /help · Ctrl+Q to quit, Shift+Ctrl+C/Shift+Ctrl+V to Copy/Paste", classes="pane-title")
                 yield RichLog(id="llm-output", wrap=True, markup=False, auto_scroll=True)
                 yield Input(placeholder="Chat with the configured LLM…", id="llm-input")
+                with Horizontal(id="llm-chat-toolbar"):
+                    yield Button("New Chat", id="new-chat")
+                    yield Button("Show RCA Output", id="show-rca-output", disabled=True)
 
             with Container(id="command-one-pane", classes="pane"):
                 yield Static("Command Terminal 1 · /help · /collect <name> · /collectrun <name> · /task <name> · /taskrun <name> · /tasklist · /tasknew · /taskedit <taskname>", classes="pane-title")
@@ -258,6 +383,8 @@ class HawkConsole(App[None]):
 
         with Container(id="editor-pane", classes="pane"):
             yield Static("Editor · /help · use /taskedit <name> or /tasknew", classes="pane-title")
+            yield TickCheckbox("Review Input Args", value=True, id="review-input-args",
+                           disabled=self._api_client is None)
             with Container(id="task-create-pane"):
                 yield Static("Create Task", classes="pane-title")
                 with Container(id="task-create-fields"):
@@ -299,20 +426,24 @@ class HawkConsole(App[None]):
             with Container(id="task-chat-pane"):
                 yield Static("Task Chat", classes="pane-title")
                 yield Static("Task description")
-                yield TextArea("", id="loaded-task-description", soft_wrap=True)
-                yield Button("Save Description", id="save-loaded-task-description")
+                with Horizontal(id="loaded-task-description-row"):
+                    yield TextArea("", id="loaded-task-description", soft_wrap=True)
+                    yield Button("Save Description", id="save-loaded-task-description")
+                yield Static("Execution Policy")
                 with Horizontal(id="loaded-task-policy-row"):
-                    yield Static("Execution Policy")
                     yield Select(
                         [("Manual", "manual"), ("AI-assisted", "ai-assisted"),
                          ("Auto-approved", "auto-approved"), ("Disabled", "disabled")],
                         value="manual", allow_blank=False, id="loaded-task-execution-policy",
                     )
                     yield Button("Save Policy", id="save-task-execution-policy")
-                yield Static(
-                    "AI-triggered runs are not connected yet. When available, AI may request only an approved and enabled version; Auto-approved skips per-run approval. Local development runs remain available.",
-                    classes="muted",
-                )
+                yield Static("No saved version selected.", id="loaded-version-status")
+                with Horizontal(id="loaded-task-version-actions"):
+                    yield Button("Enable", id="enable-loaded-version", disabled=True)
+                    yield Button("Approve", id="approve-loaded-version", disabled=True)
+                with Container(id="collector-schema-pane"):
+                    yield Static("Arguments schema JSON (optional; blank or {} means no arguments; saved with version)")
+                    yield TextArea("", id="collector-arguments-schema", soft_wrap=True)
                 yield RichLog(id="task-chat-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal(id="task-message-row"):
                     yield Input(placeholder="Describe the artifact you want…", id="task-message-input")
@@ -384,6 +515,13 @@ class HawkConsole(App[None]):
                 with Horizontal(id="command-editor-toolbar"):
                     yield Button("Confirm Changes", variant="primary", id="confirm-command-edits")
                     yield Button("Cancel", id="cancel-command-edits")
+            with Container(id="rca-output-pane"):
+                yield Static("RCA Output", classes="pane-title")
+                yield TextArea("", id="rca-output-text", read_only=True, soft_wrap=True)
+                with Horizontal(id="rca-output-toolbar"):
+                    yield Button("Copy", id="copy-rca-output")
+                    yield Button("Download", id="download-rca-output")
+                    yield Button("Close", id="close-rca-output")
             with Container(id="help-pane"):
                 yield Static("Hawk Console Command Help", classes="pane-title")
                 yield RichLog(id="help-output", wrap=True, markup=False, auto_scroll=True)
@@ -399,7 +537,8 @@ class HawkConsole(App[None]):
                 if self._api_client is not None
                 else "Chat uses the configured LiteLLM provider and local LanceDB context when available.\n"
             )
-            + "Ordinary chat uses the LLM directly. Prefix a question with /rag to search indexed documents.\n"
+            + "Signed-in chat can use approved collector tools when enabled on the API server. "
+            "Prefix a question with /rag to search indexed documents.\n"
             "To request shell command(s), enter /command generate commands based on above discussion "
             "or /command <what to do>.\n"
             "Type YES or yes to run it, E or e to edit it in the Editor pane, "
@@ -434,6 +573,7 @@ class HawkConsole(App[None]):
         self.query_one("#command-output-mirror", RichLog).display = False
         self.query_one("#command-editor-pane", Container).display = False
         self.query_one("#help-pane", Container).display = False
+        self.query_one("#rca-output-pane", Container).display = False
         self._load_chat_history()
         if self._api_client is not None:
             self.set_interval(300, self._start_history_flush)
@@ -443,29 +583,22 @@ class HawkConsole(App[None]):
         self.run_worker(self._flush_remote_history, thread=True, name="console-history-sync")
 
     def _load_chat_history(self) -> None:
+        self._chat_history = []
         try:
             if self._api_client is not None:
                 history = self._api_client.get_json("/api/v1/console/history")
-                self._chat_history = [
-                    {"role": item["role"], "content": item["content"]}
-                    for item in history.get("llm_messages", [])
-                    if item.get("role") in {"user", "assistant"}
-                ]
                 for terminal_id in ("command-one", "command-two"):
                     self._command_history[terminal_id] = [
                         item["command"] for item in history.get("commands", [])
                         if item.get("terminal_id") == terminal_id
                     ][-command_history.MAX_HISTORY_ENTRIES:]
                     self._command_history_index[terminal_id] = len(self._command_history[terminal_id])
-            else:
-                self._chat_history = local_store.load_conversation_history()
-            if self._chat_history:
-                self.query_one("#llm-output", RichLog).write(
-                    f"Loaded {len(self._chat_history)} prior chat messages.\n"
-                )
+            self.query_one("#llm-output", RichLog).write(
+                "Started a fresh conversation. Saved chat history is not included in LLM context.\n"
+            )
         except Exception as exc:
             self.query_one("#llm-output", RichLog).write(
-                f"Could not load chat history: {exc}\n"
+                f"Could not load command history; conversation context remains empty: {exc}\n"
             )
 
     def _persist_chat_message(self, role: str, content: str) -> None:
@@ -594,6 +727,9 @@ class HawkConsole(App[None]):
             if text.casefold() == "/help":
                 self._show_help()
                 return
+            if self._pending_collector_call is not None:
+                self.query_one("#llm-output", RichLog).write("Review the input arguments in the open dialog.")
+                return
             if self._pending_llm_command is not None:
                 self._confirm_llm_command(text)
                 return
@@ -638,7 +774,10 @@ class HawkConsole(App[None]):
             self.query_one("#llm-output", RichLog).write(
                 f"\nYou: {text}\nAssistant:\n"
             )
-            self._run_chat(text, use_rag=use_rag)
+            review_checkbox = self.query_one("#review-input-args", Checkbox)
+            review_arguments = review_checkbox.value
+            review_checkbox.disabled = True
+            self._run_chat(text, use_rag=use_rag, review_arguments=review_arguments)
             return
 
         terminal_id = "command-one" if event.input.id == "command-one-input" else "command-two"
@@ -666,6 +805,7 @@ class HawkConsole(App[None]):
 
     def _show_help(self) -> None:
         """Display the command reference without discarding the Editor's current view."""
+        self._close_rca_output()
         widget_ids = (
             "task-create-pane",
             "task-chat-pane",
@@ -701,9 +841,10 @@ class HawkConsole(App[None]):
             ),
             ("/command", "<request>", "AI/LLM", "Ask the LLM to propose shell command(s). Review, edit, then confirm before execution."),
             ("/collectlist", "None", "Command 1 or 2 · signed in", "List built-in collectors and custom Tasks with the Collector kind."),
-            ("/collectview", "<collector-name>", "Command 1 or 2 · signed in", "Show a collector's description, argument schema, enabled state, and recent run history."),
+            ("/collectpolicy", "<built-in-name> <policy>", "Command 1 or 2 - signed in", "Administrator/Power User: set manual, ai-assisted, auto-approved or disabled for a built-in collector."),
+            ("/collectview", "<collector-name>", "Command 1 or 2", "Open a saved collector in the Task editor. Built-in details require sign-in."),
             ("/collect", "<collector-name> [JSON arguments]", "Command 1 or 2 · signed in", "Run a built-in or custom collector through the authenticated API; custom versions must be approved and enabled."),
-            ("/collectrun", "<collector-name> [JSON arguments]", "Command 1 or 2", "Run a built-in or custom collector locally in this Command Terminal; local development runs do not require approval or enabled status."),
+            ("/collectrun", "<collector-name> [JSON arguments]", "Command 1 or 2", "Show saved collector code and input arguments, then ask Y/N before running locally. Built-ins also require Y/N. No approval or enabled status required. Saved schemas validate JSON arguments passed in LH_RUNNER_ARGUMENTS_JSON."),
             ("/collectenable", "<collector-name>", "Command 1 or 2 · signed in", "Enable a built-in collector or a custom collector Task version; Users may enable their own Tasks."),
             ("/collectdisable", "<collector-name>", "Command 1 or 2 · signed in", "Disable a built-in collector or a custom collector Task version; Users may disable their own Tasks."),
             (
@@ -723,7 +864,7 @@ class HawkConsole(App[None]):
             ("/taskedit", "<taskname>", "Command 1 or 2", "Load a saved Task into the Editor pane to edit code and execution policy. Quote names containing spaces."),
             ("/taskview", "<taskname>", "Command 1 or 2", "Alias for /taskedit."),
             ("/task", "<taskname> [JSON arguments]", "Command 1 or 2 · signed in", "Run the latest saved Task version through the authenticated API; it must be approved and enabled. n8n workflows are not executed."),
-            ("/taskrun", "<taskname>", "Command 1 or 2", "Load and locally run the latest saved version after confirmation. Local development runs do not require approval or enabled status; n8n is not executed."),
+            ("/taskrun", "<taskname> [JSON arguments]", "Command 1 or 2", "Load and locally run the latest saved version after confirmation. Validate JSON arguments against its saved schema and pass them in LH_RUNNER_ARGUMENTS_JSON. Local development runs do not require approval or enabled status; n8n is not executed."),
             ("/taskdelete", "<taskname>", "Command 1 or 2", "Delete a Task, its conversation, and saved versions after confirmation. Quote names containing spaces."),
             ("OS command", "<command>", "Command 1 or 2", "Run a native shell command in that terminal."),
         )
@@ -745,6 +886,64 @@ class HawkConsole(App[None]):
     def _handle_collector_command(
         self, command: str, output: RichLog, terminal_id: str
     ) -> None:
+        command_name = command.split(maxsplit=1)[0].lower()
+        if command_name in {"/collectview", "/collectrun"}:
+            try:
+                name, arguments = _parse_api_run_command(
+                    "/collect " + command.split(maxsplit=1)[1], "/collect")
+                if command_name == "/collectview" and arguments:
+                    raise ValueError("Usage: /collectview <collector-name>")
+                if self._task_chat_busy or self._sessions[terminal_id].busy:
+                    raise ValueError("Wait for current Task generation or terminal execution to finish.")
+                if self._editor_is_dirty() or self._has_generated_draft:
+                    raise ValueError("Save or cancel the current Task edits first.")
+                if (self.query_one("#task-create-pane", Container).display
+                        or self.query_one("#command-editor-pane", Container).display):
+                    raise ValueError("Finish or cancel the current editor form first.")
+                if self.current_task and (
+                    self.query_one("#loaded-task-description", TextArea).text != self.current_task.get("description", "")
+                    or self.query_one("#loaded-task-execution-policy", Select).value != self.current_task.get("execution_policy", "manual")
+                ):
+                    raise ValueError("Save the current description and policy edits first.")
+                task = self._task_workspace.find_task_by_name(name)
+                if task is not None:
+                    if task.get("task_kind") != "collector":
+                        raise ValueError("This name belongs to a Task, not a Collector.")
+                    if command_name == "/collectview":
+                        self._load_task(task)
+                        output.write(f"Loaded Collector: {task['name']} · User ID: {task['userid']} · Category: {task['category']}\n")
+                        return
+                    artifact = task.get("latest_artifact")
+                    if not artifact:
+                        raise ValueError("This collector has no saved version.")
+                    if task["artifact_type"] not in {"python", "bash", "powershell", "windows-cmd"}:
+                        raise ValueError("This collector type cannot run locally.")
+                    if artifact.get("arguments_schema") is not None:
+                        from loghawk.collectors.contracts import validate_arguments
+                        arguments = validate_arguments(artifact["arguments_schema"], arguments)
+                    self._load_task(task)
+                    artifact = dict(artifact, _run_arguments=arguments, _run_command="/collectrun")
+                    self._pending_task_runs[terminal_id] = (task, artifact)
+                    output.write(f"Collector: {task['name']} · User ID: {task['userid']} · Version {artifact['version']}\n")
+                elif command_name == "/collectview":
+                    if self._api_client is None:
+                        raise ValueError("Saved collector not found. Built-in details require sign-in.")
+                    self._begin_command_output(terminal_id, command)
+                    self._run_collector_request(terminal_id, command_name, name, {})
+                    return
+                else:
+                    from loghawk.collectors.registry import _DEFINITIONS
+                    if name not in _DEFINITIONS:
+                        raise ValueError(f"Collector not found: {name}")
+                    self._pending_task_runs[terminal_id] = (
+                        {"name": name, "_builtin_collector": True},
+                        {"_run_arguments": arguments},
+                    )
+                    output.write(f"Built-in collector: {name}\n")
+                output.write("Input arguments: " + json.dumps(arguments, ensure_ascii=False) + "\nRun locally? (Y/N): ")
+            except (ValueError, IndexError, RuntimeError) as exc:
+                output.write(f"Collector request: {exc or 'Specify a collector name.'}\n")
+            return
         if self._api_client is None and not command.lower().startswith("/collectrun"):
             output.write("Collector commands require a signed-in Hawk Console session; they are unavailable in --local mode.\n")
             return
@@ -764,7 +963,7 @@ class HawkConsole(App[None]):
             return
         if command_name not in {
             "/collectlist", "/collectview", "/collectrun",
-            "/collectenable", "/collectdisable",
+            "/collectenable", "/collectdisable", "/collectpolicy",
         }:
             output.write("Unknown collector command. Use /help.\n")
             return
@@ -773,6 +972,16 @@ class HawkConsole(App[None]):
                 output.write("Usage: /collectlist\n")
                 return
             collector_name, arguments = None, {}
+        elif command_name == "/collectpolicy":
+            try:
+                policy_parts = shlex.split(command)
+            except ValueError as exc:
+                output.write(f"Invalid collector policy command: {exc}\n")
+                return
+            if len(policy_parts) != 3 or policy_parts[2] not in {"manual", "ai-assisted", "auto-approved", "disabled"}:
+                output.write("Usage: /collectpolicy <built-in-name> manual|ai-assisted|auto-approved|disabled\n")
+                return
+            collector_name, arguments = policy_parts[1], {"execution_policy": policy_parts[2]}
         elif command_name == "/collectrun":
             if len(parts) < 2:
                 output.write('Usage: /collectrun <collector-name> [JSON arguments]\nExample: /collectrun prometheus-query {"query":"up"}\n')
@@ -805,21 +1014,17 @@ class HawkConsole(App[None]):
     ) -> None:
         try:
             if command_name == "/collectrun":
-                task = self._task_workspace.find_task_by_name(collector_name or "")
-                if task is not None and task.get("task_kind", "general") == "collector":
-                    artifact = task.get("latest_artifact")
-                    if artifact is None:
-                        raise RuntimeError("This collector Task has no saved version.")
-                    result = lhrunner.run_artifact(
-                        task["artifact_type"], artifact["content"], arguments=arguments
-                    )
-                    result.update({"task": task["name"], "version": artifact["version"]})
-                else:
-                    result = lhrunner.run_builtin_collector(collector_name or "", arguments)
+                # Saved collectors use the captured artifact through _run_task_artifact.
+                result = lhrunner.run_builtin_collector(collector_name or "", arguments)
             elif self._api_client is None:
                 raise RuntimeError("This collector command requires a signed-in Hawk Console session.")
             elif command_name == "/collectlist":
                 result = self._api_client.get_json("/api/v1/console/collectors")
+            elif command_name == "/collectpolicy":
+                result = self._api_client.put_json(
+                    f"/api/v1/console/collectors/{quote(collector_name or '', safe='')}/execution-policy",
+                    arguments,
+                )
             elif command_name == "/collectview":
                 result = self._api_client.get_json(f"/api/v1/console/collectors/{collector_name}")
             elif command_name == "/collect":
@@ -1179,6 +1384,7 @@ class HawkConsole(App[None]):
         )
 
     def _open_command_editor(self) -> None:
+        self._close_rca_output()
         if self._pending_llm_command is None:
             return
         editor_pane = self.query_one("#command-editor-pane", Container)
@@ -1307,7 +1513,7 @@ class HawkConsole(App[None]):
                     self.notify("Could not update Task execution policy.", severity="error")
                     return
 
-            saved_task = self._task_workspace.save_artifact(task["id"], content)
+            saved_task = self._task_workspace.save_artifact(task["id"], content, arguments_schema=(task.get("latest_artifact") or {}).get("arguments_schema"))
             if saved_task is None or saved_task.get("latest_artifact") is None:
                 self.notify("Could not save the Task version.", severity="error")
                 return
@@ -1323,7 +1529,7 @@ class HawkConsole(App[None]):
         self.query_one("#llm-output", RichLog).write("Command canceled.\n")
 
     @work(thread=True, exclusive=True, group="hawk-llm")
-    def _run_chat(self, prompt: str, use_rag: bool = False) -> None:
+    def _run_chat(self, prompt: str, use_rag: bool = False, review_arguments: bool = True) -> None:
         response_parts: list[str] = []
         try:
             if self._api_client is not None:
@@ -1335,7 +1541,9 @@ class HawkConsole(App[None]):
                 else:
                     messages = [*self._chat_history, {"role": "user", "content": prompt}]
                     result = self._api_client.post_json(
-                        "/api/v1/console/chat", {"messages": messages}, timeout=300
+                        "/api/v1/console/chat",
+                        {"messages": messages, "review_arguments": review_arguments},
+                        timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS + 30)
                     )
                     response = result["response"]
                 if not response:
@@ -1346,7 +1554,10 @@ class HawkConsole(App[None]):
                 ])
                 self._persist_chat_message("user", prompt)
                 self._persist_chat_message("assistant", response)
-                self.app.call_from_thread(self._finish_chat, None, response)
+                if not use_rag:
+                    self.app.call_from_thread(self._finish_tool_chat, result)
+                else:
+                    self.app.call_from_thread(self._finish_chat, None, response)
                 return
             try:
                 context = ""
@@ -1427,7 +1638,188 @@ class HawkConsole(App[None]):
     def _write_chat_notice(self, notice: str) -> None:
         self.query_one("#llm-output", RichLog).write(notice)
 
+    def _finish_tool_chat(self, result: dict) -> None:
+        if result.get("execution"):
+            self._latest_rca_output = self._format_rca_output(result)
+            self.query_one("#show-rca-output", Button).disabled = False
+        from rich.text import Text
+
+        execution = result.get("execution")
+        if execution:
+            output = self.query_one("#llm-output", RichLog)
+            lines = [
+                "Execution status · reported by LogHawk server",
+                str(execution.get("summary", "")),
+                f"Discovery calls: {execution.get('discovery_calls', 0)} · "
+                f"Request: {execution.get('request_id', result.get('request_id', ''))}",
+            ]
+            for event in execution.get("events", []):
+                collector = event.get("collector", "unknown")
+                label = "Tool request" if collector == "unknown" else collector
+                version = event.get("version")
+                if version:
+                    label += f" · Version {version}"
+                lines.append(f"- {label} — {event.get('status', 'UNKNOWN')}")
+                if event.get("run_id"):
+                    lines.append(f"  Run: {event['run_id']}")
+                if event.get("reason"):
+                    lines.append(f"  {event['reason']}")
+            lines.append("The assistant's narrative below is not execution confirmation.")
+            output.write(Text("\n".join(lines) + "\n"))
+        self._finish_chat(None, result.get("response", ""))
+        if result.get("status") == "PENDING":
+            self.query_one("#review-input-args", Checkbox).disabled = True
+            self._pending_collector_call = {
+                "request_id": result["request_id"], **result["pending"],
+            }
+            self.query_one("#llm-input", Input).disabled = True
+            self.push_screen(CollectorArgumentReviewScreen(self._pending_collector_call),
+                             callback=self._collector_review_closed)
+
+    @staticmethod
+    def _format_rca_output(result: dict) -> str:
+        execution = result.get("execution") or {}
+        lines = ["RCA Output", "Execution status · reported by LogHawk server",
+                 f"Request: {execution.get('request_id', result.get('request_id', ''))}",
+                 str(execution.get("summary", "")),
+                 f"Discovery calls: {execution.get('discovery_calls', 0)}"]
+        for event in execution.get("events", []):
+            lines.extend(["", f"Collector: {event.get('collector', 'unknown')}",
+                          f"Version: {event.get('version', '')}",
+                          f"Status: {event.get('status', 'UNKNOWN')}"])
+            if event.get("run_id"):
+                lines.append(f"Run: {event['run_id']}")
+            if event.get("reason"):
+                lines.append(str(event["reason"]))
+            if event.get("arguments") is not None:
+                lines.extend(["Input arguments (redacted):",
+                              json.dumps(event["arguments"], indent=2, ensure_ascii=False)])
+            if event.get("evidence"):
+                evidence = event["evidence"]
+                try:
+                    evidence = json.dumps(json.loads(evidence), indent=2, ensure_ascii=False)
+                except (ValueError, TypeError):
+                    pass
+                lines.extend(["", "Collector evidence (redacted; may be truncated):", evidence])
+        lines.extend(["", "AI/LLM explanation (not execution confirmation):",
+                      str(result.get("response", "")), "",
+                      "Collector evidence is limited by LH_LLM_TOOL_MAX_RESULT_CHARS."])
+        return "\n".join(lines)
+
+    def _new_chat(self) -> None:
+        if (
+            self._chat_busy
+            or self._pending_collector_call is not None
+            or self._pending_llm_command is not None
+            or self._awaiting_llm_command_final_confirmation
+        ):
+            self.notify(
+                "Wait for the current request or finish/cancel its confirmation before starting a new chat.",
+                severity="warning",
+            )
+            return
+        self._chat_history.clear()
+        self._latest_rca_output = ""
+        self.query_one("#show-rca-output", Button).disabled = True
+        self._close_rca_output()
+        output = self.query_one("#llm-output", RichLog)
+        output.clear()
+        output.write(
+            "New chat started. Previous conversation context has been cleared.\n"
+            "Saved history is retained. Messages awaiting synchronization are retained.\n"
+        )
+        # Preserve any question already typed by the user.
+        self.query_one("#llm-input", Input).focus()
+
+    def _show_rca_output(self) -> None:
+        if not self._latest_rca_output:
+            return
+        if (self._task_chat_busy or self._pending_task_runs or self._pending_collector_call
+                or self._pending_llm_command is not None
+                or self.query_one("#command-editor-pane", Container).display
+                or self.query_one("#task-create-pane", Container).display
+                or self._editor_is_dirty() or self._has_generated_draft):
+            self.notify("Finish, save, or cancel current edits or pending actions before viewing RCA output.",
+                        severity="warning")
+            return
+        if self.current_task and (
+            self.query_one("#loaded-task-description", TextArea).text != self.current_task.get("description", "")
+            or self.query_one("#loaded-task-execution-policy", Select).value
+                != self.current_task.get("execution_policy", "manual")
+        ):
+            self.notify("Save or cancel Task metadata edits before viewing RCA output.", severity="warning")
+            return
+        self._close_help()
+        widget_ids = ("task-create-pane", "task-chat-pane", "editor-toolbar", "editor",
+                      "editor-status", "task-list-pane", "command-output-mirror", "command-editor-pane")
+        if self._rca_previous_visibility is None:
+            self._rca_previous_visibility = {
+                widget_id: self.query_one(f"#{widget_id}").display for widget_id in widget_ids
+            }
+        for widget_id in widget_ids:
+            self.query_one(f"#{widget_id}").display = False
+        self.query_one("#rca-output-text", TextArea).load_text(self._latest_rca_output)
+        self.query_one("#rca-output-pane", Container).display = True
+
+    def _close_rca_output(self) -> None:
+        self.query_one("#rca-output-pane", Container).display = False
+        self.query_one("#rca-output-text", TextArea).load_text("")
+        if self._rca_previous_visibility is not None:
+            for widget_id, was_visible in self._rca_previous_visibility.items():
+                self.query_one(f"#{widget_id}").display = was_visible
+            self._rca_previous_visibility = None
+
+    def _download_rca_output(self) -> None:
+        content = self.query_one("#rca-output-text", TextArea).text
+        if content:
+            self.push_screen(DownloadPathScreen("loghawk-rca-output.txt"),
+                             callback=lambda destination: self._save_rca_output(destination, content))
+
+    def _save_rca_output(self, destination: str | None, content: str) -> None:
+        if not destination:
+            return
+        path = Path(destination).expanduser()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("x", encoding="utf-8") as stream:
+                stream.write(content)
+            self.notify(f"Downloaded RCA output to {path}")
+        except OSError as exc:
+            self.notify(f"Could not download RCA output: {exc}", severity="error")
+
+    def _collector_review_closed(self, result: dict) -> None:
+        self._pending_collector_call = None
+        self._finish_tool_chat(result)
+
+    @work(thread=True, group="hawk-tool-confirmation")
+    def _confirm_collector_call(self, pending: dict, approved: bool,
+                                arguments: dict | None, review: CollectorArgumentReviewScreen) -> None:
+        try:
+            result = self._api_client.post_json(
+                f"/api/v1/console/chat/{pending['request_id']}/confirm",
+                {"confirmation_id": pending["confirmation_id"], "approved": approved, "arguments": arguments},
+                timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS + 30),
+            )
+        except Exception as exc:
+            # ConsoleApiClient prefixes HTTP validation errors with their status.
+            correctable = isinstance(exc, RuntimeError) and str(exc).startswith("LogHawk API returned 422:")
+            self.app.call_from_thread(review.show_error, str(exc), correctable)
+            return
+        action = ("Reviewed input arguments for" if pending.get("review_arguments", True)
+                  else "Confirmed execution of") if approved else "Cancelled"
+        decision = f"{action} collector {pending['collector']} version {pending['version']}"
+        response = result.get("response", "")
+        try:
+            self._chat_history.extend([{"role": "user", "content": decision}, {"role": "assistant", "content": response}])
+            self._persist_chat_message("user", decision)
+            self._persist_chat_message("assistant", response)
+        except Exception as exc:
+            # Execution already returned: a history-save error must not offer execution again.
+            self.app.call_from_thread(self._write_chat_notice, f"Could not save collector chat history: {exc}")
+        self.app.call_from_thread(review.dismiss, result)
+
     def _finish_chat(self, error: str | None, response: str | None) -> None:
+        self.query_one("#review-input-args", Checkbox).disabled = self._api_client is None
         output = self.query_one("#llm-output", RichLog)
         if response:
             output.write(response)
@@ -1450,6 +1842,7 @@ class HawkConsole(App[None]):
             self._active_command_outputs.discard(terminal_id)
 
     def _begin_command_output(self, terminal_id: str, command: str) -> None:
+        self._close_rca_output()
         if self.query_one("#command-editor-pane", Container).display:
             self._pending_llm_command = None
             self._awaiting_llm_command_final_confirmation = False
@@ -1570,8 +1963,11 @@ class HawkConsole(App[None]):
             )
             return
         if command_name == "/taskrun":
-            if len(parts) != 2:
-                output.write('Usage: /taskrun <taskname> (quote names containing spaces)\n')
+            try:
+                task_name, arguments = _parse_api_run_command(
+                    "/task " + command.split(maxsplit=1)[1], "/task")
+            except (ValueError, IndexError) as exc:
+                output.write(f'Usage: /taskrun <taskname> [JSON arguments] (quote names containing spaces): {exc}\n')
                 return
             if self._sessions[terminal_id].busy:
                 output.write("Wait for the current command to finish before running a Task.\n")
@@ -1584,13 +1980,20 @@ class HawkConsole(App[None]):
             ):
                 output.write("Save or cancel the current Task edits before running another Task.\n")
                 return
-            task = self._task_workspace.find_task_by_name(parts[1])
+            task = self._task_workspace.find_task_by_name(task_name)
             if task is None:
-                output.write(f"Task not found: {parts[1]}\n")
+                output.write(f"Task not found: {task_name}\n")
                 return
             artifact = task.get("latest_artifact")
             if artifact is None:
                 output.write(f"Task has no saved artifact version: {task['name']}\n")
+                return
+            try:
+                if artifact.get("arguments_schema") is not None:
+                    from loghawk.collectors.contracts import validate_arguments
+                    arguments = validate_arguments(artifact["arguments_schema"], arguments)
+            except ValueError as exc:
+                output.write(f"Invalid Task arguments: {exc}\n")
                 return
             self._load_task(task)
             if task["artifact_type"] == "n8n":
@@ -1601,7 +2004,9 @@ class HawkConsole(App[None]):
                     "n8n workflow JSON must be imported into the customer-managed n8n instance to run.\n"
                 )
                 return
+            artifact = dict(artifact, _run_arguments=arguments)
             self._pending_task_runs[terminal_id] = (task, artifact)
+            output.write("Input arguments: " + json.dumps(arguments, ensure_ascii=False) + "\n")
             output.write(
                 f"Run {task['name']} · User ID: {task['userid']} · "
                 f"Category: {task['category']} · "
@@ -1684,8 +2089,12 @@ class HawkConsole(App[None]):
             output.write("Please answer Y or N: ")
             return
         task, artifact = self._pending_task_runs.pop(terminal_id)
+        if task.get("_builtin_collector"):
+            self._begin_command_output(terminal_id, f"/collectrun {task['name']}")
+            self._run_collector_request(terminal_id, "/collectrun", task["name"], artifact["_run_arguments"])
+            return
         self._begin_command_output(
-            terminal_id, f"/taskrun {task['name']} · Version {artifact['version']}"
+            terminal_id, f"{artifact.get('_run_command', '/taskrun')} {task['name']} · Version {artifact['version']}"
         )
         output.write(
             f"Confirmed. Running {task['name']} · User ID: {task['userid']} · "
@@ -1712,8 +2121,12 @@ class HawkConsole(App[None]):
             output.write(f"Unsupported Task type: {artifact_type}\n")
             return
         try:
+            arguments = artifact.get("_run_arguments", {})
+            if artifact.get("arguments_schema") is not None:
+                from loghawk.collectors.contracts import validate_arguments
+                arguments = validate_arguments(artifact["arguments_schema"], arguments)
             result = await asyncio.to_thread(
-                lhrunner.run_artifact, artifact_type, artifact["content"]
+                lhrunner.run_artifact, artifact_type, artifact["content"], arguments=arguments
             )
             label = "Terminal 1" if terminal_id == "command-one" else "Terminal 2"
             for stream_name in ("stdout", "stderr"):
@@ -1793,6 +2206,7 @@ class HawkConsole(App[None]):
         )
 
     def _begin_task_creation(self) -> None:
+        self._close_rca_output()
         self._close_task_list()
         self.current_task = None
         self.current_artifact = None
@@ -1855,6 +2269,7 @@ class HawkConsole(App[None]):
         )
 
     def _show_task_list(self, terminal_output: RichLog) -> None:
+        self._close_rca_output()
         pane = self.query_one("#task-list-pane", Container)
         for widget_id in (
             "task-create-pane",
@@ -1998,7 +2413,8 @@ class HawkConsole(App[None]):
             if task is None:
                 self.notify("Could not update Task execution policy.", severity="error")
                 return
-            self._load_task(task)
+            self.current_task["execution_policy"] = task["execution_policy"]
+            self._sync_editor_controls()
             self.notify(f"Execution policy set to {policy}.")
         except Exception as exc:
             self.notify(f"Could not update Task execution policy: {exc}", severity="error")
@@ -2015,10 +2431,36 @@ class HawkConsole(App[None]):
             if task is None:
                 self.notify("Could not update Task description.", severity="error")
                 return
-            self._load_task(task)
+            self.current_task["description"] = task["description"]
+            self.query_one("#loaded-task-description", TextArea).load_text(task["description"])
+            self._sync_editor_controls()
             self.notify("Task description saved.")
         except Exception as exc:
             self.notify(f"Could not update Task description: {exc}", severity="error")
+
+    def _set_selected_version_policy(self, *, approve: bool = False) -> None:
+        if (self._api_client is None or not self.current_task or not self.current_artifact
+                or self._task_chat_busy or self._editor_is_dirty() or self._has_generated_draft):
+            self.notify("Save or cancel the artifact draft before changing a saved version.", severity="warning")
+            return
+        try:
+            if approve:
+                updated = self._task_workspace.approve_artifact(
+                    self.current_task["id"], self.current_artifact["id"])
+            else:
+                updated = self._task_workspace.set_artifact_enabled(
+                    self.current_task["id"], self.current_artifact["id"],
+                    not self.current_artifact.get("enabled", False))
+            if not updated or updated.get("id") != self.current_artifact["id"]:
+                raise RuntimeError("The API did not return the selected artifact version.")
+            self.current_artifact.update(updated)
+            for artifact in self.current_task.get("artifacts", []):
+                if artifact["id"] == updated["id"]:
+                    artifact.update(updated)
+            self._sync_editor_controls()
+            self.notify("Selected version approved." if approve else "Selected version enabled status updated.")
+        except Exception as exc:
+            self.notify(f"Could not update selected version: {exc}", severity="error")
 
     def _render_task_messages(self, task: dict) -> None:
         output = self.query_one("#task-chat-output", RichLog)
@@ -2028,8 +2470,11 @@ class HawkConsole(App[None]):
             output.write(f"{label}: {message['content']}\n")
 
     def _load_task(self, task: dict) -> None:
+        self._close_rca_output()
         self._close_task_list()
         self.current_task = task
+        self.query_one("#collector-schema-pane", Container).display = True
+        self._set_schema_text(None)
         self.query_one("#loaded-task-description", TextArea).text = task.get("description", "")
         self._has_generated_draft = False
         self.query_one("#task-create-pane", Container).display = False
@@ -2065,6 +2510,7 @@ class HawkConsole(App[None]):
 
     def _load_artifact(self, artifact: dict) -> None:
         self.current_artifact = artifact
+        self._set_schema_text(artifact.get("arguments_schema"))
         self._set_editor_text(artifact["content"])
         self.query_one("#editor-status", Static).update(
             f"Task: {self.current_task['name']} · "
@@ -2078,8 +2524,14 @@ class HawkConsole(App[None]):
         editor.text = text
         self._editor_baseline = text
 
+    def _set_schema_text(self, schema: dict | None) -> None:
+        self._schema_baseline = json.dumps(schema, indent=2) if schema is not None else "{}"
+        self.query_one("#collector-arguments-schema", TextArea).text = self._schema_baseline
+
     def _editor_is_dirty(self) -> bool:
-        return self.query_one("#editor", TextArea).text != self._editor_baseline
+        schema_dirty = bool(self.current_task
+                            and self.query_one("#collector-arguments-schema", TextArea).text != self._schema_baseline)
+        return self.query_one("#editor", TextArea).text != self._editor_baseline or schema_dirty
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "task-kind-select" and event.value == "collector":
@@ -2110,7 +2562,7 @@ class HawkConsole(App[None]):
             self._sync_editor_controls()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
-        if event.text_area.id == "editor":
+        if event.text_area.id in {"editor", "collector-arguments-schema"}:
             self._sync_editor_controls()
         elif event.text_area.id == "task-description-input" and self.is_mounted:
             self._sync_editor_controls()
@@ -2127,7 +2579,30 @@ class HawkConsole(App[None]):
             return
         editor = self.query_one("#editor", TextArea)
         has_task = self.current_task is not None
-        dirty = editor.text != self._editor_baseline
+        dirty = self._editor_is_dirty()
+        manager = self._api_user.get("role") in {"Administrator", "Power User"}
+        can_manage = bool(has_task and (self._api_client is None or manager
+                          or self.current_task.get("userid") == self._api_user.get("userid")))
+        self.query_one("#loaded-task-description", TextArea).read_only = not can_manage
+        self.query_one("#save-loaded-task-description", Button).disabled = not can_manage or self._task_chat_busy
+        self.query_one("#loaded-task-execution-policy", Select).disabled = not can_manage or self._task_chat_busy
+        self.query_one("#save-task-execution-policy", Button).disabled = not can_manage or self._task_chat_busy
+        artifact = self.current_artifact if has_task else None
+        ready = bool(self._api_client and artifact and not dirty
+                     and not self._has_generated_draft and not self._task_chat_busy)
+        enable = self.query_one("#enable-loaded-version", Button)
+        enable.label = "Disable" if artifact and artifact.get("enabled") else "Enable"
+        enable.disabled = not (ready and can_manage)
+        self.query_one("#approve-loaded-version", Button).disabled = not (
+            ready and manager and not artifact.get("approved"))
+        status = "No saved version selected."
+        if artifact:
+            status = (f"Selected Version: {artifact['version']} · "
+                      f"{'Approved' if artifact.get('approved') else 'Not approved'} · "
+                      f"{'Enabled' if artifact.get('enabled') else 'Disabled'}")
+        if self._api_client is None:
+            status += " · Server approval controls require sign-in."
+        self.query_one("#loaded-version-status", Static).update(status)
         self.query_one("#save-version", Button).disabled = not (
             has_task and (dirty or self._has_generated_draft) and bool(editor.text.strip())
         )
@@ -2148,7 +2623,18 @@ class HawkConsole(App[None]):
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "create-task":
+        if event.button.id == "new-chat":
+            self._new_chat()
+        elif event.button.id == "show-rca-output":
+            self._show_rca_output()
+        elif event.button.id == "copy-rca-output":
+            self.copy_to_clipboard(self.query_one("#rca-output-text", TextArea).text)
+            self.notify("Copy requested; clipboard availability depends on the terminal.")
+        elif event.button.id == "download-rca-output":
+            self._download_rca_output()
+        elif event.button.id == "close-rca-output":
+            self._close_rca_output()
+        elif event.button.id == "create-task":
             self._create_task()
         elif event.button.id == "cancel-create-task":
             self._cancel_task_creation()
@@ -2162,6 +2648,10 @@ class HawkConsole(App[None]):
             if prompt:
                 message_input.value = ""
                 self._submit_task_message(prompt)
+        elif event.button.id == "enable-loaded-version":
+            self._set_selected_version_policy()
+        elif event.button.id == "approve-loaded-version":
+            self._set_selected_version_policy(approve=True)
         elif event.button.id == "save-task-execution-policy":
             self._save_task_execution_policy()
         elif event.button.id == "save-loaded-task-description":
@@ -2191,6 +2681,8 @@ class HawkConsole(App[None]):
             task = self._task_workspace.save_artifact(
                 self.current_task["id"],
                 self.query_one("#editor", TextArea).text,
+                arguments_schema=(json.loads(self.query_one("#collector-arguments-schema", TextArea).text)
+                                  if self.query_one("#collector-arguments-schema", TextArea).text.strip() else {}),
             )
             if task:
                 self._load_task(task)
@@ -2205,6 +2697,7 @@ class HawkConsole(App[None]):
             return
         self._has_generated_draft = False
         self._set_editor_text(self._editor_baseline)
+        self.query_one("#collector-arguments-schema", TextArea).text = self._schema_baseline
         if self.current_artifact:
             status = f"{self.current_task['name']} · Version {self.current_artifact['version']}"
         else:
@@ -2317,7 +2810,7 @@ def main() -> None:
         if not session:
             return
         set_userid_override(session["user"]["userid"])
-        HawkConsole(api_token=session["access_token"]).run()
+        HawkConsole(api_token=session["access_token"], api_user=session["user"]).run()
     else:
         HawkConsole().run()
 

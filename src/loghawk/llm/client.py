@@ -107,6 +107,35 @@ class LiteLLMClient:
             )
         return str(content), response
 
+    def complete_tool_turn(
+        self, messages: list[dict], tools: list[dict], *, timeout: float,
+        require_tool: bool = False,
+    ) -> dict:
+        """Native tool responses may legitimately contain no assistant text."""
+        from litellm import completion
+
+        kwargs = self._chat_kwargs(config.LH_LLM_TOOL_MODEL)
+        kwargs.update(messages=messages, temperature=0.1, timeout=timeout,
+                      num_retries=0, max_tokens=config.LH_LLM_TOOL_MAX_TOKENS)
+        if config.LH_LLM_PROVIDER == "ollama":
+            kwargs["num_ctx"] = config.LH_LLM_TOOL_CONTEXT_LENGTH
+        if tools:
+            kwargs.update(
+                tools=tools,
+                tool_choice="required" if require_tool else "auto",
+            )
+        response = completion(**kwargs)
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            raise RuntimeError("Tool model reached its output-token limit; increase LH_LLM_TOOL_MAX_TOKENS.")
+        message = choice.message.model_dump(exclude_none=True)
+        result = {"role": "assistant", "content": message.get("content") or ""}
+        if message.get("tool_calls"):
+            result["tool_calls"] = message["tool_calls"]
+        if not result["content"] and not result.get("tool_calls"):
+            raise RuntimeError("Tool model returned neither text nor tool calls.")
+        return result
+
     def stream(
         self,
         messages: Sequence[dict[str, str]],

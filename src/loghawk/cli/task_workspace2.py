@@ -66,8 +66,8 @@ def get_artifact(task_id: str, artifact_id: str) -> dict | None:
     return task_store.get_artifact_version(task_id, artifact_id, _DATABASE_ROLE)
 
 
-def save_artifact(task_id: str, content: str) -> dict | None:
-    return task_service.save_artifact_version(task_id, content, _DATABASE_ROLE)
+def save_artifact(task_id: str, content: str, *, arguments_schema: dict | None = None) -> dict | None:
+    return task_service.save_artifact_version(task_id, content, _DATABASE_ROLE, arguments_schema=arguments_schema)
 
 
 def delete_artifact(task_id: str, artifact_id: str) -> bool:

@@ -51,6 +51,7 @@ def _task_tables(metadata: MetaData) -> dict[str, Table]:
         Column("userid", String, nullable=True),
         Column("version", Integer, nullable=False),
         Column("content", Text, nullable=False),
+        Column("arguments_schema_json", Text, nullable=True),
         Column("created_at", String, nullable=False),
         Column("deleted_at", String, nullable=True),
         Column("approved", Boolean, nullable=False, server_default=false()),
@@ -141,6 +142,7 @@ collector_registry = Table(
     Column("arguments_schema_json", Text, nullable=False),
     Column("approved", Boolean, nullable=False, server_default=true()),
     Column("enabled", Boolean, nullable=False, server_default=true()),
+    Column("execution_policy", String, nullable=False, server_default="manual"),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
@@ -159,6 +161,35 @@ collector_runs = Table(
 )
 Index("collector_runs_user_started", collector_runs.c.userid, collector_runs.c.started_at)
 Index("collector_runs_name_started", collector_runs.c.collector_name, collector_runs.c.started_at)
+
+llm_tool_requests = Table(
+    "llm_tool_requests", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("origin_software", String, nullable=False, server_default="console"),
+    Column("status", String, nullable=False),
+    Column("state_json", Text, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+llm_tool_calls = Table(
+    "llm_tool_calls", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("request_id", String, ForeignKey("llm_tool_requests.id", ondelete="CASCADE"), nullable=False),
+    Column("origin", String, nullable=False, server_default="AI"),
+    Column("origin_userid", String, nullable=False),
+    Column("collector_name", String, nullable=False),
+    Column("collector_version", String, nullable=False),
+    Column("artifact_id", String, nullable=True),
+    Column("origin_software", String, nullable=False, server_default="console"),
+    Column("status", String, nullable=False),
+    Column("arguments_json", Text, nullable=False),
+    Column("run_id", String, nullable=True),
+    Column("result_text", Text, nullable=True),
+    Column("started_at", String, nullable=False),
+    Column("completed_at", String, nullable=True),
+)
 
 task_runs = Table(
     "task_runs", SERVER_METADATA,

@@ -119,7 +119,7 @@ def save_task_artifact(
         raise HTTPException(status_code=404, detail="Task not found")
     _require_owner_or_manager(task, user)
     try:
-        result = task_service.save_artifact_version(task_id, body.content)
+        result = task_service.save_artifact_version(task_id, body.content, arguments_schema=body.arguments_schema)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if result is None:
@@ -220,7 +220,10 @@ def run_task(
         raise HTTPException(status_code=409, detail="This Task is disabled by its execution policy.")
     if not artifact.get("approved") or not artifact.get("enabled"):
         raise HTTPException(status_code=409, detail="API execution requires this version to be approved and enabled.")
-    return task_runner.run_version(task, artifact, user["userid"], body.arguments)
+    try:
+        return task_runner.run_version(task, artifact, user["userid"], body.arguments)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/{task_id}/messages")

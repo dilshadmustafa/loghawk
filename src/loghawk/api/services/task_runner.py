@@ -9,12 +9,15 @@ from loghawk.api.services import task_store2
 
 
 def run_version(
-    task: dict, artifact: dict, userid: str, arguments: dict[str, Any] | None = None
+    task: dict, artifact: dict, userid: str, arguments: dict[str, Any] | None = None, *, timeout: float = 300
 ) -> dict:
+    if artifact.get("arguments_schema") is not None:
+        from loghawk.collectors.contracts import validate_arguments
+        arguments = validate_arguments(artifact["arguments_schema"], arguments or {})
     run_id, started_at = task_store2.start_task_run(task["id"], artifact["id"], userid)
     try:
         result = lhrunner.run_artifact(
-            task["artifact_type"], artifact["content"], arguments=arguments
+            task["artifact_type"], artifact["content"], arguments=arguments, timeout=timeout
         )
     except Exception as exc:
         result = {
