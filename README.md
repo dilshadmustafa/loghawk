@@ -2219,8 +2219,6 @@ Automatic execution requires an approved, enabled collector with
 Auto-Approved policy and Review Input Args unchecked.
 
 ![Web UI automatic RCA — screen 1](loghawk_webui_RCA_auto_screen1.jpg)
-![Web UI automatic RCA — screen 2](loghawk_webui_RCA_auto_screen2.jpg)
-![Web UI automatic RCA — screen 3](loghawk_webui_RCA_auto_screen3.jpg)
 ![Web UI automatic RCA — screen 4](loghawk_webui_RCA_auto_screen4.jpg)
 
 #### Execution status and evidence
