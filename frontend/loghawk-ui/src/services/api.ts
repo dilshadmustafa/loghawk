@@ -221,6 +221,11 @@ export const confirmRcaCollector = (requestId: string, confirmationId: string, a
     method: "POST", body: JSON.stringify({ confirmation_id: confirmationId, approved, arguments: reviewedArguments }),
   });
 
+export const retryRcaExplanation = (requestId: string) =>
+  request<import("../types/api").RcaAnswer>(`/rca/chat/${encodeURIComponent(requestId)}/explanation/retry`, {
+    method: "POST",
+  });
+
 export const getBuiltinCollectors = () =>
   request<import("../types/api").BuiltinCollector[]>("/builtin-collectors");
 export const setBuiltinCollectorEnabled = (name: string, enabled: boolean) =>

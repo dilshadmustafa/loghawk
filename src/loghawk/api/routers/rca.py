@@ -37,3 +37,16 @@ def confirm(request_id: str, body: Confirmation, user: dict = Depends(require_we
                             headers={"X-LogHawk-Execution": "not-started"}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/chat/{request_id}/explanation/retry")
+def retry_explanation(request_id: str, user: dict = Depends(require_webui_user)) -> dict:
+    from loghawk.api.services import collector_tool_service
+    try:
+        return collector_tool_service.retry_explanation(
+            request_id, user["userid"], origin_software="web",
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

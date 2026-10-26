@@ -192,6 +192,11 @@ export interface RcaExecutionSummary {
   }[];
 }
 export interface RcaAnswer {
+  explanation?: {
+    status: "RUNNING" | "COMPLETED" | "FAILED";
+    can_retry: boolean;
+    attempts: number;
+  };
   execution?: RcaExecutionSummary;
   response: string;
   status?: string;

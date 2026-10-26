@@ -1865,6 +1865,16 @@ When the services are ready, open [http://localhost:5173](http://localhost:5173)
 
 #### How to schedule LogHawk pipeline run using CronJob
 
+##### Typical Usage
+
+LogHawk Pipelines can run in **Train only**, **Detect only**, or **Train & Detect** mode.
+
+1. Run a **Train-only** Pipeline once, using External/Internal S3 input locations containing logs, metrics, and traces from your QA, UAT, or Pre-Prod environments. Save the trained ML models to a RustFS/Internal S3 bucket and batch folder.
+
+2. Schedule a **Detect-only** Pipeline to run **every 15 minutes**, using External/Internal S3 input locations containing Production logs, metrics, and traces. Configure its processing output to use the **same RustFS/Internal S3 bucket and batch folder** where the Train-only Pipeline saved the ML models.
+
+Use training data that represents expected Production behavior, with compatible schemas and feature groups, so the trained models are suitable for detecting Production anomalies.
+
 On Linux or macOS, you can use `cron` to start a saved Web UI Pipeline on a schedule. The `run_pipeline_email.sh` launcher defaults to the Pipeline named `pce3` and starts `loghawk.admin.pipeline_cron`. Set `LH_PIPELINE_NAME` in `run_pipeline_email.sh` to run a different saved Pipeline.
 
 Before scheduling it, make sure the LogHawk API, Temporal server, and Temporal worker are running. Configure SMTP in the repository-root `.env` file so LogHawk can email the completion result:
@@ -1952,7 +1962,11 @@ Document upload — Windows: local_doc_upload_UI.bat
 
 ### LogHawk Web UI capabilities
 
-The Web UI provides a browser-based way to configure and run LogHawk pipelines:
+The Web UI provides a browser-based interface for pipelines, RAG, versioned
+Tasks and Collectors, user management, and AI-assisted RCA.
+
+The left navigation groups features under **ConfigSets & Pipelines**,
+**RAG Operations**, **Tasks & Collectors**, **AI-Assisted RCA**, and **Account**.
 
 ![LogHawk Web UI sign-in screen](loghawk_webui_screen1.jpg)
 ![LogHawk Web UI Pipelines page](loghawk_webui_screen2.jpg)
@@ -1964,7 +1978,17 @@ The Web UI provides a browser-based way to configure and run LogHawk pipelines:
 - Create Pipelines that select a Config Set and run Train, Detect, or both phases.
 - Launch saved Pipelines and monitor their status and Temporal workflow run details.
 - Use Quick Run to start a pipeline without first creating a saved Pipeline.
-- Create Tasks to collaborate with the configured LLM on n8n workflow JSON, Python programs, or Bash/PowerShell scripts.
+- Create AI-assisted artifacts of type Python, Bash, PowerShell, Windows CMD,
+  or n8n workflow JSON.
+- Organize artifacts as General Tasks, Collectors, Remediation Tasks, or
+  Rollback Tasks. Add descriptions to help users and AI discover their purpose.
+- Use dedicated Create/List links for Collectors, Remediation Tasks, and
+  Rollback Tasks. List Tasks includes all task kinds.
+- Manage built-in collectors through Built-in Collectors.
+- Review saved versions, approve and enable eligible versions, and configure
+  their execution policy.
+- Use RCA Chat to discover eligible collectors, review input arguments,
+  collect evidence, and obtain an AI explanation.
 - Edit generated artifacts and save versions explicitly. Browse version history, select a version, download it, or delete it.
 - Import a saved n8n workflow version into a customer/user-managed n8n instance. Imported workflows remain inactive; review and activate them in n8n.
 - Upload documents and crawl websites for indexing in LanceDB, then ask questions about the indexed content through RAG chat.
@@ -1977,7 +2001,131 @@ Sign-in is required to use the Web UI. On first API server startup, LogHawk crea
 |---|---|---|
 | `admin` | `admin` | Administrator |
 
-Change the initial password from **Account Settings** after signing in. Administrators can create users and assign the User or Administrator role, and can delete users subject to safeguards against deleting their own account or the last active Administrator. Deleting a user also removes their sessions and Hawk Console history; their tasks and RAG documents remain.
+Change the initial password from **Account Settings** after signing in.
+Administrators can create users with the Administrator, Power User, or User
+role. User creation includes an initial password and confirmation field.
+Administrators can delete users, subject to safeguards against deleting their
+own account or the last active Administrator. Deletion also removes the user's
+sessions and Hawk Console history; their tasks and RAG documents remain.
+
+#### Roles and permissions
+
+These permissions apply to authenticated server operations. For custom Tasks,
+an owner is the user who created the Task.
+
+| Capability | Administrator | Power User | User |
+|---|---|---|---|
+| Create Tasks and Collectors | Yes | Yes | Yes |
+| Edit descriptions, artifacts, and argument schemas | Any Task | Any Task | Own Tasks |
+| Delete Tasks or saved versions | Any Task | Any Task | Own Tasks |
+| Approve Version | Yes | Yes | No |
+| Enable/Disable Version | Any Task | Any Task | Own Tasks |
+| Set Manual, AI-Assisted, or Disabled policy | Any Task | Any Task | Own Tasks |
+| Set Auto-Approved policy | Yes | Yes | No |
+| Run an approved, enabled version through the API | Yes | Yes | Yes |
+| Create/delete users and assign roles at creation | Yes | No | No |
+| Change own password | Yes | Yes | Yes |
+
+For built-in collectors, all three roles can enable or disable them.
+Only Administrators and Power Users can change built-in collector approval
+or execution policy.
+
+Administrators must also use approved, enabled versions for API execution.
+The Disabled execution policy blocks API execution for every role.
+
+#### Task versions, approval, and enablement
+
+Task kind describes the purpose: **General**, **Collector**, **Remediation**,
+or **Rollback**. Artifact type describes the implementation: **Python**,
+**Bash**, **PowerShell**, **Windows CMD**, or **n8n**.
+
+Categories are stored in uppercase, so `general` and `General` belong to the
+same category. Tasks also have a description and owning user ID.
+
+Generated code is shown as an editable draft. Generation does not execute it
+or automatically save an artifact version. Save Version applies the relevant
+artifact validation, including Python syntax checking and n8n JSON validation.
+
+Saving changes to an older version creates a new version; it does not
+overwrite the selected version's code or argument schema. Each newly saved
+version starts **unapproved and disabled**.
+
+| Control | Meaning | Who can use it? |
+|---|---|---|
+| Approve Version | Records approval of that saved version and its argument schema | Administrator or Power User |
+| Enable Version | Makes that version available for execution, subject to approval and policy | Administrator, Power User, or the Task owner |
+| Disable Version | Prevents that version from being run through the API | Administrator, Power User, or the Task owner |
+
+Select the required saved version before approving or enabling it. Approval
+and enablement do not carry over to a newly saved version.
+
+#### Execution policies
+
+These policies govern server/API execution. All executable versions must
+also be approved and enabled.
+
+| Policy | Human-initiated API execution | AI collector execution |
+|---|---|---|
+| Manual (`manual`) | Allowed when the user explicitly invokes it | Not offered to AI |
+| AI-Assisted (`ai-assisted`) | Allowed | Requires human execution confirmation |
+| Auto-Approved (`auto-approved`) | Allowed | Can proceed without execution confirmation, unless Review Input Args is checked |
+| Disabled (`disabled`) | Blocked | Not offered to AI |
+
+Typing `/task` or `/collect` is a human execution request. Manual policy does
+not add a second Yes/No prompt to these API commands.
+
+Current AI tool calling executes eligible **Collectors**. General,
+Remediation, and Rollback Tasks can be created and managed, but the RCA
+collector dispatcher does not automatically execute them.
+
+Local `/taskrun` and `/collectrun` are development commands. They ask for
+Y/N confirmation and do not require server approval or enablement.
+
+#### Arguments schema
+
+All task kinds support an optional Arguments schema JSON field, saved with
+the artifact version. Arguments are validated before execution.
+
+Saving a blank schema or `{}` stores an explicit no-arguments schema:
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "required": [],
+  "additionalProperties": false
+}
+```
+
+This accepts `{}` and rejects extra argument fields. It does not mean
+“accept any arguments.”
+
+For a collector accepting a PromQL query, use:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}
+```
+
+Scripts receive validated arguments through `LH_RUNNER_ARGUMENTS_JSON`.
+For Python:
+
+```python
+import json
+import os
+
+arguments = json.loads(os.environ.get("LH_RUNNER_ARGUMENTS_JSON", "{}"))
+```
 
 #### API addresses
 
@@ -1989,7 +2137,14 @@ Change the initial password from **Account Settings** after signing in. Administ
 Set these addresses in the `.env` file so the API is reachable from the processes or containers that use it. They may differ when the API binds to one interface but clients reach it through another address.
 
 The Web UI starts and monitors workflows; processing continues to run in the Temporal worker.
-LogHawk does not execute generated Python or shell artifacts. n8n is an optional, separately Customer-managed integration.
+
+Generating an artifact does not execute it. Approved and enabled saved
+Python, Bash, PowerShell, and Windows CMD versions can run through the API
+using lhrunner, subject to execution policy. Local development runs are
+available through Hawk Console.
+
+n8n is an optional, separately Customer-managed integration. LogHawk imports
+saved workflow JSON into n8n; it does not execute those workflows itself.
 
 #### Configure Customer/User managed n8n details
 
@@ -2002,11 +2157,167 @@ LogHawk uses these settings to connect to the n8n instance when importing a save
 
 `N8N_HOST`, `N8N_PORT`, `N8N_PROTOCOL`, `N8N_SECURE_COOKIE`, `N8N_WEBHOOK_URL`, and `GENERIC_TIMEZONE` configure the n8n runtime. They are not substitutes for the LogHawk connection URL and API key.
 
+### AI-assisted RCA and collector tool calling
+
+Open **AI-Assisted RCA > RCA Chat** in the Web UI, or use the AI/LLM Terminal
+in signed-in Hawk Console.
+
+Example:
+
+```text
+Use the Prometheus collector to query Kubernetes metrics.
+```
+
+The API discovers approved, enabled collectors with an eligible execution
+policy and argument schema. The LLM requests a collector and exact version;
+the server validates the request and executes it through deterministic code.
+
+#### Built-in and custom collectors
+
+| Built-in collector | Purpose |
+|---|---|
+| `prometheus-query` | Read-only instant PromQL query |
+| `kubernetes-pods` | Pod names and status within a namespace |
+| `jira-issue-search` | Read-only Jira issue search using JQL |
+
+Built-in collectors appear in **Built-in Collectors**, separately from
+user-created Collector Tasks. Their initial registration is approved and
+enabled with Manual policy. An Administrator or Power User must select an
+AI-eligible policy before AI can discover them.
+
+For custom collectors, save an argument schema and approve and enable the
+latest saved version. If the latest version is ineligible, AI discovery does
+not fall back to an older approved version.
+
+![Web UI built-in collector management](loghawk_webui_builtin_collector_screen1.jpg)
+
+#### Review Input Args
+
+The checkbox defaults to checked. In Web UI it appears at the top of RCA
+Chat; in Hawk Console it appears in the Editor area.
+
+| Setting | Auto-Approved collector | AI-Assisted collector |
+|---|---|---|
+| Checked | Review/edit arguments, then Confirm & Execute or Cancel | Review/edit arguments, then Confirm & Execute or Cancel |
+| Unchecked | Executes automatically; arguments appear with the result | Still requires execution confirmation; arguments are read-only |
+
+This reviews **input arguments only**. It does not approve collector code
+or change the saved version's approval or enabled status.
+
+The API validates edited arguments against the saved schema. Invalid
+arguments leave the confirmation available for correction. Unchanged
+masked values retain their original server-side values.
+
+##### Web UI RCA with argument review
+
+![Web UI RCA argument review — screen 1](loghawk_webui_RCA_screen1.jpg)
+![Web UI RCA argument review — screen 2](loghawk_webui_RCA_screen2.jpg)
+
+##### Web UI RCA with automatic execution
+
+Automatic execution requires an approved, enabled collector with
+Auto-Approved policy and Review Input Args unchecked.
+
+![Web UI automatic RCA — screen 1](loghawk_webui_RCA_auto_screen1.jpg)
+![Web UI automatic RCA — screen 2](loghawk_webui_RCA_auto_screen2.jpg)
+![Web UI automatic RCA — screen 3](loghawk_webui_RCA_auto_screen3.jpg)
+![Web UI automatic RCA — screen 4](loghawk_webui_RCA_auto_screen4.jpg)
+
+#### Execution status and evidence
+
+Use the server-reported execution status, collector version, and run ID to
+determine what ran. An AI statement such as “proceeding with execution” is
+not evidence that execution occurred.
+
+- Web UI: expand **Input arguments** and **Collector evidence**.
+- Hawk Console: select **Show RCA Output** to view the result in the Editor
+  pane, with Copy, Download, and Close controls.
+- Earlier Web chat messages retain their original execution status.
+
+**Redacted** means sensitive values such as credentials and tokens are
+masked. **Compacted** means repeated or unnecessary representation is reduced.
+**Truncated** means some content has been omitted.
+
+LogHawk retains returned, redacted collector evidence separately from the
+smaller model input. Prometheus compaction factors out repeated labels and
+reports included and omitted series. Model evidence remains valid JSON.
+Source collectors and scripts may themselves limit output.
+
+For example, `kube_pod_info` provides metadata. A value of `1` does not prove
+that a pod is healthy or ready.
+
+AI tool audit records identify `origin=AI`, the originating login in
+`origin_userid`, and `origin_software=web` or `console`. Explanation attempts
+are recorded separately from collector execution outcomes.
+
+#### Tool-calling settings and timeouts
+
+Configure these values in `.env` on the API server:
+
+| Variable | Purpose | Code default |
+|---|---|---|
+| `LH_LLM_TOOL_CALLING_ENABLED` | Enable collector tool calling in Web RCA and signed-in Console chat | `false` |
+| `LH_LLM_TOOL_MODEL` | Tool-capable model using the configured LiteLLM provider | `qwen3:4b-instruct` |
+| `LH_LLM_TOOL_CONTEXT_LENGTH` | Input/output context budget; also sets Ollama context length | `4096` |
+| `LH_LLM_TOOL_MAX_TOKENS` | Maximum generated tokens per model response | `1024` |
+| `LH_LLM_TOOL_MAX_CALLS` | Tool-call limit per request, including discovery | `3` |
+| `LH_LLM_TOOL_TIMEOUT_SECONDS` | Shared discovery/execution processing budget; excludes human confirmation wait | `120` |
+| `LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS` | Separate budget for final explanation and each explanation retry | `180` |
+| `LH_LLM_TOOL_MAX_RESULT_CHARS` | Maximum characters per model tool result; also bounds discovery responses | `6000` |
+
+Example using the current repository settings:
+
+```ini
+LH_LLM_TOOL_CALLING_ENABLED=true
+LH_LLM_TOOL_MODEL=qwen3:4b-instruct
+LH_LLM_TOOL_CONTEXT_LENGTH=8192
+LH_LLM_TOOL_MAX_TOKENS=1024
+LH_LLM_TOOL_MAX_CALLS=3
+LH_LLM_TOOL_TIMEOUT_SECONDS=300
+LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS=180
+LH_LLM_TOOL_MAX_RESULT_CHARS=6000
+```
+
+The tool model uses `LH_LLM_PROVIDER`, `LH_LLM_BASE_URL`, and the associated
+provider credentials. Task drafting can separately use
+`LH_LLM_CODEASSIST_MODEL`; leaving that blank uses `LH_LLM_MODEL`.
+
+The final explanation uses a separate model call without execution tools.
+Its timeout is additional to the discovery/execution budget.
+
+Restart the API server after changing its settings. Restart Hawk Console
+after updating its local configuration; its HTTP timeout accounts for both
+processing and explanation budgets.
+
+#### Retry AI Explanation
+
+Collector execution may succeed even when the subsequent AI explanation
+times out. The saved execution result remains available.
+
+When explanation generation fails:
+
+1. Inspect the server-reported execution status and saved evidence.
+2. Select **Retry AI Explanation** in the Web response or Console RCA Output.
+3. LogHawk uses the saved question and evidence to generate another explanation.
+
+This retry never rediscovers or reruns collectors. The API checks request
+ownership and prevents concurrent active explanation attempts. Each attempt
+has its own explanation timeout and audit record.
+
+Retry support applies to requests created with explanation context saved
+by this implementation. Older truncated evidence cannot be reconstructed.
+
+Model transport retries are disabled for this tool flow. A bounded
+correction is allowed when the model narrates instead of issuing a required
+tool call; this is not an automatic retry of collector execution.
+
 ### Hawk Console
 
 Hawk Console is LogHawk’s four-pane terminal interface for Windows, Linux, and macOS.
 
-Hawk Console is a standalone application that can work independently of other LogHawk components, providing operational intelligence, expert guidance, and assistance with root-cause analysis (RCA).
+Hawk Console provides operational intelligence, expert guidance, and
+assistance with RCA. Local mode can work independently of the LogHawk API;
+signed-in mode requires a reachable API server.
 
 Hawk Console has two modes:
 
@@ -2028,10 +2339,15 @@ Python 3.12 or newer is required. From the repository root, run the setup script
 
 ```sh
 bash firsttime_setup_hawkconsole.sh
-source venv_hawkconsole/bin/activate
+conda activate venv_hawkconsole
 ```
 
 These scripts create a separate `venv_hawkconsole` environment and install Hawk Console’s dependencies. They do not start RustFS or Temporal.
+
+Linux/macOS setup uses Conda. If Conda is not initialized in your shell,
+follow the activation commands printed by the setup script.
+The setup also invokes setup_tools to prepare the separate `venv_tools`
+environment used for Python script execution.
 
 With the Hawk Console environment active, start it from the repository root:
 
@@ -2074,24 +2390,102 @@ Command Terminal examples:
 /ragupload "/mnt/c/Users/ACER/Downloads/Science and Sports (Ch 5 to 8).pdf"
 /ragscrape https://economictimes.indiatimes.com/
 ```
-- **Editor pane:** View and edit task artifacts, and manage saved versions.
+- **Editor pane:** Create and edit Tasks, manage descriptions, policies,
+  argument schemas and saved versions, review proposed commands, and display
+  command output or RCA evidence.
+
+In signed-in mode, collector-enabled chat uses the shared API RCA flow.
+**New Chat** clears the active conversation context without deleting saved
+history. Previous saved conversations are not automatically loaded into a
+new chat. **Show RCA Output** opens the latest server-reported RCA result.
+
+Command history supports Up/Down navigation and editing. Signed-in history
+is synchronized with the server; local mode uses the Console database.
+
+The proposed-command Editor includes Task name, artifact type, category,
+and Quick Save controls. Quick Save creates a saved version and applies
+the relevant validation; it does not execute the command.
+
+#### Hawk Console RCA with argument review
+
+![Hawk Console RCA argument review — screen 1](loghawk_console_RCA_screen1.jpg)
+![Hawk Console RCA argument review — screen 2](loghawk_console_RCA_screen2.jpg)
+
+#### Hawk Console RCA with automatic execution
+
+Automatic execution requires an approved, enabled collector with
+Auto-Approved policy and Review Input Args unchecked.
+
+![Hawk Console automatic RCA — screen 1](loghawk_console_RCA_auto_screen1.jpg)
+![Hawk Console automatic RCA — screen 2](loghawk_console_RCA_auto_screen2.jpg)
 
 For an LLM-proposed command, type `YES` or `yes` to run it in Command Terminal 1. Type `E` or `e` to edit it in the Editor pane; after confirming the edits, the command is shown again for confirmation. Type `N` or anything else to cancel.
 
-#### Hawk Console task commands
+#### Hawk Console commands and help
+
+Enter `/help` in the **AI/LLM Terminal**, **Command Terminal 1**, or
+**Command Terminal 2**. The Editor pane displays command names, parameters,
+supported terminals, descriptions, and RAG duplicate-handling guidance.
+Use Close to dismiss the help pane.
+
+| Command | Terminal | Purpose |
+|---|---|---|
+| `/help` | All three terminals | Open the command reference in the Editor pane |
+| `/rag <question>` | AI/LLM | Query indexed documents |
+| `/command <request>` | AI/LLM | Propose commands for review, editing, and confirmation |
+| `/tasknew` | Command 1 or 2 | Create an AI-assisted Task; select kind and artifact type |
+| `/tasklist` | Command 1 or 2 | List Tasks, categories, types, policies, and user IDs |
+| `/taskedit <name>` | Command 1 or 2 | Load a Task into the Editor |
+| `/taskview <name>` | Command 1 or 2 | Alias for `/taskedit` |
+| `/taskdelete <name>` | Command 1 or 2 | Delete a Task after confirmation |
+| `/task <name> [JSON arguments]` | Command 1 or 2, signed in | Execute through the API |
+| `/taskrun <name> [JSON arguments]` | Command 1 or 2 | Confirm and execute locally |
+| `/collectlist` | Command 1 or 2, signed in | List built-in and custom collectors |
+| `/collectview <name>` | Command 1 or 2 | Open a saved Collector in the Editor; built-in details require sign-in |
+| `/collect <name> [JSON arguments]` | Command 1 or 2, signed in | Execute a collector through the API |
+| `/collectrun <name> [JSON arguments]` | Command 1 or 2 | Confirm and execute a collector locally |
+| `/collectenable <name>` / `/collectdisable <name>` | Command 1 or 2, signed in | Change collector enablement, subject to permissions |
+| `/collectpolicy <name> <policy>` | Command 1 or 2, signed in | Administrator/Power User: change a built-in collector's policy |
+| `/ragupload <path>` | Command 1 or 2 | Index a supported file or folder |
+| `/ragscrape <url>` | Command 1 or 2 | Crawl and index a website |
+
+Create a custom Collector through `/tasknew` by selecting the Collector kind.
+Use `/taskedit` to edit its metadata, code, schema, and policy.
+
+Examples:
 
 ```text
-/tasknew                 Create a task with AI-assistance in the Editor pane
-/tasklist                List tasks in the Editor pane
-/taskview <taskname>     Load a task artifact into the Editor pane
-/taskrun <taskname>      Load the latest saved version and request confirmation
+/help
+/collect prometheus-query {"query":"up"}
+/collectrun prometheus-query {"query":"up"}
+/collectrun kubernetes-pods {"namespace":"monitoring","limit":20}
+/task "My Task" {}
+/taskrun "My Task" {}
 ```
 
-`/tasknew` supports **Python**, **Shell**, and **n8n** task types, with a task name and category. The Editor pane lets you select a saved version, edit the artifact, explicitly save a new version, download it, or delete a version. Draft changes are not saved automatically.
+API commands execute on the API host. Local `/taskrun` and `/collectrun`
+execute on the machine running Hawk Console, after Y/N confirmation.
+Python scripts use `venv_tools`; other types require the corresponding
+shell on the execution host. Windows CMD requires Windows.
 
-`/taskrun` asks for confirmation before running Python or Shell task artifacts. Hawk Console does not execute n8n workflow JSON; import it into a customer-managed n8n instance to run it.
+Quote names and file paths containing spaces. For local development,
+approval and enablement are not required. n8n JSON is imported into
+customer-managed n8n rather than executed by lhrunner.
 
-Hawk Console stores its local task records and versions in `LH_DATA_DIR/db/loghawk_local_hawkconsole.sqlite3`.
+#### Tools environment and storage
+
+`setup_tools.bat` and `setup_tools.sh` install `requirements_tools.txt` into
+`venv_tools`. Connector settings belong in `.env_tools`, including Prometheus,
+Kubernetes kubeconfig, and Jira connection settings. Configure them on the
+machine where execution occurs.
+
+| Mode | Database setting | LanceDB settings |
+|---|---|---|
+| Signed-in Web UI / Hawk Console | `LH_SERVER_DATABASE_URL` | `LH_SERVER_LANCEDB_FILE_PATH`, `LH_SERVER_LANCEDB_TABLE_NAME` |
+| `hawk --local` | `LH_CONSOLE_DATABASE_URL` | `LH_CONSOLE_LANCEDB_FILE_PATH`, `LH_CONSOLE_LANCEDB_TABLE_NAME` |
+
+Local and server Tasks, histories, and RAG indexes are separate. Signed-in
+Console operations use authenticated API calls; local mode uses local storage.
 
 ### LLM Provider References
 

@@ -136,6 +136,13 @@ class LiteLLMClient:
             raise RuntimeError("Tool model returned neither text nor tool calls.")
         return result
 
+    def explain_collector_evidence(self, messages: list[dict], *, timeout: float) -> str:
+        """Generate text only. No tools, execution dispatcher, or automatic retries."""
+        message = self.complete_tool_turn(messages, [], timeout=timeout)
+        if message.get("tool_calls"):
+            raise RuntimeError("Explanation model returned tool calls; none were executed.")
+        return message["content"]
+
     def stream(
         self,
         messages: Sequence[dict[str, str]],

@@ -81,7 +81,7 @@ def record(request_id: str, target: dict, arguments: dict, status: str,
                    VALUES (?, ?, 'AI', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                    (call_id, request_id, origin_userid, request["origin_software"], target.get("name", "unknown"), str(target.get("version", "")),
                     target.get("artifact_id"), status, json.dumps(arguments), evidence, run_id,
-                    timestamp, None if status == "RUNNING" else timestamp))
+                    timestamp, None if status in {"RUNNING", "EXPLANATION_RUNNING"} else timestamp))
     return call_id
 
 
@@ -104,7 +104,7 @@ def execution_summary(request_id: str) -> dict:
             discovery_calls += 1
             continue
         status = row["status"]
-        if status in {"CONFIRMED", "AWAITING_CONFIRMATION", "REQUEST_SETTINGS"}:
+        if status.startswith("EXPLANATION_") or status in {"CONFIRMED", "AWAITING_CONFIRMATION", "REQUEST_SETTINGS"}:
             continue
         bucket = {"COMPLETED": "succeeded", "FAILED": "failed", "REJECTED": "rejected",
                   "CANCELLED": "cancelled", "RUNNING": "running"}.get(status)
@@ -125,3 +125,69 @@ def execution_summary(request_id: str) -> dict:
     return {"request_id": request_id, "request_status": request["status"],
             "discovery_calls": discovery_calls, **counts, "awaiting_confirmation": waiting,
             "summary": "; ".join(parts) + ".", "events": events}
+
+
+def begin_explanation(request_id: str, userid: str, origin_software: str,
+                      timeout: int, context: dict | None = None) -> dict:
+    """Atomically claim a text-only explanation; retain no runnable collector state."""
+    timestamp = now()
+    with connect("server") as db:
+        row = db.execute("SELECT * FROM llm_tool_requests WHERE id = ? AND userid = ?",
+                         (request_id, userid)).fetchone()
+        if not row or row["origin_software"] != origin_software:
+            raise PermissionError("Explanation request not found or not owned by this user.")
+        previous = json.loads(row["state_json"]).get("explanation")
+        if context is None:
+            expired = (previous and previous.get("status") == "RUNNING"
+                       and row["expires_at"] <= timestamp)
+            if not previous or (previous.get("status") != "FAILED" and not expired):
+                raise ValueError("Explanation is not retryable or another attempt is still running.")
+            context = previous["context"]
+        elif row["status"] != "PROCESSING" or previous:
+            raise ValueError("This request has already entered its explanation stage.")
+        explanation = {"status": "RUNNING", "attempt_id": uuid4().hex,
+                       "attempts": (previous or {}).get("attempts", 0) + 1,
+                       "context": context, "response": "", "error": None}
+        lease = (datetime.now(UTC) + timedelta(seconds=timeout + 60)).isoformat()
+        result = db.execute(
+            "UPDATE llm_tool_requests SET state_json = ?, status = 'EXPLAINING', "
+            "expires_at = ?, updated_at = ? WHERE id = ? AND userid = ? "
+            "AND status = ? AND state_json = ?",
+            (json.dumps({"explanation": explanation}), lease, timestamp,
+             request_id, userid, row["status"], row["state_json"]),
+        )
+        if result.rowcount != 1:
+            raise ValueError("Another explanation attempt already claimed this request.")
+    return explanation
+
+
+def finish_explanation(request_id: str, attempt_id: str, response: str, error: str | None) -> None:
+    with connect("server") as db:
+        row = db.execute("SELECT state_json FROM llm_tool_requests WHERE id = ?",
+                         (request_id,)).fetchone()
+        state = json.loads(row["state_json"]) if row else {}
+        explanation = state.get("explanation", {})
+        if explanation.get("attempt_id") != attempt_id or explanation.get("status") != "RUNNING":
+            raise ValueError("This explanation attempt was superseded; no collector was rerun.")
+        explanation.update(status="FAILED" if error else "COMPLETED", response=response, error=error)
+        result = db.execute(
+            "UPDATE llm_tool_requests SET state_json = ?, status = ?, updated_at = ? "
+            "WHERE id = ? AND state_json = ?",
+            (json.dumps(state), "FAILED" if error else "COMPLETED", now(), request_id, row["state_json"]),
+        )
+        if result.rowcount != 1:
+            raise ValueError("Explanation state changed; no collector was rerun.")
+
+
+def explanation_info(request_id: str) -> dict | None:
+    with connect("server") as db:
+        row = db.execute("SELECT state_json, expires_at FROM llm_tool_requests WHERE id = ?",
+                         (request_id,)).fetchone()
+    explanation = json.loads(row["state_json"]).get("explanation") if row else None
+    if not explanation:
+        return None
+    retryable = explanation["status"] == "FAILED" or (
+        explanation["status"] == "RUNNING" and row["expires_at"] <= now()
+    )
+    return {"status": explanation["status"], "can_retry": retryable,
+            "attempts": explanation["attempts"]}

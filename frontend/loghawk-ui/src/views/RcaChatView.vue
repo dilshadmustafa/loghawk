@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ApiError, sendRcaMessage, confirmRcaCollector } from "../services/api";
+import { ApiError, sendRcaMessage, confirmRcaCollector, retryRcaExplanation } from "../services/api";
 import type { RcaMessage, RcaAnswer, RcaExecutionSummary } from "../types/api";
-type ChatEntry = RcaMessage & { requestId?: string; execution?: RcaExecutionSummary };
+type ChatEntry = RcaMessage & { requestId?: string; execution?: RcaExecutionSummary; explanation?: RcaAnswer["explanation"] };
 const messages = ref<ChatEntry[]>([]);
 const draft = ref("");
 const busy = ref(false);
@@ -29,10 +29,28 @@ function formatEvidence(evidence: string): string {
 function receive(answer: RcaAnswer) {
   pending.value = answer.pending ? answer : null;
   argumentDraft.value = answer.pending ? JSON.stringify(answer.pending.arguments, null, 2) : "";
+  if (answer.explanation && answer.request_id) {
+    // Keep historical execution snapshots; only the latest explanation can be retried.
+    for (const entry of messages.value) {
+      if (entry.requestId === answer.request_id && entry.explanation) entry.explanation.can_retry = false;
+    }
+  }
   if (answer.response || answer.execution) messages.value.push({
-    role: "assistant", content: answer.response || "", requestId: answer.request_id, execution: answer.execution,
+    role: "assistant", content: answer.response || "", requestId: answer.request_id,
+    execution: answer.execution, explanation: answer.explanation,
   });
 }
+async function retryExplanation(message: ChatEntry) {
+  if (busy.value || pending.value || uncertain.value || !message.requestId || !message.explanation?.can_retry) return;
+  busy.value = true;
+  error.value = "";
+  try { receive(await retryRcaExplanation(message.requestId)); }
+  catch (e) {
+    error.value = `Could not receive the AI explanation: ${e instanceof Error ? e.message : String(e)}. This retry does not execute collectors.`;
+  }
+  finally { busy.value = false; }
+}
+
 async function send() {
   if (busy.value || pending.value || uncertain.value || !draft.value.trim()) return;
   const submitted = draft.value.trim();
@@ -117,6 +135,10 @@ async function decide(approved: boolean) {
           <p>The assistant's narrative below is not execution confirmation.</p>
         </section>
         <div class="message-text">{{ message.content }}</div>
+        <div v-if="message.explanation?.can_retry">
+          <button :disabled="busy || !!pending || uncertain" @click="retryExplanation(message)">Retry AI Explanation</button>
+          <p>Uses saved evidence. Collectors will not run again.</p>
+        </div>
       </article>
     </div>
     <p v-if="busy" role="status">Processing request…</p>

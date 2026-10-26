@@ -355,6 +355,7 @@ class HawkConsole(App[None]):
         self._command_history_draft = {"command-one": "", "command-two": ""}
         self._help_previous_visibility: dict[str, bool] | None = None
         self._latest_rca_output = ""
+        self._rca_retry_request_id = None
         self._rca_previous_visibility: dict[str, bool] | None = None
 
     def compose(self) -> ComposeResult:
@@ -521,6 +522,7 @@ class HawkConsole(App[None]):
                 with Horizontal(id="rca-output-toolbar"):
                     yield Button("Copy", id="copy-rca-output")
                     yield Button("Download", id="download-rca-output")
+                    yield Button("Retry AI Explanation", id="retry-rca-explanation", disabled=True)
                     yield Button("Close", id="close-rca-output")
             with Container(id="help-pane"):
                 yield Static("Hawk Console Command Help", classes="pane-title")
@@ -1543,7 +1545,8 @@ class HawkConsole(App[None]):
                     result = self._api_client.post_json(
                         "/api/v1/console/chat",
                         {"messages": messages, "review_arguments": review_arguments},
-                        timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS + 30)
+                        timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS
+                                + config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30)
                     )
                     response = result["response"]
                 if not response:
@@ -1641,7 +1644,12 @@ class HawkConsole(App[None]):
     def _finish_tool_chat(self, result: dict) -> None:
         if result.get("execution"):
             self._latest_rca_output = self._format_rca_output(result)
+            self._rca_retry_request_id = (
+                result.get("request_id") if (result.get("explanation") or {}).get("can_retry") else None
+            )
             self.query_one("#show-rca-output", Button).disabled = False
+            if self.query_one("#rca-output-pane", Container).display:
+                self.query_one("#rca-output-text", TextArea).load_text(self._latest_rca_output)
         from rich.text import Text
 
         execution = result.get("execution")
@@ -1703,7 +1711,7 @@ class HawkConsole(App[None]):
                 lines.extend(["", "Collector evidence (redacted; may be truncated):", evidence])
         lines.extend(["", "AI/LLM explanation (not execution confirmation):",
                       str(result.get("response", "")), "",
-                      "Collector evidence is limited by LH_LLM_TOOL_MAX_RESULT_CHARS."])
+                      "Saved collector evidence is independent of the compact model input; source output may be limited."])
         return "\n".join(lines)
 
     def _new_chat(self) -> None:
@@ -1720,7 +1728,9 @@ class HawkConsole(App[None]):
             return
         self._chat_history.clear()
         self._latest_rca_output = ""
+        self._rca_retry_request_id = None
         self.query_one("#show-rca-output", Button).disabled = True
+        self.query_one("#retry-rca-explanation", Button).disabled = True
         self._close_rca_output()
         output = self.query_one("#llm-output", RichLog)
         output.clear()
@@ -1761,6 +1771,40 @@ class HawkConsole(App[None]):
         self.query_one("#rca-output-text", TextArea).load_text(self._latest_rca_output)
         self.query_one("#rca-output-pane", Container).display = True
 
+    def _retry_rca_explanation(self) -> None:
+        if self._api_client is None or not self._rca_retry_request_id:
+            return
+        if (self._chat_busy or self._pending_collector_call or self._pending_llm_command
+                or self._awaiting_llm_command_final_confirmation):
+            self.notify("Finish the current chat or confirmation before retrying the explanation.", severity="warning")
+            return
+        self._chat_busy = True
+        self.query_one("#llm-input", Input).disabled = True
+        self.query_one("#review-input-args", Checkbox).disabled = True
+        self.query_one("#retry-rca-explanation", Button).disabled = True
+        self.query_one("#llm-output", RichLog).write("Retrying AI explanation from saved evidence. No collectors will run.\n")
+        self._run_explanation_retry(self._rca_retry_request_id)
+
+    @work(thread=True, group="hawk-explanation-retry")
+    def _run_explanation_retry(self, request_id: str) -> None:
+        try:
+            result = self._api_client.post_json(
+                f"/api/v1/console/chat/{request_id}/explanation/retry", {},
+                timeout=config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30,
+            )
+        except Exception as exc:
+            self.app.call_from_thread(
+                self._finish_chat, f"Explanation retry failed: {exc}. This retry does not execute collectors.", None,
+            )
+            return
+        response = result.get("response", "")
+        try:
+            self._chat_history.append({"role": "assistant", "content": response})
+            self._persist_chat_message("assistant", response)
+        except Exception as exc:
+            self.app.call_from_thread(self._write_chat_notice, f"Could not save explanation history: {exc}")
+        self.app.call_from_thread(self._finish_tool_chat, result)
+
     def _close_rca_output(self) -> None:
         self.query_one("#rca-output-pane", Container).display = False
         self.query_one("#rca-output-text", TextArea).load_text("")
@@ -1798,7 +1842,8 @@ class HawkConsole(App[None]):
             result = self._api_client.post_json(
                 f"/api/v1/console/chat/{pending['request_id']}/confirm",
                 {"confirmation_id": pending["confirmation_id"], "approved": approved, "arguments": arguments},
-                timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS + 30),
+                timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS
+                                + config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30),
             )
         except Exception as exc:
             # ConsoleApiClient prefixes HTTP validation errors with their status.
@@ -1820,6 +1865,9 @@ class HawkConsole(App[None]):
 
     def _finish_chat(self, error: str | None, response: str | None) -> None:
         self.query_one("#review-input-args", Checkbox).disabled = self._api_client is None
+        self.query_one("#retry-rca-explanation", Button).disabled = (
+            self._api_client is None or not self._rca_retry_request_id
+        )
         output = self.query_one("#llm-output", RichLog)
         if response:
             output.write(response)
@@ -2634,6 +2682,8 @@ class HawkConsole(App[None]):
             self._download_rca_output()
         elif event.button.id == "close-rca-output":
             self._close_rca_output()
+        elif event.button.id == "retry-rca-explanation":
+            self._retry_rca_explanation()
         elif event.button.id == "create-task":
             self._create_task()
         elif event.button.id == "cancel-create-task":
