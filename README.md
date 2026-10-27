@@ -1871,7 +1871,7 @@ LogHawk Pipelines can run in **Train only**, **Detect only**, or **Train & Detec
 
 1. Run a **Train-only** Pipeline once, using External/Internal S3 input locations containing logs, metrics, and traces from your QA, UAT, or Pre-Prod environments. Configure the Train only pipeline using its Config Set to save the trained ML models to a RustFS/Internal S3 bucket and batch folder.
 
-2. Schedule a **Detect-only** Pipeline to run **every 15 minutes**, using External/Internal S3 input locations containing Production logs, metrics, and traces. Configure its processing output to use the **same RustFS/Internal S3 bucket and batch folder** where the Train-only Pipeline saved the ML models.
+2. Schedule a **Detect-only** Pipeline to run **every 15 minutes**, using External/Internal S3 input locations containing Production logs, metrics, and traces. Configure its processing output to use the **same RustFS/Internal S3 bucket and batch folder** where the Train-only Pipeline saved the ML models. You can use the same Config Set for both the Train-only and Detect-only pipelines.
 
 Use training data that represents expected Production behavior, with compatible schemas and feature groups, so the trained models are suitable for detecting Production anomalies.
 
