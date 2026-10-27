@@ -1869,13 +1869,30 @@ When the services are ready, open [http://localhost:5173](http://localhost:5173)
 
 LogHawk Pipelines can run in **Train only**, **Detect only**, or **Train & Detect** mode.
 
-1. Run a **Train-only** Pipeline once, using External/Internal S3 input locations containing logs, metrics, and traces from your QA, UAT, or Pre-Prod environments. Save the trained ML models to a RustFS/Internal S3 bucket and batch folder.
+1. Run a **Train-only** Pipeline once, using External/Internal S3 input locations containing logs, metrics, and traces from your QA, UAT, or Pre-Prod environments. Configure the Train only pipeline using its Config Set to save the trained ML models to a RustFS/Internal S3 bucket and batch folder.
 
 2. Schedule a **Detect-only** Pipeline to run **every 15 minutes**, using External/Internal S3 input locations containing Production logs, metrics, and traces. Configure its processing output to use the **same RustFS/Internal S3 bucket and batch folder** where the Train-only Pipeline saved the ML models.
 
 Use training data that represents expected Production behavior, with compatible schemas and feature groups, so the trained models are suitable for detecting Production anomalies.
 
 On Linux or macOS, you can use `cron` to start a saved Web UI Pipeline on a schedule. The `run_pipeline_email.sh` launcher defaults to the Pipeline named `pce3` and starts `loghawk.admin.pipeline_cron`. Set `LH_PIPELINE_NAME` in `run_pipeline_email.sh` to run a different saved Pipeline.
+
+Set `LH_PIPELINE_BATCH_S3_URL` in `run_pipeline_email.sh` or its environment
+to the RustFS/Internal S3 bucket and batch folder containing the Pipeline's
+incident output. The launcher defaults to `s3://loghawk-data/somefolder/`.
+This location must match the selected Pipeline's processing output location;
+the setting does not change the Pipeline's Config Set.
+
+For example:
+
+```bash
+export LH_PIPELINE_BATCH_S3_URL="s3://loghawk-data/somefolder/"
+```
+
+The runner appends `incidents/correlated_incidents.parquet` to this URL,
+reads that file, and converts the incident data to CSV for the email
+attachment. Configure this variable in the launcher or cron environment,
+not in `.env`.
 
 Before scheduling it, make sure the LogHawk API, Temporal server, and Temporal worker are running. Configure SMTP in the repository-root `.env` file so LogHawk can email the completion result:
 
@@ -1895,12 +1912,13 @@ Edit the crontab with `crontab -e` and add an entry like this, replacing the exa
 ```cron
 PATH=/absolute/path/to/venv312/bin:/usr/local/bin:/usr/bin:/bin
 LH_PIPELINE_NAME=pce3
+LH_PIPELINE_BATCH_S3_URL=s3://loghawk-data/somefolder/
 LH_PIPELINE_USERID=admin
 LH_PIPELINE_PASSWORD=replace-with-your-password
 */15 * * * * /absolute/path/to/loghawk/run_pipeline_email.sh >> "$HOME/loghawk-pipeline-cron.log" 2>&1
 ```
 
-This runs every 15 minutes according to the machine's local cron timezone. Each invocation skips the run if that Pipeline is already running; otherwise it starts the Pipeline and polls until it completes or fails. On completion, it reads `s3://loghawk-data/somefolder/incidents/correlated_incidents.parquet` and emails the incident data as a CSV attachment only when the output object has changed during that run. Configure the internal S3 endpoint and credentials in `.env` so the script can read the Parquet output.
+This runs every 15 minutes according to the machine's local cron timezone. Each invocation skips the run if that Pipeline is already running; otherwise it starts the Pipeline and polls until it completes or fails. On completion, it reads `<LH_PIPELINE_BATCH_S3_URL>/incidents/correlated_incidents.parquet` and emails the incident data as a CSV attachment only when the output object has changed during that run. Configure the internal S3 endpoint and credentials in `.env` so the script can read the Parquet output.
 
 ### Beginner User Guides
 
