@@ -2266,6 +2266,52 @@ AI tool audit records identify `origin=AI`, the originating login in
 `origin_userid`, and `origin_software=web` or `console`. Explanation attempts
 are recorded separately from collector execution outcomes.
 
+#### Audit records, execution records, and saved evidence
+
+All server records below use the database configured by `LH_SERVER_DATABASE_URL`.
+
+| Record | Stored information |
+|---|---|
+| `llm_tool_requests` | AI request owner, originating software, request status, and confirmation/explanation state |
+| `llm_tool_calls` | AI discovery and execution events, collector/version, redacted arguments, evidence, status, timestamps, and execution run ID. Also records explanation attempts. |
+| `collector_runs` | Built-in collector execution metadata: user ID, collector/version, argument names, status, timestamps, short result summary, and error type. Does not store full collector evidence. |
+| `task_runs` | Custom Task/Collector execution metadata, user ID, artifact version reference, status, exit code, stdout, stderr, timestamps, and error type |
+
+##### Saved collector evidence
+
+For **Web UI RCA Chat** and **signed-in Hawk Console AI collector calls**, LogHawk saves the full returned, redacted collector evidence in `llm_tool_calls.result_text` **before model compaction**.
+
+The LLM receives a smaller, compacted representation. This does not replace the saved evidence.
+
+“Full returned” means the output received from the collector or runner:
+
+- Source collectors may limit returned records.
+- Custom script stdout and stderr are each capped at 100,000 characters, followed by a truncation marker when applicable.
+- Sensitive values are masked in the AI evidence record.
+- The separate `task_runs` stdout/stderr fields are stored directly from the runner and do **not** receive the AI evidence redaction step.
+
+##### Which execution paths create these records
+
+| Execution path | Records |
+|---|---|
+| AI invokes a built-in collector | AI audit records plus `collector_runs` |
+| AI invokes a custom Collector Task | AI audit records plus `task_runs` |
+| Human invokes `/collect` through the API | `collector_runs` for built-ins; `task_runs` for custom collectors. No AI evidence record. |
+| Human invokes `/task` through the API | `task_runs`. No AI evidence record. |
+| Local `/taskrun` or `/collectrun` | Output appears in the Console. These paths do not create the server execution/audit records above. Command history is separate. |
+
+##### Inspecting results
+
+In Web UI, expand **Collector evidence**. In Hawk Console, select **Show RCA Output**.
+
+Use the AI **request ID** to find its audit events. Where an execution run ID is recorded, it links to the corresponding `collector_runs` or `task_runs` record. A rejected request may have no execution run ID.
+
+**Retry AI Explanation** reads saved evidence and records another explanation attempt. It does not rerun the collector.
+
+##### Application log files
+
+API and worker console/file logs contain diagnostic messages and exceptions. They are separate from database audit and execution records and should not be treated as the complete evidence archive.
+
 #### Tool-calling settings and timeouts
 
 Configure these values in `.env` on the API server:
