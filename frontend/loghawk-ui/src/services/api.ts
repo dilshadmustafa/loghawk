@@ -241,3 +241,6 @@ export const setBuiltinCollectorApproved = (name: string, approved: boolean) =>
   request<{ name: string; approved: boolean }>(`/builtin-collectors/${encodeURIComponent(name)}/approved`, {
     method: "PUT", body: JSON.stringify({ approved }),
   });
+
+export const getBuiltinCollectorSource = (name: string) =>
+  request<import("../types/api").BuiltinCollectorSource>(`/builtin-collectors/${encodeURIComponent(name)}/source`);

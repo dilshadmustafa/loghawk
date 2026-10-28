@@ -130,20 +130,3 @@ def validate_arguments(schema: dict, arguments: dict) -> dict:
     validate_schema(schema)
     _json_size(arguments, 32000)
     return _validate_value(arguments, schema, "arguments")
-
-
-def builtin_schema(fields: dict) -> dict:
-    properties, required = {}, []
-    for name, spec in fields.items():
-        item = {"type": spec["type"]}
-        if "description" in spec:
-            item["description"] = spec["description"]
-        for old, new in (("max_length", "maxLength"), ("min", "minimum"), ("max", "maximum"), ("default", "default")):
-            if old in spec:
-                item[new] = spec[old]
-        if spec["type"] == "string":
-            item["minLength"] = 1
-        properties[name] = item
-        if spec.get("required"):
-            required.append(name)
-    return validate_schema({"type": "object", "properties": properties, "required": required, "additionalProperties": False})

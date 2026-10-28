@@ -11,7 +11,7 @@ from loghawk import config
 from loghawk.api.services import collector_tool_store as store, task_runner, task_store2
 from loghawk.api.services.collector_evidence import bounded_json, compact_evidence
 from loghawk.collectors import registry
-from loghawk.collectors.contracts import builtin_schema, validate_arguments, validate_schema
+from loghawk.collectors.contracts import validate_arguments, validate_schema
 from loghawk.llm import get_llm_client
 from loghawk.llm.client import _chat_model
 
@@ -89,7 +89,7 @@ def catalog() -> dict[str, dict]:
             continue
         result["builtin_" + item["name"].replace("-", "_")] = {
             "name": item["name"], "version": str(item["version"]), "kind": "builtin",
-            "policy": item["execution_policy"], "schema": builtin_schema(item["arguments_schema"]),
+            "policy": item["execution_policy"], "schema": validate_schema(item["arguments_schema"]),
             "description": item["description"][:1000],
         }
     for task in task_store2.list_tasks():
@@ -281,7 +281,7 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
             if not current or not current["approved"] or not current["enabled"]:
                 raise PermissionError("Collector approval or enabled status changed.")
             policy = current.get("execution_policy")
-            if builtin_schema(current["arguments_schema"]) != target["schema"]:
+            if validate_schema(current["arguments_schema"]) != target["schema"]:
                 raise PermissionError("Collector contract changed.")
         else:
             task = task_store2.get_task(target["task_id"])

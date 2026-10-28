@@ -11,6 +11,21 @@ const pending = ref<RcaAnswer | null>(null);
 const uncertain = ref(false);
 const argumentDraft = ref("");
 const reviewInputArgs = ref(true);
+const newChatDialog = ref<HTMLDialogElement | null>(null);
+
+function requestNewChat() {
+  if (busy.value || pending.value || uncertain.value) return;
+  newChatDialog.value?.showModal();
+}
+
+function confirmNewChat() {
+  if (busy.value || pending.value || uncertain.value) return;
+  messages.value = [];
+  error.value = "";
+  argumentDraft.value = "";
+  newChatDialog.value?.close();
+}
+
 const blockedReason = computed(() => {
   if (busy.value) return "A request is processing. Please wait.";
   if (uncertain.value) return "Sending is paused because the previous request outcome is uncertain. Check the error above.";
@@ -99,6 +114,16 @@ async function decide(approved: boolean) {
 <template>
   <section class="rca-chat">
     <h1>AI-Assisted RCA</h1>
+    <button :disabled="busy || !!pending || uncertain" @click="requestNewChat">
+      New Chat
+    </button>
+    <dialog ref="newChatDialog" aria-labelledby="new-chat-title">
+      <h2 id="new-chat-title">Start a new chat?</h2>
+      <p>Clear the current conversation and RCA output?
+         Saved history, audit records, and execution evidence will remain available.</p>
+      <button @click="confirmNewChat">Yes</button>
+      <button autofocus @click="newChatDialog?.close()">No</button>
+    </dialog>
     <label>
       <input type="checkbox" v-model="reviewInputArgs" :disabled="busy || !!pending || uncertain" />
       Review Input Args

@@ -174,6 +174,52 @@ class CollectorArgumentReviewScreen(ModalScreen[dict]):
         self.app._confirm_collector_call(self.pending, approved, arguments, self)
 
 
+class ConfirmNewChatScreen(ModalScreen[bool]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+    CSS = """
+    ConfirmNewChatScreen {
+        layout: vertical;
+        align: center middle;
+    }
+    #new-chat-confirm-box {
+        width: 70; max-width: 95%;
+        height: auto; padding: 1 2;
+        border: round $primary; background: $surface;
+    }
+    #new-chat-confirm-box Static {
+        width: 1fr;
+        height: auto;
+    }
+    #new-chat-confirm-actions {
+        height: 4;
+        align-horizontal: center;
+    }
+    #new-chat-confirm-box Button { margin: 1 1 0 0; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container(id="new-chat-confirm-box"):
+            yield Static("Start a new chat?")
+            yield Static(
+                "Clear the current conversation and RCA output? "
+                "Saved history, audit records, and execution evidence "
+                "will remain available."
+            )
+            with Horizontal(id="new-chat-confirm-actions"):
+                yield Button("Yes", variant="primary", id="new-chat-yes")
+                yield Button("No", id="new-chat-no")
+
+    def on_mount(self) -> None:
+        self.query_one("#new-chat-no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "new-chat-yes")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
 class ConfirmDeleteScreen(ModalScreen[bool]):
     """Confirmation dialog for deleting a saved Task artifact version."""
 
@@ -1714,7 +1760,7 @@ class HawkConsole(App[None]):
                       "Saved collector evidence is independent of the compact model input; source output may be limited."])
         return "\n".join(lines)
 
-    def _new_chat(self) -> None:
+    def _new_chat(self, confirmed: bool = False) -> None:
         if (
             self._chat_busy
             or self._pending_collector_call is not None
@@ -1724,6 +1770,12 @@ class HawkConsole(App[None]):
             self.notify(
                 "Wait for the current request or finish/cancel its confirmation before starting a new chat.",
                 severity="warning",
+            )
+            return
+        if not confirmed:
+            self.push_screen(
+                ConfirmNewChatScreen(),
+                callback=lambda yes: self._new_chat(confirmed=True) if yes else None,
             )
             return
         self._chat_history.clear()

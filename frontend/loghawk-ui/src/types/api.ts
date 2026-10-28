@@ -221,3 +221,12 @@ export interface BuiltinCollector {
   arguments_schema: Record<string, unknown>;
   updated_at: string;
 }
+
+export interface BuiltinCollectorSource {
+  name: string;
+  display_name: string;
+  version: string;
+  filename: string;
+  source: string;
+  arguments_schema: Record<string, unknown>;
+}

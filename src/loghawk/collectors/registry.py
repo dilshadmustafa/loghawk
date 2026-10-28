@@ -79,9 +79,10 @@ def _deserialize_definition(row) -> dict:
     definition = _DEFINITIONS.get(result["name"])
     if definition and str(definition["version"]) == str(result["version"]):
         result["description"] = definition["description"]
-        for name, spec in definition["arguments_schema"].items():
-            if name in result["arguments_schema"] and "description" in spec:
-                result["arguments_schema"][name]["description"] = spec["description"]
+        properties = result["arguments_schema"]["properties"]
+        for name, spec in definition["arguments_schema"]["properties"].items():
+            if name in properties and "description" in spec:
+                properties[name]["description"] = spec["description"]
     result["enabled"] = bool(result["enabled"])
     result["approved"] = bool(result["approved"])
     return result

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from loghawk.collectors.contracts import validate_arguments as validate_schema_arguments
+
 
 DEFINITIONS = {
     "prometheus-query": {
@@ -9,10 +11,15 @@ DEFINITIONS = {
         "display_name": "Prometheus query",
         "description": "Query Prometheus metrics, including Kubernetes metrics, using PromQL. Examples: up, node_cpu_seconds_total, kube_pod_info. Do not pass shell commands such as kubectl.",
         "arguments_schema": {
-            "query": {
-                "type": "string", "required": True, "max_length": 2000,
-                "description": "A PromQL expression, not a shell command. Example: rate(node_cpu_seconds_total[5m]).",
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string", "minLength": 1, "maxLength": 2000,
+                    "description": "A PromQL expression, not a shell command. Example: rate(node_cpu_seconds_total[5m]).",
+                },
             },
+            "required": ["query"],
+            "additionalProperties": False,
         },
     },
     "kubernetes-pods": {
@@ -20,8 +27,13 @@ DEFINITIONS = {
         "display_name": "Kubernetes pod status",
         "description": "List pod names and status in one namespace; no cluster changes.",
         "arguments_schema": {
-            "namespace": {"type": "string", "required": False, "default": "default", "max_length": 253},
-            "limit": {"type": "integer", "required": False, "default": 100, "min": 1, "max": 200},
+            "type": "object",
+            "properties": {
+                "namespace": {"type": "string", "default": "default", "minLength": 1, "maxLength": 253},
+                "limit": {"type": "integer", "default": 100, "minimum": 1, "maximum": 200},
+            },
+            "required": [],
+            "additionalProperties": False,
         },
     },
     "jira-issue-search": {
@@ -29,40 +41,42 @@ DEFINITIONS = {
         "display_name": "Jira issue search",
         "description": "Search Jira issues using a read-only JQL query.",
         "arguments_schema": {
-            "jql": {"type": "string", "required": True, "max_length": 2000},
-            "limit": {"type": "integer", "required": False, "default": 50, "min": 1, "max": 100},
+            "type": "object",
+            "properties": {
+                "jql": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 100},
+            },
+            "required": ["jql"],
+            "additionalProperties": False,
         },
     },
 }
+
 
 
 def validate_arguments(name: str, arguments: dict) -> dict:
     definition = DEFINITIONS.get(name)
     if definition is None:
         raise KeyError(name)
+    if not isinstance(arguments, dict):
+        raise ValueError("Collector arguments must be a JSON object.")
     schema = definition["arguments_schema"]
-    unknown = set(arguments) - set(schema)
-    if unknown:
-        raise ValueError(f"Unsupported argument(s): {', '.join(sorted(unknown))}")
-    normalized = {}
-    for key, spec in schema.items():
-        value = arguments.get(key, spec.get("default"))
-        if value is None:
-            if spec.get("required"):
-                raise ValueError(f"'{key}' is required.")
-            continue
-        if spec["type"] == "string":
-            if not isinstance(value, str) or not value.strip():
+    # Preserve the legacy direct-call behavior for explicitly null optional fields.
+    omitted = {
+        key for key, value in arguments.items()
+        if value is None and key in schema["properties"] and key not in schema["required"]
+    }
+    normalized = validate_schema_arguments(
+        schema, {key: value for key, value in arguments.items() if key not in omitted}
+    )
+    for key in omitted:
+        normalized.pop(key, None)
+    # Validate original lengths before trimming, as the built-ins always have.
+    for key, value in normalized.items():
+        if schema["properties"][key]["type"] == "string":
+            if not value.strip():
                 raise ValueError(f"'{key}' must be a non-empty string.")
-            if len(value) > spec["max_length"]:
-                raise ValueError(f"'{key}' is longer than {spec['max_length']} characters.")
             normalized[key] = value.strip()
-        elif spec["type"] == "integer":
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise ValueError(f"'{key}' must be an integer.")
-            if not spec["min"] <= value <= spec["max"]:
-                raise ValueError(f"'{key}' must be between {spec['min']} and {spec['max']}.")
-            normalized[key] = value
     return normalized
 
 

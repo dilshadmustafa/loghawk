@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import BuiltinCollectorSourceDialog from "../components/BuiltinCollectorSourceDialog.vue";
 import { getBuiltinCollectors, getCurrentUser, setBuiltinCollectorEnabled, setBuiltinCollectorPolicy, setBuiltinCollectorApproved } from "../services/api";
 import type { BuiltinCollector, TaskExecutionPolicy } from "../types/api";
 
 type Row = BuiltinCollector & { savedApproved: boolean; savedEnabled: boolean; savedPolicy: TaskExecutionPolicy };
 const items = ref<Row[]>([]);
+const sourceCollector = ref<Row | null>(null);
 const loading = ref(true);
 const busy = ref("");
 const error = ref("");
@@ -89,17 +91,23 @@ onMounted(() => void load());
                   </select>
                   <span v-else>{{ item.execution_policy }}</span>
                 </td>
-                <td><button class="btn" :disabled="!!busy || !canEnable || !dirty(item)" @click="save(item)">{{ busy === item.name ? "Saving…" : "Save" }}</button></td>
+                <td><div class="row-actions">
+                  <button class="btn" :disabled="!!busy || !canEnable || !dirty(item)" @click="save(item)">{{ busy === item.name ? "Saving…" : "Save" }}</button>
+                  <button class="btn" :aria-label="`View source for ${item.name}`" @click="sourceCollector = item">View Source</button>
+                </div></td>
               </tr>
             </tbody>
           </table>
         </div>
       </template>
     </section>
+    <BuiltinCollectorSourceDialog v-if="sourceCollector" :name="sourceCollector.name" @close="sourceCollector = null" />
   </div>
 </template>
 
 <style scoped>
 td { vertical-align: middle; }
+.row-actions { display: flex; justify-content: center; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.row-actions .btn { width: 8rem; }
 input[type="checkbox"] { width: auto; }
 </style>
