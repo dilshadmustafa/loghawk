@@ -244,3 +244,9 @@ export const setBuiltinCollectorApproved = (name: string, approved: boolean) =>
 
 export const getBuiltinCollectorSource = (name: string) =>
   request<import("../types/api").BuiltinCollectorSource>(`/builtin-collectors/${encodeURIComponent(name)}/source`);
+
+
+export const getRcaHistory = (query: URLSearchParams) =>
+  request<import("../types/api").RcaHistoryPage>(`/rca/history?${query.toString()}`);
+export const getRcaHistoryDetail = (id: string) =>
+  request<import("../types/api").RcaHistoryDetail>(`/rca/history/${encodeURIComponent(id)}`);

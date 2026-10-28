@@ -1926,6 +1926,7 @@ Step-by-step guides for getting started with LogHawk:
 
 - [LogHawk Web UI Beginner Guide](Howto_Guides/LogHawk_Web_UI_Beginners_Guide.docx)
 - [Hawk Console Beginner Guide](Howto_Guides/Hawk_Console_Beginners_Guide.docx)
+- [How to Create Custom Collectors](Howto_Guides/How_to_Create_Custom_Collectors.docx) — Input schemas, Python examples, approval and execution policies, AI discovery, and troubleshooting.
 
 #### RAPIDS cuML setup with NVIDIA GPU (Optional)
 

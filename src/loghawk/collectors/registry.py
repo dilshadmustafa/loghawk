@@ -28,14 +28,14 @@ def ensure_registered() -> None:
             db.execute(
                 """INSERT INTO collector_registry
                    (name, version, display_name, description, arguments_schema_json, approved,
-                    enabled, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    enabled, execution_policy, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT (name) DO NOTHING""",
                 (
                     name, definition["version"], definition["display_name"],
                     definition["description"],
                     json.dumps(definition["arguments_schema"], sort_keys=True),
-                    True, True, now, now,
+                    True, True, "ai-assisted", now, now,
                 ),
             )
 

@@ -88,3 +88,47 @@ def compact_evidence(evidence, max_chars):
                 entries.pop()
                 data.update(included_series=len(entries), omitted_series=len(series) - len(entries))
     return bounded_json(packed, max_chars)
+
+
+def evidence_metadata(original: str, prepared: str) -> dict:
+    """Describe observed omissions without claiming source completeness."""
+    def parse(text):
+        try:
+            return json.loads(text)
+        except (ValueError, TypeError):
+            return None
+    source, output = parse(original), parse(prepared)
+    markers = []
+    def walk(value, path="$", depth=0):
+        if depth > 20:
+            return
+        if isinstance(value, dict):
+            keys = ("truncated", "truncated_by_script", "total_series", "included_series", "omitted_series",
+                    "total_items", "included_items", "total_fields", "original_chars", "source_limit", "requested_limit")
+            found = {key: value[key] for key in keys if key in value}
+            if found:
+                markers.append({"path": path, **found})
+            for key, item in value.items():
+                walk(item, path + "." + key, depth + 1)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                walk(item, path + f"[{index}]", depth + 1)
+    walk(output)
+    result = source.get("result", {}) if isinstance(source, dict) else {}
+    source_markers = []
+    if isinstance(result, dict):
+        data = result.get("data", {})
+        for container in (result, data if isinstance(data, dict) else {}):
+            for key in ("truncated", "truncated_by_script", "source_limit", "requested_limit", "limit", "returned_series"):
+                if key in container:
+                    source_markers.append({key: container[key]})
+    omitted = any(m.get("truncated") is True or
+                  (isinstance(m.get("omitted_series"), (int, float)) and m["omitted_series"] > 0)
+                  for m in markers)
+    return {"redacted": True, "changed": source != output, "model_omissions": omitted,
+            "reason": "Bounded preview or record omission" if omitted else
+                      ("Representation compacted without reported omissions" if source != output else "Unchanged evidence"),
+            "model_markers": markers, "source_reported_limits": source_markers or None,
+            "source_completeness": "Not established; limits apply before saved evidence",
+            "runner_output": result.get("output_metadata") if isinstance(result, dict) else None,
+            "character_counts": "Unicode characters after redaction, not tokens or bytes"}

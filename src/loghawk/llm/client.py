@@ -109,7 +109,7 @@ class LiteLLMClient:
 
     def complete_tool_turn(
         self, messages: list[dict], tools: list[dict], *, timeout: float,
-        require_tool: bool = False,
+        require_tool: bool = False, audit_callback=None,
     ) -> dict:
         """Native tool responses may legitimately contain no assistant text."""
         from litellm import completion
@@ -125,6 +125,12 @@ class LiteLLMClient:
                 tool_choice="required" if require_tool else "auto",
             )
         response = completion(**kwargs)
+        if audit_callback is not None:
+            usage = getattr(response, "usage", None)
+            if hasattr(usage, "model_dump"):
+                usage = usage.model_dump(exclude_none=True)
+            audit_callback({"returned_model": getattr(response, "model", None),
+                            "usage": usage if isinstance(usage, dict) else None})
         choice = response.choices[0]
         if choice.finish_reason == "length":
             raise RuntimeError("Tool model reached its output-token limit; increase LH_LLM_TOOL_MAX_TOKENS.")
@@ -136,9 +142,9 @@ class LiteLLMClient:
             raise RuntimeError("Tool model returned neither text nor tool calls.")
         return result
 
-    def explain_collector_evidence(self, messages: list[dict], *, timeout: float) -> str:
+    def explain_collector_evidence(self, messages: list[dict], *, timeout: float, audit_callback=None) -> str:
         """Generate text only. No tools, execution dispatcher, or automatic retries."""
-        message = self.complete_tool_turn(messages, [], timeout=timeout)
+        message = self.complete_tool_turn(messages, [], timeout=timeout, audit_callback=audit_callback)
         if message.get("tool_calls"):
             raise RuntimeError("Explanation model returned tool calls; none were executed.")
         return message["content"]

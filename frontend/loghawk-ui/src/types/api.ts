@@ -230,3 +230,39 @@ export interface BuiltinCollectorSource {
   source: string;
   arguments_schema: Record<string, unknown>;
 }
+
+
+export interface RcaHistoryItem {
+  id: string; userid: string; origin_software: string; status: string;
+  created_at: string; updated_at: string; question_text: string | null;
+  execution_summary: string; explanation_status: string | null;
+}
+export interface RcaHistoryPage {
+  items: RcaHistoryItem[]; total: number; limit: number; offset: number;
+}
+export interface RcaHistoryEvent {
+  id: string; collector_name: string; collector_version: string; status: string;
+  origin_userid: string; origin_software: string; origin: string;
+  run_id: string | null; arguments: Record<string, unknown> | null;
+  result_text: string | null; started_at: string; completed_at: string | null;
+}
+export interface RcaInvocation {
+  id: string; stage: string; invocation_number: number; explanation_attempt_id: string | null;
+  configured_model: string | null; returned_model: string | null; provider: string | null;
+  settings: Record<string, unknown> | null; usage: Record<string, unknown> | null;
+  started_at: string; completed_at: string | null; duration_ms: number | null;
+  status: string; error_text: string | null;
+}
+export interface RcaEvidenceView {
+  id: string; tool_call_id: string | null; invocation_id: string | null; stage: string; created_at: string;
+  saved_evidence_chars: number | null; input_chars: number | null; output_chars: number;
+  effective_limit_chars: number | null; transformation: Record<string, unknown> | null;
+  model_evidence_text: string;
+}
+export interface RcaHistoryDetail {
+  id: string; userid: string; origin_software: string; status: string;
+  created_at: string; updated_at: string; question_text: string | null; response_text: string | null;
+  settings: Record<string, unknown> | null; events: RcaHistoryEvent[];
+  invocations: RcaInvocation[]; evidence_views: RcaEvidenceView[];
+  execution: RcaExecutionSummary;
+}

@@ -65,6 +65,16 @@ def _bounded(value: str | None) -> str:
     return value[:MAX_OUTPUT_CHARS] + "\n[output truncated]"
 
 
+def _output_metadata(stdout, stderr):
+    def describe(value):
+        value = value.decode(errors="replace") if isinstance(value, bytes) else (value or "")
+        return {"original_chars": len(value), "retained_chars": min(len(value), MAX_OUTPUT_CHARS),
+                "returned_chars": len(_bounded(value)), "limit_chars": MAX_OUTPUT_CHARS,
+                "truncated": len(value) > MAX_OUTPUT_CHARS}
+    return {"stdout": describe(stdout), "stderr": describe(stderr),
+            "counts_before_redaction": True}
+
+
 def run_artifact(
     artifact_type: str,
     content: str,
@@ -111,6 +121,7 @@ def run_artifact(
                 "stdout": _bounded(result.stdout),
                 "stderr": _bounded(result.stderr),
                 "error_type": None,
+                "output_metadata": _output_metadata(result.stdout, result.stderr),
             }
         except subprocess.TimeoutExpired as exc:
             return {
@@ -118,6 +129,7 @@ def run_artifact(
                 "stdout": _bounded(exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout),
                 "stderr": _bounded(exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr),
                 "error_type": "TimeoutExpired",
+                "output_metadata": _output_metadata(exc.stdout, exc.stderr),
             }
 
 

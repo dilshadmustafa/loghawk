@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from loghawk import config
 from loghawk.api.services import collector_tool_store as store, task_runner, task_store2
-from loghawk.api.services.collector_evidence import bounded_json, compact_evidence
+from loghawk.api.services.collector_evidence import bounded_json, compact_evidence, evidence_metadata
 from loghawk.collectors import registry
 from loghawk.collectors.contracts import validate_arguments, validate_schema
 from loghawk.llm import get_llm_client
@@ -78,6 +78,49 @@ def redact(value):
             item = re.sub(r'(?i)((?:password|token|secret|api_key)\s*[=:]\s*)[^\s,;]+', r'\1[REDACTED]', item)
         return item
     return clean(value)
+
+
+def redact_audit_metadata(value):
+    """Preserve known numeric LLM settings/counts; redact other metadata."""
+    safe_numeric_fields = {
+        "LH_LLM_TOOL_MAX_TOKENS",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "reasoning_tokens",
+        "audio_tokens",
+        "text_tokens",
+        "image_tokens",
+        "accepted_prediction_tokens",
+        "rejected_prediction_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    }
+    safe_containers = {
+        "usage",
+        "prompt_tokens_details",
+        "completion_tokens_details",
+        "input_tokens_details",
+        "output_tokens_details",
+    }
+    cleaned = redact(value)
+    if not isinstance(value, dict):
+        return cleaned
+
+    for key, item in value.items():
+        if (
+            key in safe_numeric_fields
+            and isinstance(item, int)
+            and not isinstance(item, bool)
+            and item >= 0
+        ):
+            cleaned[key] = item
+        elif key in safe_containers and isinstance(item, dict):
+            cleaned[key] = redact_audit_metadata(item)
+    return cleaned
 
 
 def catalog() -> dict[str, dict]:
@@ -314,7 +357,10 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
                            "notice": "Collector output could not be serialized safely."})
     # Preserve returned, redacted evidence independently of the model's smaller input.
     store.record(request_id, target, {}, status, text, result.get("run_id"), call_id)
-    return compact_evidence(text, config.LH_LLM_TOOL_MAX_RESULT_CHARS)
+    prepared = compact_evidence(text, config.LH_LLM_TOOL_MAX_RESULT_CHARS)
+    store.record_evidence_view(request_id, call_id, None, "collection_compaction", text, prepared,
+                               config.LH_LLM_TOOL_MAX_RESULT_CHARS, evidence_metadata(text, prepared))
+    return prepared
 
 
 def start(messages: list[dict], userid: str, *, origin_software: str = "console",
@@ -345,6 +391,8 @@ def start(messages: list[dict], userid: str, *, origin_software: str = "console"
              "execution_attempted": False, "narration_corrections": 0,
              "discovery_ids": [], "remaining": config.LH_LLM_TOOL_TIMEOUT_SECONDS, "budget": budget}
     request_id = store.create(userid, origin_software)
+    store.initialize_history(request_id, str(redact(messages[-1].get("content", ""))),
+                             redact_audit_metadata(store.settings_snapshot()))
     store.record(request_id, {"name": "request_settings"},
                  {"review_arguments": review_arguments}, "REQUEST_SETTINGS",
                  "Input-argument review preference.")
@@ -404,12 +452,14 @@ def resume(request_id: str, userid: str, confirmation_id: str, approved: bool, *
                                else "Execution confirmed by the authenticated request owner."))
     text = _execute(request_id, pending["target"], reviewed, userid, deadline, confirmed=True)
     state["execution_attempted"] = True
+    state.setdefault("evidence_call_ids", {})[pending["call_id"]] = store.latest_execution_event(request_id)
     state["messages"].append({"role": "tool", "tool_call_id": pending["call_id"], "content": text})
     state["remaining"] = max(0, deadline - time.monotonic())
     return _loop(request_id, state, userid)
 
 
 def _reply(request_id, status, response, pending=None):
+    store.save_response(request_id, str(redact(response)))
     result = {"status": status, "request_id": request_id, "response": response,
               "execution": store.execution_summary(request_id)}
     if pending is not None:
@@ -484,6 +534,7 @@ def _loop(request_id, state, userid):
                                        "arguments": redact(arguments), "confirmation_id": pending["confirmation_id"]})
                     text = _execute(request_id, target, arguments, userid, deadline)
                     state["execution_attempted"] = True
+                    state.setdefault("evidence_call_ids", {})[call["id"]] = store.latest_execution_event(request_id)
                 state["messages"].append({"role": "tool", "tool_call_id": call["id"], "content": text})
                 continue
             tools = _available_tools(state)
@@ -505,9 +556,8 @@ def _loop(request_id, state, userid):
                     largest["content"], max(80, len(largest["content"]) // 2)
                 )
             try:
-                message = get_llm_client().complete_tool_turn(
-                    state["messages"], tools, timeout=_remaining(deadline), require_tool=require_tool,
-                )
+                message = _audited_tool_turn(request_id, state["messages"], tools,
+                                             _remaining(deadline), require_tool, state.get("evidence_call_ids", {}))
             except Exception as exc:
                 state["assistant_error"] = str(redact(str(exc)))
                 raise
@@ -581,7 +631,7 @@ EXPLANATION_SYSTEM = (
 )
 
 
-def _explanation_messages(context, execution):
+def _explanation_messages(context, execution, invocation_id=None):
     events = [event for event in execution["events"] if event.get("evidence")]
     if not events:
         raise ValueError("No saved collector evidence is available for explanation.")
@@ -598,6 +648,14 @@ def _explanation_messages(context, execution):
         messages = [{"role": "system", "content": EXPLANATION_SYSTEM},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
         if _input_tokens(messages, []) <= budget:
+            if invocation_id:
+                for event in events:
+                    prepared = compact_evidence(event["evidence"], limit)
+                    meta = evidence_metadata(event["evidence"], prepared)
+                    meta["context_reduction"] = limit < config.LH_LLM_TOOL_MAX_RESULT_CHARS
+                    meta["question_context_limit_chars"] = context_limit
+                    store.record_evidence_view(execution["request_id"], event.get("call_id"), invocation_id,
+                                               "explanation_input", event["evidence"], prepared, limit, meta)
             return messages
         if limit <= 256 and context_limit <= 256:
             raise ValueError("Explanation context budget too small; increase context length or reduce output tokens.")
@@ -639,12 +697,18 @@ def _perform_explanation(request_id, attempt, origin):
         "EXPLANATION_RUNNING", "Generating explanation from saved evidence; no collectors will run.",
     )
     error = None
+    metadata = {}
+    invocation_id = store.begin_invocation(request_id,
+        "explanation_retry" if attempt["attempts"] > 1 else "initial_explanation",
+        redact_audit_metadata(store.settings_snapshot()), config.LH_LLM_PROVIDER, attempt["attempt_id"])
     try:
-        messages = _explanation_messages(attempt["context"], execution)
+        messages = _explanation_messages(attempt["context"], execution, invocation_id)
         timeout = config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS - (time.monotonic() - started)
         if timeout <= 0:
             raise TimeoutError("Explanation preparation exhausted its time budget.")
-        response = str(redact(get_llm_client().explain_collector_evidence(messages, timeout=timeout)))
+        store.invocation_dispatch(invocation_id, timeout)
+        response = str(redact(get_llm_client().explain_collector_evidence(
+            messages, timeout=timeout, audit_callback=metadata.update)))
     except Exception as exc:
         error = str(redact(str(exc)))
         hint = {"web": "Expand Collector evidence to view the results.",
@@ -652,6 +716,7 @@ def _perform_explanation(request_id, attempt, origin):
                     origin, "Collected evidence is included in the execution details.")
         prefix = "Collector completed; AI response failed. " if execution["succeeded"] else "AI explanation failed. "
         response = prefix + hint + " Use Retry AI Explanation; collectors will not run again.\n" + error
+    store.finish_invocation(invocation_id, (time.monotonic() - started) * 1000, error, redact_audit_metadata(metadata))
     store.record(request_id, target, {}, "EXPLANATION_FAILED" if error else "EXPLANATION_COMPLETED",
                  error or response, call_id=audit_id)
     store.finish_explanation(request_id, attempt["attempt_id"], response, error)
@@ -662,3 +727,34 @@ def _perform_explanation(request_id, attempt, origin):
     except Exception:
         pass
     return _reply(request_id, "FAILED" if error else "COMPLETED", response)
+
+
+def _audited_tool_turn(request_id, messages, tools, timeout, require_tool, evidence_call_ids):
+    started = time.monotonic()
+    invocation_id = store.begin_invocation(request_id, "discovery_tool_selection",
+                                           redact_audit_metadata(store.settings_snapshot()), config.LH_LLM_PROVIDER)
+    metadata, error = {}, None
+    try:
+        # Capture the final tool-result representation, not a reconstructed current-config copy.
+        for message in messages:
+            if message.get("role") != "tool":
+                continue
+            prepared = str(redact(message.get("content", "")))
+            call_id = evidence_call_ids.get(message.get("tool_call_id"))
+            original = store.saved_execution_evidence(request_id, call_id) if call_id else None
+            details = evidence_metadata(original, prepared) if original is not None else {
+                "source": "Discovery result or legacy tool result; no saved execution link"}
+            details["tool_call_reference"] = message.get("tool_call_id")
+            store.record_evidence_view(request_id, call_id, invocation_id, "dispatcher_tool_input",
+                                       original, prepared, None, details)
+        remaining = timeout - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("Processing budget exhausted before model invocation.")
+        store.invocation_dispatch(invocation_id, remaining)
+        return get_llm_client().complete_tool_turn(messages, tools, timeout=remaining,
+                                                   require_tool=require_tool, audit_callback=metadata.update)
+    except Exception as exc:
+        error = str(redact(str(exc)))
+        raise
+    finally:
+        store.finish_invocation(invocation_id, (time.monotonic() - started) * 1000, error, redact_audit_metadata(metadata))
