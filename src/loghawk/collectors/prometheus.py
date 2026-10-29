@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
+import json
+import os
+import sys
+
 from urllib.parse import urlparse
 
 import requests
 
-from loghawk.collectors import config
-
 
 def query(promql: str) -> dict:
-    base_url = config.PROMETHEUS_URL
+    base_url = os.environ.get("LH_TOOLS_PROMETHEUS_URL", "").strip().rstrip("/")
+    bearer_token = os.environ.get("LH_TOOLS_PROMETHEUS_BEARER_TOKEN", "").strip()
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise RuntimeError("Set LH_TOOLS_PROMETHEUS_URL to a reachable HTTP(S) Prometheus URL in .env_tools.")
     headers = {}
-    if config.PROMETHEUS_BEARER_TOKEN:
-        headers["Authorization"] = f"Bearer {config.PROMETHEUS_BEARER_TOKEN}"
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
     response = requests.post(
         f"{base_url}/api/v1/query",
         data={"query": promql, "limit": 100},
@@ -41,3 +44,28 @@ def query(promql: str) -> dict:
         "summary": f"Prometheus returned {len(results)} result series.",
         "data": {"resultType": data.get("resultType"), "result": results[:100]},
     }
+
+
+def collect(arguments: dict) -> dict:
+    promql = arguments.get("query")
+    if not isinstance(promql, str) or not promql.strip():
+        raise ValueError('Provide a query, for example {"query":"up"}')
+    return query(promql)
+
+
+def main() -> int:
+    try:
+        arguments = json.loads(
+            os.environ.get("LH_RUNNER_ARGUMENTS_JSON", "{}")
+        )
+        if not isinstance(arguments, dict):
+            raise ValueError("Collector arguments must be a JSON object.")
+        print(json.dumps(collect(arguments), ensure_ascii=False))
+        return 0
+    except Exception as exc:
+        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

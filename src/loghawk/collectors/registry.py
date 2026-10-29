@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect
 from loghawk.collectors.builtins import (
     DEFINITIONS as _DEFINITIONS,
@@ -138,15 +139,15 @@ def run_collector(name: str, arguments: dict, userid: str, *, timeout: float = 6
         raise PermissionError("This collector has not been approved for API execution.")
     normalized = _validate_arguments(name, arguments)
     run_id = uuid4().hex
-    started_at = _now()
+    started_at = utc_now()
     with connect("server") as db:
         db.execute(
             """INSERT INTO collector_runs
                (id, collector_name, collector_version, userid, status,
-                argument_keys_json, started_at)
-               VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)""",
+                argument_keys_json, started_at, created_at)
+               VALUES (?, ?, ?, ?, 'RUNNING', ?, ?, ?)""",
             (run_id, name, collector["version"], userid,
-             json.dumps(sorted(normalized)), started_at),
+             json.dumps(sorted(normalized)), started_at, started_at),
         )
     try:
         from loghawk.lhrunner import run_builtin_collector

@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect, initialize_database
 
 
@@ -244,13 +245,15 @@ def get_active_run(pipeline_id: str) -> dict | None:
 
 
 def reserve_run(pipeline_id: str, workflow_id: str) -> dict:
+    created_at = utc_now()
     run = {
         "id": uuid4().hex,
         "pipeline_id": pipeline_id,
         "workflow_id": workflow_id,
         "temporal_run_id": None,
         "status": "RUNNING",
-        "started_at": _now(),
+        "created_at": created_at,
+        "started_at": created_at,
         "completed_at": None,
         "error": None,
     }
@@ -267,11 +270,11 @@ def reserve_run(pipeline_id: str, workflow_id: str) -> dict:
         connection.execute(
             """INSERT INTO pipeline_runs
                (id, pipeline_id, workflow_id, temporal_run_id, status,
-                started_at, completed_at, error)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                started_at, completed_at, error, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             tuple(run[key] for key in (
                 "id", "pipeline_id", "workflow_id", "temporal_run_id",
-                "status", "started_at", "completed_at", "error",
+                "status", "started_at", "completed_at", "error", "created_at",
             )),
         )
         connection.commit()

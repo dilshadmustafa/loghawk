@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from loghawk.collectors.contracts import validate_arguments as validate_schema_arguments
 
 
@@ -80,14 +82,21 @@ def validate_arguments(name: str, arguments: dict) -> dict:
     return normalized
 
 
+SOURCE_FILES = {
+    "prometheus-query": "prometheus.py",
+    "kubernetes-pods": "kubernetes.py",
+    "jira-issue-search": "jira.py",
+}
+
+
+def source_code(name: str) -> str:
+    filename = SOURCE_FILES.get(name)
+    if filename is None:
+        raise KeyError(name)
+    return Path(__file__).with_name(filename).read_text(encoding="utf-8")
+
+
 def run_builtin(name: str, arguments: dict) -> dict:
-    if name == "prometheus-query":
-        from loghawk.collectors.prometheus import query
-        return query(arguments["query"])
-    if name == "kubernetes-pods":
-        from loghawk.collectors.kubernetes import list_pods
-        return list_pods(arguments["namespace"], arguments["limit"])
-    if name == "jira-issue-search":
-        from loghawk.collectors.jira import search_issues
-        return search_issues(arguments["jql"], arguments["limit"])
-    raise KeyError(name)
+    from loghawk.lhrunner import run_builtin_collector
+
+    return run_builtin_collector(name, arguments)

@@ -337,8 +337,9 @@ class HawkConsole(App[None]):
     }
     #llm-output, #command-one-output, #command-two-output { height: 1fr; }
     #editor-toolbar { height: auto; min-height: 3; }
-    #task-create-pane { height: auto; padding: 0 1; }
-    #task-create-fields { height: auto; }
+    #task-create-pane { height: 1fr; padding: 0 1; }
+    #task-create-fields { height: 1fr; overflow-y: auto; }
+    #task-description-input { height: 5; }
     #task-chat-pane { height: 1fr; min-height: 8; overflow-y: auto; }
     #loaded-task-description-row { height: 5; }
     #loaded-task-description { width: 1fr; height: 5; }

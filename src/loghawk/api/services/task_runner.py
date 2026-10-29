@@ -25,6 +25,7 @@ def run_version(
             "stderr": str(exc), "error_type": type(exc).__name__,
         }
     task_store2.finish_task_run(run_id, result)
+    result = lhrunner.normalize_output(result)
     return {
         "run_id": run_id,
         "task_id": task["id"],

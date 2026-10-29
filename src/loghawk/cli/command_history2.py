@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect
 from loghawk.utils.user_identity import get_userid
 
@@ -31,9 +32,9 @@ def save_command(terminal_id: str, command: str) -> None:
     userid = get_userid()
     with connect("console") as connection:
         connection.execute(
-            """INSERT INTO cli_command_history (userid, terminal_id, command)
-               VALUES (?, ?, ?)""",
-            (userid, terminal_id, command),
+            """INSERT INTO cli_command_history (userid, terminal_id, command, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (userid, terminal_id, command, utc_now()),
         )
         connection.execute(
             """DELETE FROM cli_command_history

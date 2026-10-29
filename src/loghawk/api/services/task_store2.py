@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect, initialize_database
 from loghawk.utils.user_identity import get_userid
 
@@ -281,12 +282,12 @@ def set_artifact_policy(
 
 
 def start_task_run(task_id: str, artifact_id: str, userid: str) -> tuple[str, str]:
-    run_id, started_at = uuid4().hex, _now()
+    run_id, started_at = uuid4().hex, utc_now()
     with _connect("server") as connection:
         connection.execute(
-            """INSERT INTO task_runs (id, task_id, artifact_id, userid, status, started_at)
-               VALUES (?, ?, ?, ?, 'RUNNING', ?)""",
-            (run_id, task_id, artifact_id, userid, started_at),
+            """INSERT INTO task_runs (id, task_id, artifact_id, userid, status, started_at, created_at)
+               VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)""",
+            (run_id, task_id, artifact_id, userid, started_at, started_at),
         )
     return run_id, started_at
 

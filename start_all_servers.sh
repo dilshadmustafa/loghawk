@@ -163,18 +163,47 @@ load_nvm() {
     source "$NVM_DIR/nvm.sh"
 }
 
+use_installed_compatible_node() {
+    local node_version node_dir
+
+    # Loading nvm may already have activated a compatible version.
+    if node_compatible; then
+        return 0
+    fi
+
+    # Try installed versions, newest first. Uses portable numeric sort.
+    while IFS= read -r node_version; do
+        if nvm use "$node_version" >/dev/null 2>&1; then
+            if node_compatible; then
+                return 0
+            fi
+        fi
+    done < <(
+        for node_dir in "$NVM_DIR"/versions/node/v*; do
+            if [[ -x "$node_dir/bin/node" ]]; then
+                printf '%s\n' "${node_dir##*/}"
+            fi
+        done | sort -t. -k1.2,1nr -k2,2nr -k3,3nr
+    )
+
+    return 1
+}
+
 if ! node_compatible; then
-    echo "Installing a compatible Node.js LTS release with nvm..."
+    echo "Checking Node.js versions available through nvm..."
     set +u
     load_nvm
-    nvm install --lts
-    nvm use --lts
+    if ! use_installed_compatible_node; then
+        echo "No compatible installed version found; installing Node.js LTS..."
+        nvm install --lts
+    fi
     set -u
 fi
 if ! node_compatible; then
     echo "Node.js/npm did not meet the frontend requirement after installation." >&2
     exit 1
 fi
+echo "Using Node.js $(node --version) and npm $(npm --version)"
 
 echo "============================================================"
 echo "Installing LogHawk Web UI packages"

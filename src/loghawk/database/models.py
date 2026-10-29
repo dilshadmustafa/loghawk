@@ -156,6 +156,7 @@ collector_runs = Table(
     Column("argument_keys_json", Text, nullable=False),
     Column("result_summary", Text),
     Column("error_type", String),
+    Column("created_at", String, nullable=True),
     Column("started_at", String, nullable=False),
     Column("completed_at", String),
 )
@@ -187,6 +188,7 @@ llm_tool_calls = Table(
     Column("arguments_json", Text, nullable=False),
     Column("run_id", String, nullable=True),
     Column("result_text", Text, nullable=True),
+    Column("created_at", String, nullable=True),
     Column("started_at", String, nullable=False),
     Column("completed_at", String, nullable=True),
 )
@@ -202,6 +204,7 @@ task_runs = Table(
     Column("stdout", Text),
     Column("stderr", Text),
     Column("error_type", String),
+    Column("created_at", String, nullable=True),
     Column("started_at", String, nullable=False),
     Column("completed_at", String),
 )
@@ -234,7 +237,7 @@ Table(
     Column("userid", String, nullable=True),
     Column("terminal_id", String, nullable=False),
     Column("command", Text, nullable=False),
-    Column("created_at", String, nullable=False, server_default="CURRENT_TIMESTAMP"),
+    Column("created_at", String, nullable=False),
 )
 Table(
     "llm_conversation_history", CONSOLE_METADATA,
@@ -242,7 +245,7 @@ Table(
     Column("userid", String, nullable=True),
     Column("role", String, nullable=False),
     Column("content", Text, nullable=False),
-    Column("created_at", String, nullable=False, server_default="CURRENT_TIMESTAMP"),
+    Column("created_at", String, nullable=False),
 )
 
 Table(
@@ -275,6 +278,7 @@ runs = Table(
     Column("workflow_id", String, nullable=False, unique=True),
     Column("temporal_run_id", String),
     Column("status", String, nullable=False),
+    Column("created_at", String, nullable=True),
     Column("started_at", String, nullable=False),
     Column("completed_at", String),
     Column("error", Text),

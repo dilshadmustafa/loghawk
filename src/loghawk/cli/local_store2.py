@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import loghawk.config as config
+from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect, initialize_database
 from loghawk.utils.user_identity import get_userid
 
@@ -34,6 +35,6 @@ def save_conversation_message(role: str, content: str) -> None:
         connection.execute(
             """INSERT INTO llm_conversation_history
                (userid, role, content, created_at)
-               VALUES (?, ?, ?, CURRENT_TIMESTAMP)""",
-            (get_userid(), role, content),
+               VALUES (?, ?, ?, ?)""",
+            (get_userid(), role, content, utc_now()),
         )

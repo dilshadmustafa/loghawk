@@ -150,9 +150,26 @@ echo ============================================================
 where node >nul 2>nul
 set "NODE_MISSING=!errorlevel!"
 where npm >nul 2>nul
-if not "!NODE_MISSING!"=="0" goto :install_node
-if errorlevel 1 goto :install_node
+if not "!NODE_MISSING!"=="0" goto :find_installed_node
+if errorlevel 1 goto :find_installed_node
 goto :check_node_version
+
+:find_installed_node
+rem Look for an existing installation before downloading Node.js.
+for %%D in (
+    "%ProgramFiles%\nodejs"
+    "%LOCALAPPDATA%\Programs\nodejs"
+) do (
+    if exist "%%~D\node.exe" if exist "%%~D\npm.cmd" (
+        "%%~D\node.exe" -e "const [major,minor]=process.versions.node.split('.').map(Number);process.exit((major===20&&minor>=19)||(major>=22&&(major>22||minor>=12))?0:1)" >nul 2>&1
+        if not errorlevel 1 (
+            set "PATH=%%~D;!PATH!"
+            echo Using existing Node.js installation: %%~D
+            goto :check_node_version
+        )
+    )
+)
+goto :install_node
 
 :install_node
 where winget >nul 2>nul

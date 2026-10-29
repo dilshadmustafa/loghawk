@@ -133,17 +133,56 @@ def run_artifact(
             }
 
 
-def run_builtin_collector(name: str, arguments: dict[str, Any], *, timeout: int = 60) -> dict:
-    """Run a built-in collector in venv_tools and return its JSON result."""
-    command = [*tools_python_command(), "-m", "loghawk.collectors.runner", name]
-    result = subprocess.run(
-        command, cwd=PROJECT_ROOT, input=json.dumps(arguments), capture_output=True,
-        text=True, timeout=timeout, check=False,
+def normalize_output(result: dict[str, Any]) -> dict[str, Any]:
+    """Add structured output without replacing execution metadata."""
+    stdout = result.get("stdout") or ""
+    truncated = (
+        result.get("output_metadata", {})
+        .get("stdout", {})
+        .get("truncated", False)
     )
-    if result.returncode:
-        message = _bounded(result.stderr or result.stdout)
-        raise RuntimeError(message.strip() or f"Collector exited with code {result.returncode}.")
     try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Collector runner returned invalid JSON.") from exc
+        if truncated:
+            raise ValueError("Output was truncated")
+        payload = json.loads(stdout)
+    except ValueError:
+        payload = {"text": stdout}
+
+    summary = (
+        "Execution completed."
+        if result.get("status") == "COMPLETED"
+        else "Execution failed."
+    )
+    if isinstance(payload, dict) and "data" in payload:
+        data = payload["data"]
+        if isinstance(payload.get("summary"), str):
+            summary = payload["summary"]
+    else:
+        data = payload
+
+    return {
+        **result,
+        "summary": summary,
+        "data": data,
+    }
+
+
+def run_builtin_collector(name: str, arguments: dict[str, Any], *, timeout: int = 60) -> dict:
+    """Execute packaged collector source through the shared artifact runner."""
+    from loghawk.collectors.builtins import source_code, validate_arguments
+
+    normalized = validate_arguments(name, arguments)
+    result = run_artifact(
+        "python",
+        source_code(name),
+        arguments=normalized,
+        timeout=timeout,
+    )
+    if result["status"] != "COMPLETED":
+        message = result.get("stderr") or result.get("stdout")
+        raise RuntimeError(
+            message.strip() if message else
+            f"Collector failed: {result.get('error_type') or result.get('exit_code')}."
+        )
+
+    return normalize_output(result)

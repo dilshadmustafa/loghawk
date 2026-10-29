@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 import re
 from threading import RLock
@@ -11,8 +12,6 @@ from alembic.config import Config
 from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
-
-import loghawk.config as config
 
 
 class DatabaseIntegrityError(Exception):
@@ -26,7 +25,6 @@ class DatabaseIntegrityError(Exception):
 _ENGINES: dict[str, Engine] = {}
 _MIGRATED: set[str] = set()
 _LOCK = RLock()
-_ALEMBIC_CONFIG = config.PROJECT_ROOT / "alembic.ini"
 
 
 class _Result:
@@ -118,6 +116,8 @@ class _EmptyResult:
 
 
 def _url_for_role(role: str):
+    import loghawk.config as config
+
     setting = {
         "console": config.LH_CONSOLE_DATABASE_URL,
         "server": config.LH_SERVER_DATABASE_URL,
@@ -157,12 +157,15 @@ def get_engine(role: str) -> Engine:
 
 def initialize_database(role: str) -> None:
     """Run versioned Alembic migrations while retaining existing records."""
+    import loghawk.config as config
+
+    alembic_path = config.PROJECT_ROOT / "alembic.ini"
     with _LOCK:
         if role in _MIGRATED:
             return
-        if not _ALEMBIC_CONFIG.exists():
-            raise FileNotFoundError(f"Alembic configuration not found: {_ALEMBIC_CONFIG}")
-        alembic_config = Config(str(_ALEMBIC_CONFIG))
+        if not alembic_path.exists():
+            raise FileNotFoundError(f"Alembic configuration not found: {alembic_path}")
+        alembic_config = Config(str(alembic_path))
         alembic_config.set_main_option(
             "script_location",
             str(config.PROJECT_ROOT / "src" / "loghawk" / "database" / "migrations"),
@@ -227,3 +230,72 @@ def migrate_existing_schema(connection, role: str) -> None:
         for table in ("pipeline_runs", "pipelines", "config_sets"):
             if table in inspect(connection).get_table_names():
                 connection.execute(text(f'DROP TABLE "{table}"'))
+
+
+@contextmanager
+def maintenance_connection(role: str, writable: bool = False):
+    """Yield a SQLAlchemy connection without creating files or running migrations.
+
+    Preview uses a read-only snapshot. SQLite writes acquire BEGIN IMMEDIATE;
+    callers must additionally lock relevant tables for PostgreSQL maintenance.
+    Normal application configuration is intentionally imported only by normal
+    connection functions: its import can create application directories.
+    """
+    import os
+    import sqlite3
+    from dotenv import load_dotenv
+
+    defaults = {
+        "server": "sqlite:///data/db/loghawk_server.sqlite3",
+        "console": "sqlite:///data/db/loghawk_local_hawkconsole.sqlite3",
+    }
+    if role not in defaults:
+        raise ValueError("Database role must be server or console.")
+    root = Path(__file__).resolve().parents[3]
+    load_dotenv(root / ".env")
+    setting = os.getenv(f"LH_{role.upper()}_DATABASE_URL", defaults[role]).strip()
+    if not setting:
+        raise ValueError("The selected database URL is blank.")
+    url = make_url(setting)
+    backend = url.get_backend_name()
+    if backend == "sqlite":
+        if not url.database or url.database == ":memory:" or url.database.startswith("file:"):
+            raise ValueError("Maintenance requires an existing SQLite file path.")
+        database = Path(url.database)
+        if not database.is_absolute():
+            database = root / database
+        database = database.resolve()
+        if not database.is_file():
+            raise FileNotFoundError("The selected SQLite database does not exist; nothing was created.")
+        uri = database.as_uri() + ("?mode=rw" if writable else "?mode=ro")
+        engine = create_engine("sqlite://", creator=lambda: sqlite3.connect(uri, uri=True, timeout=15))
+        location = {"backend": backend, "database": str(database)}
+    elif backend == "postgresql":
+        engine = create_engine(url, hide_parameters=True)
+        location = {"backend": backend, "host": url.host, "port": url.port,
+                    "database": url.database}
+    else:
+        raise ValueError("Retention currently supports SQLite and PostgreSQL only.")
+    try:
+        with engine.connect() as connection:
+            if backend == "sqlite":
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                if not writable:
+                    connection.exec_driver_sql("PRAGMA query_only=ON")
+                connection.exec_driver_sql("BEGIN IMMEDIATE" if writable else "BEGIN")
+            else:
+                connection.exec_driver_sql("BEGIN" if writable else
+                                           "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                connection.exec_driver_sql("SET LOCAL lock_timeout = '15s'")
+            connection.info["maintenance_location"] = location
+            try:
+                yield connection
+                if writable:
+                    connection.commit()
+                else:
+                    connection.rollback()
+            except BaseException:
+                connection.rollback()
+                raise
+    finally:
+        engine.dispose()

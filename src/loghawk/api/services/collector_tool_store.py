@@ -4,11 +4,12 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect
 
 
 def now() -> str:
-    return datetime.now(UTC).isoformat()
+    return utc_now()
 
 
 def create(userid: str, origin_software: str = "console") -> str:
@@ -77,11 +78,11 @@ def record(request_id: str, target: dict, arguments: dict, status: str,
         call_id = uuid4().hex
         db.execute("""INSERT INTO llm_tool_calls
                    (id, request_id, origin, origin_userid, origin_software, collector_name, collector_version, artifact_id,
-                    status, arguments_json, result_text, run_id, started_at, completed_at)
-                   VALUES (?, ?, 'AI', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    status, arguments_json, result_text, run_id, started_at, completed_at, created_at)
+                   VALUES (?, ?, 'AI', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                    (call_id, request_id, origin_userid, request["origin_software"], target.get("name", "unknown"), str(target.get("version", "")),
                     target.get("artifact_id"), status, json.dumps(arguments), evidence, run_id,
-                    timestamp, None if status in {"RUNNING", "EXPLANATION_RUNNING"} else timestamp))
+                    timestamp, None if status in {"RUNNING", "EXPLANATION_RUNNING"} else timestamp, timestamp))
     return call_id
 
 
@@ -215,15 +216,16 @@ def save_response(request_id: str, response: str) -> None:
 def begin_invocation(request_id: str, stage: str, settings: dict, provider: str,
                      attempt_id: str | None = None) -> str:
     invocation_id = uuid4().hex
+    created_at = utc_now()
     with connect("server") as db:
         number = db.execute("SELECT COUNT(*) AS n FROM rca_llm_invocations WHERE request_id = ?",
                             (request_id,)).fetchone()["n"] + 1
         db.execute("""INSERT INTO rca_llm_invocations
             (id, request_id, explanation_attempt_id, stage, invocation_number, configured_model,
-             provider, settings_json, started_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PREPARING')""",
+             provider, settings_json, started_at, created_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PREPARING')""",
             (invocation_id, request_id, attempt_id, stage, number, settings.get("LH_LLM_TOOL_MODEL"),
-             provider, json.dumps(settings), now()))
+             provider, json.dumps(settings), created_at, created_at))
     return invocation_id
 
 

@@ -57,10 +57,18 @@ const currentUser = ref<{ userid: string; role: string } | null>(null);
 const message = ref("");
 const editorContent = ref("");
 const savedBaseline = ref("");
-const schemaText = ref("");
-const schemaBaseline = ref("");
+const emptyArgumentsSchema = JSON.stringify({
+  type: "object",
+  properties: {},
+  required: [],
+  additionalProperties: false,
+}, null, 2);
+const schemaText = ref(emptyArgumentsSchema);
+const schemaBaseline = ref(emptyArgumentsSchema);
 function loadSchema(schema?: Record<string, unknown> | null) {
-  schemaBaseline.value = schema ? JSON.stringify(schema, null, 2) : "{}";
+  schemaBaseline.value = schema
+    ? JSON.stringify(schema, null, 2)
+    : emptyArgumentsSchema;
   schemaText.value = schemaBaseline.value;
 }
 const selectedVersionId = ref("");
@@ -433,6 +441,24 @@ onMounted(() => void loadTask());
           <label class="field">Arguments schema JSON (optional; saved with version)<textarea v-model="schemaText" rows="6" spellcheck="false" /></label>
           <p class="muted">Blank or {} means this version accepts no arguments. Use object properties, required fields, and additionalProperties: false for inputs. Saving code or schema creates a new version requiring approval and enablement.</p>
           <p class="muted">No arguments: {"type":"object","properties":{},"additionalProperties":false}</p>
+          <p class="muted">
+            Input arguments are passed to the executed script as JSON in the
+            <code>LH_RUNNER_ARGUMENTS_JSON</code> environment variable.
+          </p>
+          <p class="muted">
+            Server execution through the Web UI or signed-in Hawk Console
+            (/task, /collect, or AI-assisted RCA) receives variables from the
+            server-side .env_tools file.
+          </p>
+          <p class="muted">
+            Local execution through /taskrun or /collectrun receives variables
+            from the local .env_tools file, including when using hawk --local.
+            These commands also execute locally when signed in.
+          </p>
+          <p class="muted">
+            Existing process environment values take precedence over .env_tools.
+            LH_RUNNER_ARGUMENTS_JSON is set by the runner for each execution.
+          </p>
         </div>
         <label class="field artifact-field">Code<textarea v-model="editorContent" rows="20" spellcheck="false" /></label>
         <div v-if="selectedVersion && !hasGeneratedDraft" class="actions policy-actions">
