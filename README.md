@@ -1927,6 +1927,7 @@ Step-by-step guides for getting started with LogHawk:
 - [LogHawk Web UI Beginner Guide](Howto_Guides/LogHawk_Web_UI_Beginners_Guide.docx)
 - [Hawk Console Beginner Guide](Howto_Guides/Hawk_Console_Beginners_Guide.docx)
 - [How to Create Custom Collectors](Howto_Guides/How_to_Create_Custom_Collectors.docx) — Input schemas, Python examples, approval and execution policies, AI discovery, and troubleshooting.
+- [How to Use ChatGPT to Create Custom Collectors](Howto_Guides/How_to_Use_ChatGPT_to_Create_Custom_Collectors.docx) — Attach the collector guide, use ready-to-copy prompts, generate code and input schemas, and create and test collectors through Web UI or Hawk Console.
 - [How to Schedule LogHawk Pipelines](Howto_Guides/How_to_Schedule_LogHawk_Pipelines.docx) — Schedule training and detection, configure the batch S3 location, and email incident reports using cron or Windows Task Scheduler.
 - [How to Clean Up Old Database Entries and Manage Retention](Howto_Guides/How_to_Clean_Up_Old_Database_Entries_and_Manage_Retention.docx) — Preview cleanup, choose retention cutoffs, understand protected records, and safely remove eligible historical records.
 - [How to Troubleshoot Ollama](Howto_Guides/How_to_Troubleshoot_Ollama.docx) — Diagnose model connectivity, duplicate servers, GPU usage, and RCA timeouts.

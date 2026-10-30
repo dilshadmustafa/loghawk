@@ -340,22 +340,26 @@ class HawkConsole(App[None]):
     #task-create-pane { height: 1fr; padding: 0 1; }
     #task-create-fields { height: 1fr; overflow-y: auto; }
     #task-description-input { height: 5; }
-    #task-chat-pane { height: 1fr; min-height: 8; overflow-y: auto; }
-    #loaded-task-description-row { height: 5; }
-    #loaded-task-description { width: 1fr; height: 5; }
-    #save-loaded-task-description { width: auto; margin-left: 1; }
-    #loaded-task-policy-row { height: auto; min-height: 3; }
-    #loaded-task-execution-policy { width: 1fr; }
+    #task-create-actions { height: 3; }
+    #task-chat-pane { height: 2fr; min-height: 20; }
+    #loaded-task-details-row { height: 8; }
+    #loaded-task-description-pane { width: 2fr; height: 8; padding-right: 1; }
+    #loaded-task-description { height: 4; }
+    #save-loaded-task-description { width: auto; height: 3; }
+    #loaded-task-policy-row { height: 3; overflow-x: auto; }
+    #loaded-task-policy-label { width: 17; height: 3; content-align: left middle; }
+    #loaded-task-execution-policy { width: 1fr; min-width: 18; }
     #save-task-execution-policy { width: auto; margin-left: 1; }
-    #loaded-task-version-actions { height: auto; min-height: 3; }
-    #approve-loaded-version { margin-left: 1; }
+    #enable-loaded-version, #approve-loaded-version { margin-left: 1; }
     #loaded-version-status { height: auto; }
     #task-chat-pane > Static { height: auto; }
-    #task-chat-output { min-height: 3; }
-    #collector-schema-pane { height: auto; }
-    #collector-arguments-schema { height: 6; }
-    #task-chat-output { height: 1fr; }
-    #task-message-row { height: auto; }
+    #collector-schema-pane { width: 3fr; height: 8; }
+    #collector-schema-pane > Static { height: 1; }
+    #collector-arguments-schema { height: 7; }
+    #task-chat-output { height: 1fr; min-height: 3; }
+    #task-message-row { height: 3; }
+    #task-message-input { width: 1fr; }
+    #send-task-message { width: auto; margin-left: 1; }
     #task-list-pane { height: 1fr; padding: 0 1; }
     #task-list-output { height: 1fr; }
     #command-editor-pane { height: 1fr; padding: 0 1; }
@@ -468,30 +472,30 @@ class HawkConsole(App[None]):
                     yield Static("Auto-approved requires an Administrator or Power User in signed-in mode.")
                     yield Static("Category")
                     yield Input(placeholder="Enter a category", id="task-category-input")
-                with Horizontal():
+                with Horizontal(id="task-create-actions"):
                     yield Button("Create Task", variant="primary", id="create-task")
                     yield Button("Cancel", id="cancel-create-task")
             with Container(id="task-chat-pane"):
                 yield Static("Task Chat", classes="pane-title")
-                yield Static("Task description")
-                with Horizontal(id="loaded-task-description-row"):
-                    yield TextArea("", id="loaded-task-description", soft_wrap=True)
-                    yield Button("Save Description", id="save-loaded-task-description")
-                yield Static("Execution Policy")
+                with Horizontal(id="loaded-task-details-row"):
+                    with Container(id="loaded-task-description-pane"):
+                        yield Static("Task description")
+                        yield TextArea("", id="loaded-task-description", soft_wrap=True)
+                        yield Button("Save Description", id="save-loaded-task-description")
+                    with Container(id="collector-schema-pane"):
+                        yield Static("Arguments schema JSON (optional; saved with version)")
+                        yield TextArea("", id="collector-arguments-schema", soft_wrap=True)
                 with Horizontal(id="loaded-task-policy-row"):
+                    yield Static("Execution Policy", id="loaded-task-policy-label")
                     yield Select(
                         [("Manual", "manual"), ("AI-assisted", "ai-assisted"),
                          ("Auto-approved", "auto-approved"), ("Disabled", "disabled")],
                         value="manual", allow_blank=False, id="loaded-task-execution-policy",
                     )
                     yield Button("Save Policy", id="save-task-execution-policy")
-                yield Static("No saved version selected.", id="loaded-version-status")
-                with Horizontal(id="loaded-task-version-actions"):
                     yield Button("Enable", id="enable-loaded-version", disabled=True)
                     yield Button("Approve", id="approve-loaded-version", disabled=True)
-                with Container(id="collector-schema-pane"):
-                    yield Static("Arguments schema JSON (optional; blank or {} means no arguments; saved with version)")
-                    yield TextArea("", id="collector-arguments-schema", soft_wrap=True)
+                yield Static("No saved version selected.", id="loaded-version-status")
                 yield RichLog(id="task-chat-output", wrap=True, markup=False, auto_scroll=True)
                 with Horizontal(id="task-message-row"):
                     yield Input(placeholder="Describe the artifact you want…", id="task-message-input")
@@ -2315,8 +2319,8 @@ class HawkConsole(App[None]):
         self.query_one("#task-create-pane", Container).display = True
         self.query_one("#task-chat-pane", Container).display = False
         self.query_one("#command-output-mirror", RichLog).display = False
-        self.query_one("#editor-toolbar", Horizontal).display = True
-        self.query_one("#editor", TextArea).display = True
+        self.query_one("#editor-toolbar", Horizontal).display = False
+        self.query_one("#editor", TextArea).display = False
         self.query_one("#editor-status", Static).display = True
         self.query_one("#task-name-input", Input).value = ""
         self.query_one("#task-description-input", TextArea).text = ""
@@ -2450,6 +2454,8 @@ class HawkConsole(App[None]):
     def _cancel_task_creation(self) -> None:
         self.query_one("#task-create-pane", Container).display = False
         self.query_one("#task-chat-pane", Container).display = False
+        self.query_one("#editor-toolbar", Horizontal).display = True
+        self.query_one("#editor", TextArea).display = True
         self.query_one("#task-description-input", TextArea).text = ""
         self.query_one("#task-category-input", Input).value = ""
         self._set_editor_text("")
@@ -2626,7 +2632,14 @@ class HawkConsole(App[None]):
         self._editor_baseline = text
 
     def _set_schema_text(self, schema: dict | None) -> None:
-        self._schema_baseline = json.dumps(schema, indent=2) if schema is not None else "{}"
+        if schema is None:
+            schema = {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            }
+        self._schema_baseline = json.dumps(schema, indent=2)
         self.query_one("#collector-arguments-schema", TextArea).text = self._schema_baseline
 
     def _editor_is_dirty(self) -> bool:
