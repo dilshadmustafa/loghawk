@@ -167,22 +167,15 @@ def normalize_output(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_builtin_collector(name: str, arguments: dict[str, Any], *, timeout: int = 60) -> dict:
-    """Execute packaged collector source through the shared artifact runner."""
-    from loghawk.collectors.builtins import source_code, validate_arguments
+def run_builtin_task(name: str, arguments: dict[str, Any], *, timeout: int = 60) -> dict:
+    """Execute packaged Task source through the shared artifact runner."""
+    from loghawk.builtin_tasks.loader import get_definition, source_code, validate_arguments
 
     normalized = validate_arguments(name, arguments)
     result = run_artifact(
-        "python",
+        get_definition(name)["artifact_type"],
         source_code(name),
         arguments=normalized,
         timeout=timeout,
     )
-    if result["status"] != "COMPLETED":
-        message = result.get("stderr") or result.get("stdout")
-        raise RuntimeError(
-            message.strip() if message else
-            f"Collector failed: {result.get('error_type') or result.get('exit_code')}."
-        )
-
     return normalize_output(result)

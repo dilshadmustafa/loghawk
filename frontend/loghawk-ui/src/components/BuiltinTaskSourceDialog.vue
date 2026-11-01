@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { getBuiltinCollectorSource } from "../services/api";
-import type { BuiltinCollectorSource } from "../types/api";
+import { getBuiltinTaskSource } from "../services/api";
+import type { BuiltinTaskSource } from "../types/api";
 
 const props = defineProps<{ name: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -9,7 +9,7 @@ type Tab = "source" | "schema";
 const tabs: Tab[] = ["source", "schema"];
 const active = ref<Tab>("source");
 const dialog = ref<HTMLDialogElement | null>(null);
-const data = ref<BuiltinCollectorSource | null>(null);
+const data = ref<BuiltinTaskSource | null>(null);
 const loading = ref(true);
 const error = ref("");
 const copyMessage = ref("");
@@ -24,10 +24,10 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await getBuiltinCollectorSource(props.name);
+    const result = await getBuiltinTaskSource(props.name);
     if (alive) data.value = result;
   } catch (e) {
-    if (alive) error.value = e instanceof Error ? e.message : "Could not load collector source.";
+    if (alive) error.value = e instanceof Error ? e.message : "Could not load Task source.";
   } finally { if (alive) loading.value = false; }
 }
 function close() { dialog.value?.close(); }
@@ -79,14 +79,14 @@ onBeforeUnmount(() => {
       </div>
       <button type="button" class="btn" autofocus @click="close">Close</button>
     </header>
-    <p class="muted">Read-only installed connector implementation and input definition. The source imports LogHawk helpers; it is not a standalone script.</p>
-    <p v-if="loading" role="status">Loading collector source…</p>
+    <p class="muted">Read-only installed Task source and input schema. Execution uses the configured tools environment and LH_RUNNER_ARGUMENTS_JSON.</p>
+    <p v-if="loading" role="status">Loading Task source…</p>
     <div v-else-if="error">
       <p class="error" role="alert">{{ error }}</p>
       <button type="button" class="btn" @click="load">Retry</button>
     </div>
     <template v-else-if="data">
-      <div role="tablist" aria-label="Collector details" class="tabs" @keydown="moveTab">
+      <div role="tablist" aria-label="Task details" class="tabs" @keydown="moveTab">
         <button v-for="tab in tabs" :id="`collector-tab-${tab}`" :key="tab" type="button"
           role="tab" :aria-selected="active === tab" :aria-controls="`collector-panel-${tab}`"
           :tabindex="active === tab ? 0 : -1" :class="['btn', { selected: active === tab }]"
@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
           <button type="button" class="btn" :disabled="copying" @click="copy">{{ copying ? 'Copying…' : 'Copy to Clipboard' }}</button>
         </div>
         <p role="status" aria-live="polite">{{ copyMessage }}</p>
-        <pre tabindex="0" :aria-label="active === 'source' ? 'Collector source code' : 'Collector input schema'"><code>{{ content }}</code></pre>
+        <pre tabindex="0" :aria-label="active === 'source' ? 'Task source code' : 'Task input schema'"><code>{{ content }}</code></pre>
       </section>
     </template>
   </dialog>

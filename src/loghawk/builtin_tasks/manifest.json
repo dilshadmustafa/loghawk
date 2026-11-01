@@ -1,0 +1,94 @@
+{
+  "tasks": [
+    {
+      "name": "prometheus-query",
+      "version": "1",
+      "display_name": "Prometheus query",
+      "description": "Query Prometheus metrics, including Kubernetes metrics, using PromQL. Examples: up, node_cpu_seconds_total, kube_pod_info. Do not pass shell commands such as kubectl.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "A PromQL expression, not a shell command. Example: rate(node_cpu_seconds_total[5m])."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "task_kind": "collector",
+      "artifact_type": "python",
+      "source_file": "collector_tasks/prometheus.py",
+      "execution_policy": "ai-assisted",
+      "approved": true,
+      "enabled": true
+    },
+    {
+      "name": "kubernetes-pods",
+      "version": "1",
+      "display_name": "Kubernetes pod status",
+      "description": "List pod names and status in one namespace; no cluster changes.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "default": "default",
+            "minLength": 1,
+            "maxLength": 253
+          },
+          "limit": {
+            "type": "integer",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "task_kind": "collector",
+      "artifact_type": "python",
+      "source_file": "collector_tasks/kubernetes.py",
+      "execution_policy": "ai-assisted",
+      "approved": true,
+      "enabled": true
+    },
+    {
+      "name": "jira-issue-search",
+      "version": "1",
+      "display_name": "Jira issue search",
+      "description": "Search Jira issues using a read-only JQL query.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "jql": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "limit": {
+            "type": "integer",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "jql"
+        ],
+        "additionalProperties": false
+      },
+      "task_kind": "collector",
+      "artifact_type": "python",
+      "source_file": "collector_tasks/jira.py",
+      "execution_policy": "ai-assisted",
+      "approved": true,
+      "enabled": true
+    }
+  ]
+}

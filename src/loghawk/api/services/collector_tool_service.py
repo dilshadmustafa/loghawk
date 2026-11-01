@@ -10,8 +10,9 @@ from uuid import uuid4
 from loghawk import config
 from loghawk.api.services import collector_tool_store as store, task_runner, task_store2
 from loghawk.api.services.collector_evidence import bounded_json, compact_evidence, evidence_metadata
-from loghawk.collectors import registry
-from loghawk.collectors.contracts import validate_arguments, validate_schema
+from loghawk.builtin_tasks import builtin_task_registry as registry
+from loghawk.builtin_tasks.loader import load_definitions
+from loghawk.builtin_tasks.contracts import validate_arguments, validate_schema
 from loghawk.llm import get_llm_client
 from loghawk.llm.client import _chat_model
 
@@ -54,7 +55,7 @@ SYSTEM = (
 
 def redact(value):
     """Redact sensitive keys and configured credentials before model/audit exposure."""
-    from loghawk.collectors import config as tools_config
+    from loghawk.builtin_tasks import tools_config
 
     sensitive = re.compile(r"password|secret|token|api.?key|authorization|credential", re.I)
     secrets = [str(v) for source in (vars(config), vars(tools_config), os.environ)
@@ -125,10 +126,10 @@ def redact_audit_metadata(value):
 
 def catalog() -> dict[str, dict]:
     result = {}
-    for item in registry.list_collectors():
+    for item in registry.list_tasks(task_kind="collector"):
         if not item["approved"] or not item["enabled"] or item.get("execution_policy") not in AI_POLICIES:
             continue
-        if str(registry._DEFINITIONS.get(item["name"], {}).get("version")) != str(item["version"]):
+        if str(load_definitions().get(item["name"], {}).get("version")) != str(item["version"]):
             continue
         result["builtin_" + item["name"].replace("-", "_")] = {
             "name": item["name"], "version": str(item["version"]), "kind": "builtin",
@@ -320,9 +321,10 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
     try:
         _remaining(deadline)
         if target["kind"] == "builtin":
-            current = registry.get_collector(target["name"])
-            if not current or not current["approved"] or not current["enabled"]:
-                raise PermissionError("Collector approval or enabled status changed.")
+            current = registry.get_task(target["name"])
+            if (not current or current["task_kind"] != "collector"
+                    or not current["approved"] or not current["enabled"]):
+                raise PermissionError("Collector kind, approval, or enabled status changed.")
             policy = current.get("execution_policy")
             if validate_schema(current["arguments_schema"]) != target["schema"]:
                 raise PermissionError("Collector contract changed.")
@@ -339,8 +341,9 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
             raise PermissionError("Current execution policy requires a new human confirmation or prohibits AI.")
         arguments = validate_arguments(target["schema"], arguments)
         if target["kind"] == "builtin":
-            result = registry.run_collector(target["name"], arguments, userid,
-                                            expected_version=target["version"], timeout=_remaining(deadline))
+            result = registry.run_task(target["name"], arguments, userid,
+                                            expected_version=target["version"], timeout=_remaining(deadline),
+                                            origin="AI", request_id=request_id, confirmed=confirmed)
         else:
             result = task_runner.run_version(task, artifact, userid, arguments, timeout=_remaining(deadline))
         status = result.get("status", "COMPLETED")
@@ -556,8 +559,12 @@ def _loop(request_id, state, userid):
                     largest["content"], max(80, len(largest["content"]) // 2)
                 )
             try:
-                message = _audited_tool_turn(request_id, state["messages"], tools,
-                                             _remaining(deadline), require_tool, state.get("evidence_call_ids", {}))
+                message = _audited_tool_turn(
+                    request_id, state["messages"], tools,
+                    _remaining(deadline), require_tool,
+                    state.get("evidence_call_ids", {}),
+                    narration_correction=state.pop("next_turn_is_narration_correction", False),
+                )
             except Exception as exc:
                 state["assistant_error"] = str(redact(str(exc)))
                 raise
@@ -585,6 +592,7 @@ def _loop(request_id, state, userid):
                             "The model returned narration instead of a tool call. No collector was executed."
                         )
                     state["narration_corrections"] = 1
+                    state["next_turn_is_narration_correction"] = True
                     state["messages"].append(message)
                     state["messages"].append({
                         "role": "system",
@@ -729,9 +737,11 @@ def _perform_explanation(request_id, attempt, origin):
     return _reply(request_id, "FAILED" if error else "COMPLETED", response)
 
 
-def _audited_tool_turn(request_id, messages, tools, timeout, require_tool, evidence_call_ids):
+def _audited_tool_turn(request_id, messages, tools, timeout, require_tool,
+                       evidence_call_ids, *, narration_correction=False):
     started = time.monotonic()
-    invocation_id = store.begin_invocation(request_id, "discovery_tool_selection",
+    stage = "narration_correction" if narration_correction else "discovery_tool_selection"
+    invocation_id = store.begin_invocation(request_id, stage,
                                            redact_audit_metadata(store.settings_snapshot()), config.LH_LLM_PROVIDER)
     metadata, error = {}, None
     try:

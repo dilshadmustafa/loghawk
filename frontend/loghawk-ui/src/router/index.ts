@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import BuiltinCollectorsView from "../views/BuiltinCollectorsView.vue";
+import BuiltinTasksView from "../views/BuiltinTasksView.vue";
 import RcaChatView from "../views/RcaChatView.vue";
 import RcaHistoryView from "../views/RcaHistoryView.vue";
 import RcaHistoryDetailView from "../views/RcaHistoryDetailView.vue";
@@ -21,7 +21,8 @@ import { clearAuthToken, getAuthStatus, getAuthToken, getCurrentUser } from "../
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/builtin-collectors", name: "builtin-collectors", component: BuiltinCollectorsView, meta: { requiresAuth: true } },
+    { path: "/builtin-collectors", redirect: { path: "/builtin-tasks", query: { kind: "collector" } } },
+    { path: "/builtin-tasks", name: "builtin-tasks", component: BuiltinTasksView, meta: { requiresAuth: true } },
     { path: "/rca/history", name: "rca-history", component: RcaHistoryView, meta: { requiresAuth: true } },
     { path: "/rca/history/:id", name: "rca-history-detail", component: RcaHistoryDetailView, meta: { requiresAuth: true } },
     { path: "/rca/chat", name: "rca-chat", component: RcaChatView, meta: { requiresAuth: true } },

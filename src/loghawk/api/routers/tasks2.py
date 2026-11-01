@@ -43,6 +43,8 @@ def create_task(body: TaskWrite, user: dict = Depends(require_authenticated_user
         )
     try:
         return task_store.create_task(body.model_dump())
+    except task_store.ReservedTaskNameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DatabaseIntegrityError as exc:
         raise HTTPException(
             status_code=409,

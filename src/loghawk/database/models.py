@@ -133,10 +133,12 @@ auth_sessions = Table(
 )
 Index("auth_sessions_userid", auth_sessions.c.userid)
 
-collector_registry = Table(
-    "collector_registry", SERVER_METADATA,
+builtin_task_registry = Table(
+    "builtin_task_registry", SERVER_METADATA,
     Column("name", String, primary_key=True),
     Column("version", String, nullable=False),
+    Column("task_kind", String, nullable=False),
+    Column("artifact_type", String, nullable=False),
     Column("display_name", String, nullable=False),
     Column("description", Text, nullable=False),
     Column("arguments_schema_json", Text, nullable=False),
@@ -146,12 +148,15 @@ collector_registry = Table(
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
-collector_runs = Table(
-    "collector_runs", SERVER_METADATA,
+builtin_task_runs = Table(
+    "builtin_task_runs", SERVER_METADATA,
     Column("id", String, primary_key=True),
-    Column("collector_name", String, ForeignKey("collector_registry.name"), nullable=False),
-    Column("collector_version", String, nullable=False),
+    Column("task_name", String, ForeignKey("builtin_task_registry.name"), nullable=False),
+    Column("task_version", String, nullable=False),
     Column("userid", String, ForeignKey("auth_users.userid", ondelete="CASCADE"), nullable=False),
+    Column("origin", String),
+    Column("origin_userid", String),
+    Column("origin_software", String),
     Column("status", String, nullable=False),
     Column("argument_keys_json", Text, nullable=False),
     Column("result_summary", Text),
@@ -160,8 +165,9 @@ collector_runs = Table(
     Column("started_at", String, nullable=False),
     Column("completed_at", String),
 )
-Index("collector_runs_user_started", collector_runs.c.userid, collector_runs.c.started_at)
-Index("collector_runs_name_started", collector_runs.c.collector_name, collector_runs.c.started_at)
+Index("builtin_task_runs_user_started", builtin_task_runs.c.userid, builtin_task_runs.c.started_at)
+Index("builtin_task_runs_name_started", builtin_task_runs.c.task_name, builtin_task_runs.c.started_at)
+Index("builtin_task_runs_created_at", builtin_task_runs.c.created_at)
 
 llm_tool_requests = Table(
     "llm_tool_requests", SERVER_METADATA,

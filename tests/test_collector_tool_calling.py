@@ -26,7 +26,7 @@ def setUpModule():
     from loghawk import config
     from loghawk.database import database_layer as db, models
     from loghawk.api.services import collector_tool_service as service, collector_tool_store as store, task_store2 as tasks
-    from loghawk.collectors import contracts, registry
+    from loghawk.builtin_tasks import contracts, builtin_task_registry as registry
 
 
 def tearDownModule():

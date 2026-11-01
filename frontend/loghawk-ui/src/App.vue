@@ -80,16 +80,16 @@ const navGroups = [
     links: [
       { label: "Create Task", to: "/tasks/new" },
       { label: "List Tasks", to: "/tasks" },
+      { label: "Built-in Tasks", to: "/builtin-tasks" },
       { label: "Create Collector", to: "/tasks/new?kind=collector" },
       { label: "List Collectors", to: "/tasks?kind=collector" },
-      { label: "Built-in Collectors", to: "/builtin-collectors" },
       { label: "Create Remediation Task", to: "/tasks/new?kind=remediation" },
       { label: "List Remediation Tasks", to: "/tasks?kind=remediation" },
       { label: "Create Rollback Task", to: "/tasks/new?kind=rollback" },
       { label: "List Rollback Tasks", to: "/tasks?kind=rollback" },
     ],
   },
-  { id: "rca", label: "AI-Assisted RCA", short: "RCA", links: [{ label: "RCA Chat", to: "/rca/chat" }, { label: "RCA History", to: "/rca/history" }] },
+  { id: "rca", label: "AI Investigation", short: "RCA", links: [{ label: "RCA Chat", to: "/rca/chat" }, { label: "RCA History", to: "/rca/history" }] },
   { id: "account", label: "Account", short: "A", links: [] },
 ];
 const selectedGroup = ref(groupForPath(route.path));
@@ -98,7 +98,7 @@ const activeGroup = computed(() => navGroups.find((group) => group.id === select
 function groupForPath(path: string) {
   if (path.startsWith("/rca/")) return "rca";
   if (path.startsWith("/rag/")) return "rag";
-  if (path.startsWith("/tasks") || path.startsWith("/builtin-collectors")) return "tasks";
+  if (path.startsWith("/tasks") || path.startsWith("/builtin-tasks") || path.startsWith("/builtin-collectors")) return "tasks";
   if (path === "/account" || path === "/users" || path === "/login") return "account";
   return "config-pipelines";
 }

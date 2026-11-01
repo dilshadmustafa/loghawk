@@ -10,12 +10,17 @@ from pydantic import BaseModel, Field
 
 from loghawk.api.routers.auth import require_console_user
 from loghawk.api.schemas import TaskExecutionPolicyWrite
-from loghawk.collectors import registry as collector_registry
+from loghawk.builtin_tasks import builtin_task_registry as registry
 from loghawk.api.services import task_store2, task_runner
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_console_user)])
+
+
+def _get_builtin_collector(name: str) -> dict | None:
+    task = registry.get_task(name)
+    return task if task and task["task_kind"] == "collector" else None
 
 
 class CollectorRunRequest(BaseModel):
@@ -28,7 +33,7 @@ class CollectorEnabledRequest(BaseModel):
 
 @router.get("")
 def list_collectors() -> list[dict]:
-    builtins = collector_registry.list_collectors()
+    builtins = registry.list_tasks(task_kind="collector")
     custom = []
     for task in task_store2.list_tasks():
         if task.get("task_kind") != "collector":
@@ -49,7 +54,7 @@ def list_collectors() -> list[dict]:
 
 @router.get("/{name}")
 def get_collector(name: str) -> dict:
-    collector = collector_registry.get_collector(name)
+    collector = _get_builtin_collector(name)
     if collector is None:
         task = next(
             (item for item in task_store2.list_tasks() if item["name"].casefold() == name.casefold()),
@@ -77,8 +82,8 @@ def set_collector_enabled(
     body: CollectorEnabledRequest,
     user: dict = Depends(require_console_user),
 ) -> dict:
-    if collector_registry.get_collector(name) is not None:
-        if not collector_registry.set_enabled(name, body.enabled):
+    if _get_builtin_collector(name) is not None:
+        if not registry.set_enabled(name, body.enabled):
             raise HTTPException(status_code=404, detail="Collector not found.")
         return {"name": name, "enabled": body.enabled}
     task = next(
@@ -99,9 +104,9 @@ def set_collector_enabled(
 @router.post("/{name}/runs")
 def run_collector(name: str, body: CollectorRunRequest, user: dict = Depends(require_console_user)) -> dict:
     try:
-        builtin = collector_registry.get_collector(name)
+        builtin = _get_builtin_collector(name)
         if builtin is not None:
-            return collector_registry.run_collector(name, body.arguments, user["userid"])
+            return registry.run_task(name, body.arguments, user["userid"], origin_software="console")
         task = next(
             (item for item in task_store2.list_tasks() if item["name"].casefold() == name.casefold()),
             None,
@@ -135,6 +140,6 @@ def set_execution_policy(name: str, body: TaskExecutionPolicyWrite,
                          user: dict = Depends(require_console_user)) -> dict:
     if user["role"] not in {"Administrator", "Power User"}:
         raise HTTPException(status_code=403, detail="Only Administrators and Power Users can set built-in collector policies.")
-    if not collector_registry.set_execution_policy(name, body.execution_policy):
+    if _get_builtin_collector(name) is None or not registry.set_execution_policy(name, body.execution_policy):
         raise HTTPException(status_code=404, detail="Built-in collector not found. Edit custom collector policies through Tasks.")
-    return collector_registry.get_collector(name)
+    return _get_builtin_collector(name)

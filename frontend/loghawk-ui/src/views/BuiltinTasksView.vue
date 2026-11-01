@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import BuiltinCollectorSourceDialog from "../components/BuiltinCollectorSourceDialog.vue";
-import { getBuiltinCollectors, getCurrentUser, setBuiltinCollectorEnabled, setBuiltinCollectorPolicy, setBuiltinCollectorApproved } from "../services/api";
-import type { BuiltinCollector, TaskExecutionPolicy } from "../types/api";
+import { useRoute } from "vue-router";
+import BuiltinTaskSourceDialog from "../components/BuiltinTaskSourceDialog.vue";
+import { getBuiltinTasks, getCurrentUser, setBuiltinTaskEnabled, setBuiltinTaskPolicy, setBuiltinTaskApproved } from "../services/api";
+import type { BuiltinTask, TaskExecutionPolicy, TaskKind } from "../types/api";
 
-type Row = BuiltinCollector & { savedApproved: boolean; savedEnabled: boolean; savedPolicy: TaskExecutionPolicy };
+type Row = BuiltinTask & { savedApproved: boolean; savedEnabled: boolean; savedPolicy: TaskExecutionPolicy };
 const items = ref<Row[]>([]);
-const sourceCollector = ref<Row | null>(null);
+const route = useRoute();
+const kind = ref<string>(typeof route.query.kind === "string" ? route.query.kind : "");
+const kinds: { value: TaskKind; label: string }[] = [
+  { value: "general", label: "General Task" }, { value: "collector", label: "Collector" },
+  { value: "remediation", label: "Remediation Task" }, { value: "rollback", label: "Rollback Task" },
+];
+const visibleItems = computed(() => items.value.filter(item => !kind.value || item.task_kind === kind.value));
+const kindLabel = (value: TaskKind) => kinds.find(k => k.value === value)?.label || value;
+const sourceTask = ref<Row | null>(null);
 const loading = ref(true);
 const busy = ref("");
 const error = ref("");
@@ -21,11 +30,11 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [user, collectors] = await Promise.all([getCurrentUser(), getBuiltinCollectors()]);
+    const [user, tasks] = await Promise.all([getCurrentUser(), getBuiltinTasks()]);
     role.value = user.role;
-    items.value = collectors.map(item => ({ ...item, savedApproved: item.approved, savedEnabled: item.enabled, savedPolicy: item.execution_policy }));
+    items.value = tasks.map(item => ({ ...item, savedApproved: item.approved, savedEnabled: item.enabled, savedPolicy: item.execution_policy }));
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Could not load built-in collectors.";
+    error.value = e instanceof Error ? e.message : "Could not load built-in Tasks.";
   } finally { loading.value = false; }
 }
 
@@ -37,23 +46,23 @@ async function save(item: Row) {
   let changed = false;
   try {
     if (canSetPolicy.value && item.approved !== item.savedApproved) {
-      const result = await setBuiltinCollectorApproved(item.name, item.approved);
+      const result = await setBuiltinTaskApproved(item.name, item.approved);
       item.savedApproved = result.approved;
       changed = true;
     }
     if (canSetPolicy.value && item.execution_policy !== item.savedPolicy) {
-      const result = await setBuiltinCollectorPolicy(item.name, item.execution_policy);
+      const result = await setBuiltinTaskPolicy(item.name, item.execution_policy);
       item.savedPolicy = result.execution_policy;
       changed = true;
     }
     if (canEnable.value && item.enabled !== item.savedEnabled) {
-      const result = await setBuiltinCollectorEnabled(item.name, item.enabled);
+      const result = await setBuiltinTaskEnabled(item.name, item.enabled);
       item.savedEnabled = result.enabled;
       changed = true;
     }
     message.value = `Saved settings for ${item.name}.`;
   } catch (e) {
-    const detail = e instanceof Error ? e.message : "Could not save collector settings.";
+    const detail = e instanceof Error ? e.message : "Could not save Task settings.";
     error.value = (changed ? "Some settings were saved; remaining changes are still unsaved. " : "") + detail;
   } finally { busy.value = ""; }
 }
@@ -63,23 +72,24 @@ onMounted(() => void load());
 <template>
   <div class="view">
     <header class="view-header">
-      <div><h1>Built-in Collectors</h1><p>Manage collectors supplied with LogHawk. Custom collectors are listed under List Tasks.</p></div>
+      <div><h1>Built-in Tasks</h1><p>Manage General, Collector, Remediation, and Rollback Tasks supplied with LogHawk. User-created Tasks remain in their respective lists.</p></div>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
     <section class="card">
+      <label>Task kind <select v-model="kind"><option value="">All kinds</option><option v-for="option in kinds" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
       <p class="muted">Administrators and Power Users can change approval and execution policies. All three roles can change enabled status. Click Save to apply changes.</p>
-      <p class="muted">AI discovery requires approval, enabled status, and an AI-assisted or auto-approved policy. Manual collectors are available for human-initiated execution.</p>
-      <p v-if="loading" class="muted">Loading built-in collectors…</p>
+      <p class="muted">AI collector discovery includes only Collector tasks that are approved, enabled, and AI-assisted or auto-approved. Human API execution requires approval and enablement for every Task kind.</p>
+      <p v-if="loading" class="muted">Loading built-in Tasks…</p>
       <template v-else>
-        <button v-if="error && !items.length" class="btn" @click="load">Retry</button>
-        <p v-else-if="!items.length" class="muted">No built-in collectors are registered.</p>
+        <button v-if="error && !visibleItems.length" class="btn" @click="load">Retry</button>
+        <p v-else-if="!visibleItems.length" class="muted">No built-in Tasks match this filter.</p>
         <div v-else class="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Description</th><th>Version</th><th>Approved</th><th>Enabled</th><th>Execution policy</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Task kind</th><th>Type</th><th>Description</th><th>Version</th><th>Approved</th><th>Enabled</th><th>Execution policy</th><th>Actions</th></tr></thead>
             <tbody>
-              <tr v-for="item in items" :key="item.name">
-                <td>{{ item.name }}</td><td>{{ item.description }}</td><td>{{ item.version }}</td>
+              <tr v-for="item in visibleItems" :key="item.name">
+                <td>{{ item.name }}</td><td>{{ kindLabel(item.task_kind) }}</td><td>{{ item.artifact_type }}</td><td>{{ item.description }}</td><td>{{ item.version }}</td>
                 <td>
                   <input v-if="canSetPolicy" v-model="item.approved" type="checkbox" :disabled="!!busy" :aria-label="`Approve ${item.name}`" />
                   <span v-else>{{ item.approved ? "Yes" : "No" }}</span>
@@ -93,7 +103,7 @@ onMounted(() => void load());
                 </td>
                 <td><div class="row-actions">
                   <button class="btn" :disabled="!!busy || !canEnable || !dirty(item)" @click="save(item)">{{ busy === item.name ? "Saving…" : "Save" }}</button>
-                  <button class="btn" :aria-label="`View source for ${item.name}`" @click="sourceCollector = item">View Source</button>
+                  <button class="btn" :aria-label="`View source for ${item.name}`" @click="sourceTask = item">View Source</button>
                 </div></td>
               </tr>
             </tbody>
@@ -101,7 +111,7 @@ onMounted(() => void load());
         </div>
       </template>
     </section>
-    <BuiltinCollectorSourceDialog v-if="sourceCollector" :name="sourceCollector.name" @close="sourceCollector = null" />
+    <BuiltinTaskSourceDialog v-if="sourceTask" :name="sourceTask.name" @close="sourceTask = null" />
   </div>
 </template>
 

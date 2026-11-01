@@ -210,7 +210,9 @@ export interface RcaAnswer {
   };
 }
 
-export interface BuiltinCollector {
+export interface BuiltinTask {
+  task_kind: TaskKind;
+  artifact_type: string;
   name: string;
   display_name: string;
   description: string;
@@ -222,7 +224,7 @@ export interface BuiltinCollector {
   updated_at: string;
 }
 
-export interface BuiltinCollectorSource {
+export interface BuiltinTaskSource {
   name: string;
   display_name: string;
   version: string;

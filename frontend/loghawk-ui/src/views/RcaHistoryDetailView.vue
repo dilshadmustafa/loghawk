@@ -8,6 +8,8 @@ const record = ref<RcaHistoryDetail | null>(null);
 const busy = ref(false), error = ref(""), notice = ref("");
 const tabs = ["Overview", "Evidence & Inputs", "AI Explanations", "Timeline", "LLM Usage"];
 const tab = ref("Overview");
+const stageLabel = (stage: string) =>
+  stage === "narration_correction" ? "Narration correction" : stage;
 const pretty = (value: unknown) => value == null ? "Not recorded" : JSON.stringify(value, null, 2);
 const evidence = (value: string | null) => { if (value == null) return "Not recorded"; try { return pretty(JSON.parse(value)); } catch { return value; } };
 const time = (value: string | null) => value ? new Date(value).toLocaleString() : "Not recorded";
@@ -20,7 +22,7 @@ const timeline = computed(() => {
   return [
     { id: r.id, at: r.created_at, label: "Request created", detail: `${r.userid} · ${r.origin_software}` },
     ...r.events.map(e => ({ id: e.id, at: e.started_at, label: `${e.collector_name} · ${e.status}`, detail: e.run_id ? `Run: ${e.run_id}` : e.id })),
-    ...r.invocations.map(i => ({ id: i.id, at: i.started_at, label: `${i.stage} · ${i.status}`, detail: `${i.configured_model ?? 'Not recorded'} · Invocation ${i.invocation_number}` }))
+    ...r.invocations.map(i => ({ id: i.id, at: i.started_at, label: `${stageLabel(i.stage)} · ${i.status}`, detail: `${i.configured_model ?? 'Not recorded'} · Invocation ${i.invocation_number}` }))
   ].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
 });
 let generation = 0;
@@ -101,7 +103,11 @@ function download() {
       <section v-if="tab === 'LLM Usage'">
         <p>Historical settings captured for each invocation. Dispatch calls include discovery; invocation counts include correction turns and explanation retries. PREPARING means the API call may not have started. Token usage is shown only when reported by the provider.</p>
         <article v-for="invocation in record.invocations" :key="invocation.id">
-          <h2>{{ invocation.invocation_number }} · {{ invocation.stage }} · {{ invocation.status }}</h2>
+          <h2>{{ invocation.invocation_number }} · {{ stageLabel(invocation.stage) }} · {{ invocation.status }}</h2>
+          <p v-if="invocation.stage === 'narration_correction'">
+            The previous model response contained narration instead of a required tool call.
+            LogHawk requested a correction, reusing the existing conversation and discovery results.
+          </p>
           <p>Invocation: {{ invocation.id }} · Explanation attempt: {{ invocation.explanation_attempt_id ?? 'Not applicable' }}</p>
           <p>Provider: {{ invocation.provider ?? 'Not recorded' }} · Configured model: {{ invocation.configured_model ?? 'Not recorded' }} · Returned model: {{ invocation.returned_model ?? 'Not reported' }}</p>
           <p>{{ time(invocation.started_at) }} — {{ time(invocation.completed_at) }} · Duration including preparation: {{ invocation.duration_ms == null ? 'Not recorded' : (invocation.duration_ms / 1000).toFixed(2) + ' seconds' }}</p>

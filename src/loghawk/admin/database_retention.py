@@ -23,12 +23,12 @@ from loghawk.database.database_layer import maintenance_connection
 
 
 SERVER_TARGETS = (
-    "llm_tool_requests", "pipeline_runs", "task_runs", "collector_runs",
+    "llm_tool_requests", "pipeline_runs", "task_runs", "builtin_task_runs",
     "rag_ingestion_jobs", "console_llm_history", "console_command_history", "auth_sessions",
 )
 CONSOLE_TARGETS = ("cli_command_history", "llm_conversation_history")
 CHILDREN = ("rca_evidence_views", "llm_tool_calls", "rca_llm_invocations")
-RUNS = {"pipeline_runs", "task_runs", "collector_runs"}
+RUNS = {"pipeline_runs", "task_runs", "builtin_task_runs"}
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "CANCELED", "TERMINATED", "TIMED_OUT"}
 CALL_TERMINAL = TERMINAL | {"REJECTED", "CONFIRMED", "AWAITING_CONFIRMATION",
                             "REQUEST_SETTINGS", "EXPLANATION_COMPLETED", "EXPLANATION_FAILED"}

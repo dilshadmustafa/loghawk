@@ -6,9 +6,14 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from loghawk.builtin_tasks.loader import load_definitions
 from loghawk.database.timestamps import utc_now
 from loghawk.database.database_layer import connect, initialize_database
 from loghawk.utils.user_identity import get_userid
+
+
+class ReservedTaskNameError(ValueError):
+    """A custom Task name conflicts with an installed built-in Task."""
 
 
 def _now() -> str:
@@ -134,6 +139,11 @@ def delete_artifact_version(task_id: str, artifact_id: str, database_role: str =
 
 
 def create_task(data: dict, database_role: str = "server") -> dict:
+    name = data["name"].strip()
+    if name.casefold() in {builtin_name.casefold() for builtin_name in load_definitions()}:
+        raise ReservedTaskNameError(
+            f"{name!r} is reserved for a built-in Task. Choose another name."
+        )
     task_id = uuid4().hex
     now = _now()
     with _connect(database_role) as connection:

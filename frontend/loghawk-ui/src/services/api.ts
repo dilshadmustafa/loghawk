@@ -226,24 +226,24 @@ export const retryRcaExplanation = (requestId: string) =>
     method: "POST",
   });
 
-export const getBuiltinCollectors = () =>
-  request<import("../types/api").BuiltinCollector[]>("/builtin-collectors");
-export const setBuiltinCollectorEnabled = (name: string, enabled: boolean) =>
-  request<{ name: string; enabled: boolean }>(`/builtin-collectors/${encodeURIComponent(name)}/enabled`, {
+export const getBuiltinTasks = () =>
+  request<import("../types/api").BuiltinTask[]>("/builtin-tasks");
+export const setBuiltinTaskEnabled = (name: string, enabled: boolean) =>
+  request<{ name: string; enabled: boolean }>(`/builtin-tasks/${encodeURIComponent(name)}/enabled`, {
     method: "PUT", body: JSON.stringify({ enabled }),
   });
-export const setBuiltinCollectorPolicy = (name: string, execution_policy: import("../types/api").TaskExecutionPolicy) =>
-  request<{ name: string; execution_policy: import("../types/api").TaskExecutionPolicy }>(`/builtin-collectors/${encodeURIComponent(name)}/execution-policy`, {
+export const setBuiltinTaskPolicy = (name: string, execution_policy: import("../types/api").TaskExecutionPolicy) =>
+  request<{ name: string; execution_policy: import("../types/api").TaskExecutionPolicy }>(`/builtin-tasks/${encodeURIComponent(name)}/execution-policy`, {
     method: "PUT", body: JSON.stringify({ execution_policy }),
   });
 
-export const setBuiltinCollectorApproved = (name: string, approved: boolean) =>
-  request<{ name: string; approved: boolean }>(`/builtin-collectors/${encodeURIComponent(name)}/approved`, {
+export const setBuiltinTaskApproved = (name: string, approved: boolean) =>
+  request<{ name: string; approved: boolean }>(`/builtin-tasks/${encodeURIComponent(name)}/approved`, {
     method: "PUT", body: JSON.stringify({ approved }),
   });
 
-export const getBuiltinCollectorSource = (name: string) =>
-  request<import("../types/api").BuiltinCollectorSource>(`/builtin-collectors/${encodeURIComponent(name)}/source`);
+export const getBuiltinTaskSource = (name: string) =>
+  request<import("../types/api").BuiltinTaskSource>(`/builtin-tasks/${encodeURIComponent(name)}/source`);
 
 
 export const getRcaHistory = (query: URLSearchParams) =>

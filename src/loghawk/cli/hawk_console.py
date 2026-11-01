@@ -972,7 +972,7 @@ class HawkConsole(App[None]):
                     if task["artifact_type"] not in {"python", "bash", "powershell", "windows-cmd"}:
                         raise ValueError("This collector type cannot run locally.")
                     if artifact.get("arguments_schema") is not None:
-                        from loghawk.collectors.contracts import validate_arguments
+                        from loghawk.builtin_tasks.contracts import validate_arguments
                         arguments = validate_arguments(artifact["arguments_schema"], arguments)
                     self._load_task(task)
                     artifact = dict(artifact, _run_arguments=arguments, _run_command="/collectrun")
@@ -985,8 +985,9 @@ class HawkConsole(App[None]):
                     self._run_collector_request(terminal_id, command_name, name, {})
                     return
                 else:
-                    from loghawk.collectors.registry import _DEFINITIONS
-                    if name not in _DEFINITIONS:
+                    from loghawk.builtin_tasks.loader import load_definitions
+                    definition = load_definitions().get(name)
+                    if not definition or definition["task_kind"] != "collector":
                         raise ValueError(f"Collector not found: {name}")
                     self._pending_task_runs[terminal_id] = (
                         {"name": name, "_builtin_collector": True},
@@ -1066,9 +1067,9 @@ class HawkConsole(App[None]):
         arguments: dict,
     ) -> None:
         try:
-            if command_name == "/collectrun":
-                # Saved collectors use the captured artifact through _run_task_artifact.
-                result = lhrunner.run_builtin_collector(collector_name or "", arguments)
+            if command_name in {"/collectrun", "/taskrun"}:
+                # Local development execution deliberately bypasses server policy.
+                result = lhrunner.run_builtin_task(collector_name or "", arguments)
             elif self._api_client is None:
                 raise RuntimeError("This collector command requires a signed-in Hawk Console session.")
             elif command_name == "/collectlist":
@@ -1101,7 +1102,13 @@ class HawkConsole(App[None]):
         try:
             task = self._task_workspace.find_task_by_name(task_name)
             if task is None:
-                raise RuntimeError(f"Task not found: {task_name}")
+                from urllib.parse import quote
+                result = self._api_client.post_json(
+                    f"/api/v1/builtin-tasks/{quote(task_name, safe='')}/runs",
+                    {"arguments": arguments}, timeout=330,
+                )
+                self.app.call_from_thread(self._finish_api_run_request, terminal_id, _format_api_run_result(result))
+                return
             if task.get("artifact_type") == "n8n":
                 raise RuntimeError(
                     "n8n workflows are not executed by LogHawk; import them into the customer-managed n8n instance."
@@ -2087,7 +2094,22 @@ class HawkConsole(App[None]):
                 return
             task = self._task_workspace.find_task_by_name(task_name)
             if task is None:
-                output.write(f"Task not found: {task_name}\n")
+                from loghawk.builtin_tasks.loader import load_definitions, validate_arguments
+                definition = load_definitions().get(task_name)
+                if definition is None:
+                    output.write(f"Task not found: {task_name}\n")
+                    return
+                try:
+                    arguments = validate_arguments(task_name, arguments)
+                except ValueError as exc:
+                    output.write(f"Invalid Task arguments: {exc}\n")
+                    return
+                self._pending_task_runs[terminal_id] = (
+                    {"name": task_name, "_builtin_task": True},
+                    {"_run_arguments": arguments, "_run_command": "/taskrun"},
+                )
+                output.write("Input arguments: " + json.dumps(arguments, ensure_ascii=False) + "\n")
+                output.write(f"Run built-in Task {task_name} locally? (Y/N): ")
                 return
             artifact = task.get("latest_artifact")
             if artifact is None:
@@ -2095,7 +2117,7 @@ class HawkConsole(App[None]):
                 return
             try:
                 if artifact.get("arguments_schema") is not None:
-                    from loghawk.collectors.contracts import validate_arguments
+                    from loghawk.builtin_tasks.contracts import validate_arguments
                     arguments = validate_arguments(artifact["arguments_schema"], arguments)
             except ValueError as exc:
                 output.write(f"Invalid Task arguments: {exc}\n")
@@ -2194,9 +2216,10 @@ class HawkConsole(App[None]):
             output.write("Please answer Y or N: ")
             return
         task, artifact = self._pending_task_runs.pop(terminal_id)
-        if task.get("_builtin_collector"):
-            self._begin_command_output(terminal_id, f"/collectrun {task['name']}")
-            self._run_collector_request(terminal_id, "/collectrun", task["name"], artifact["_run_arguments"])
+        if task.get("_builtin_collector") or task.get("_builtin_task"):
+            run_command = artifact.get("_run_command", "/collectrun")
+            self._begin_command_output(terminal_id, f"{run_command} {task['name']}")
+            self._run_collector_request(terminal_id, run_command, task["name"], artifact["_run_arguments"])
             return
         self._begin_command_output(
             terminal_id, f"{artifact.get('_run_command', '/taskrun')} {task['name']} · Version {artifact['version']}"
@@ -2228,7 +2251,7 @@ class HawkConsole(App[None]):
         try:
             arguments = artifact.get("_run_arguments", {})
             if artifact.get("arguments_schema") is not None:
-                from loghawk.collectors.contracts import validate_arguments
+                from loghawk.builtin_tasks.contracts import validate_arguments
                 arguments = validate_arguments(artifact["arguments_schema"], arguments)
             result = await asyncio.to_thread(
                 lhrunner.run_artifact, artifact_type, artifact["content"], arguments=arguments

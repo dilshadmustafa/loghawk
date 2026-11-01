@@ -172,7 +172,7 @@ def save_artifact_version(task_id: str, content: str, database_role: str = "serv
     validated = _validate_artifact(task, content)
     if validated is None:
         raise ValueError("Artifact cannot be empty")
-    from loghawk.collectors.contracts import normalize_task_schema
+    from loghawk.builtin_tasks.contracts import normalize_task_schema
     arguments_schema = normalize_task_schema(arguments_schema)
     task_store.save_artifact(task_id, validated, database_role, arguments_schema=arguments_schema)
     return task_store.get_task(task_id, database_role)

@@ -50,6 +50,43 @@ def bounded_json(value, max_chars):
     return text
 
 
+
+def _deduplicate_stdout(result):
+    """Omit JSON stdout only when its complete contents are represented elsewhere.
+
+    Called on the model-facing deep copy, never on saved collector evidence.
+    Plain text, truncated output, and JSON containing additional fields remain.
+    """
+    if not isinstance(result, dict) or "data" not in result:
+        return
+    stdout = result.get("stdout")
+    if not isinstance(stdout, str):
+        return
+    metadata = result.get("output_metadata")
+    if isinstance(metadata, dict):
+        stdout_metadata = metadata.get("stdout")
+        if isinstance(stdout_metadata, dict) and stdout_metadata.get("truncated"):
+            return
+    try:
+        payload = json.loads(stdout)
+        # Use canonical JSON comparisons so booleans and numbers stay distinct.
+        def same(left, right):
+            return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(right, sort_keys=True, allow_nan=False)
+        if isinstance(payload, dict) and "data" in payload:
+            duplicate = (
+                set(payload).issubset({"summary", "data"})
+                and same(payload["data"], result["data"])
+                and ("summary" not in payload or same(payload["summary"], result.get("summary")))
+            )
+        else:
+            duplicate = same(payload, result["data"])
+    except (ValueError, TypeError, RecursionError):
+        return
+    if duplicate:
+        del result["stdout"]
+        result["stdout_deduplicated"] = True
+
+
 def compact_evidence(evidence, max_chars):
     """Factor repeated Prometheus labels; otherwise use a generic bounded preview."""
     if isinstance(evidence, str):
@@ -62,6 +99,7 @@ def compact_evidence(evidence, max_chars):
                         "text": evidence}
     packed = deepcopy(evidence)
     result = packed.get("result") if isinstance(packed, dict) else None
+    _deduplicate_stdout(result)
     data = result.get("data") if isinstance(result, dict) else None
     series = data.get("result") if isinstance(data, dict) else None
     if (isinstance(series, list) and series
@@ -104,7 +142,8 @@ def evidence_metadata(original: str, prepared: str) -> dict:
             return
         if isinstance(value, dict):
             keys = ("truncated", "truncated_by_script", "total_series", "included_series", "omitted_series",
-                    "total_items", "included_items", "total_fields", "original_chars", "source_limit", "requested_limit")
+                    "total_items", "included_items", "total_fields", "original_chars", "source_limit", "requested_limit",
+                    "stdout_deduplicated")
             found = {key: value[key] for key in keys if key in value}
             if found:
                 markers.append({"path": path, **found})
