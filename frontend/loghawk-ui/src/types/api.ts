@@ -195,6 +195,7 @@ export interface RcaAnswer {
   explanation?: {
     status: "RUNNING" | "COMPLETED" | "FAILED";
     can_retry: boolean;
+    can_regenerate: boolean;
     attempts: number;
   };
   execution?: RcaExecutionSummary;
@@ -267,4 +268,5 @@ export interface RcaHistoryDetail {
   settings: Record<string, unknown> | null; events: RcaHistoryEvent[];
   invocations: RcaInvocation[]; evidence_views: RcaEvidenceView[];
   execution: RcaExecutionSummary;
+  explanation?: RcaAnswer["explanation"] | null;
 }

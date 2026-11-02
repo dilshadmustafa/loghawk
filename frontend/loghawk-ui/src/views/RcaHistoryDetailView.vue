@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { getRcaHistoryDetail } from "../services/api";
+import { getRcaHistoryDetail, retryRcaExplanation, regenerateRcaExplanation } from "../services/api";
 import type { RcaHistoryDetail } from "../types/api";
 const route = useRoute();
 const record = ref<RcaHistoryDetail | null>(null);
 const busy = ref(false), error = ref(""), notice = ref("");
+const explaining = ref(false);
 const tabs = ["Overview", "Evidence & Inputs", "AI Explanations", "Timeline", "LLM Usage"];
 const tab = ref("Overview");
 const stageLabel = (stage: string) =>
-  stage === "narration_correction" ? "Narration correction" : stage;
+  ({
+    narration_correction: "Narration correction",
+    initial_explanation: "Initial explanation",
+    explanation_retry: "Explanation retry",
+    explanation_regeneration: "Explanation regeneration",
+  } as Record<string, string>)[stage] ?? stage;
 const pretty = (value: unknown) => value == null ? "Not recorded" : JSON.stringify(value, null, 2);
 const evidence = (value: string | null) => { if (value == null) return "Not recorded"; try { return pretty(JSON.parse(value)); } catch { return value; } };
 const time = (value: string | null) => value ? new Date(value).toLocaleString() : "Not recorded";
@@ -34,6 +40,41 @@ async function load() {
   finally { if (current === generation) busy.value = false; }
 }
 watch(() => route.params.id, () => { tab.value = "Overview"; notice.value = ""; void load(); }, { immediate: true });
+async function explainAgain() {
+  const current = record.value;
+  const explanation = current?.explanation;
+  if (!current || busy.value || explaining.value ||
+      (!explanation?.can_retry && !explanation?.can_regenerate)) return;
+
+  const requestId = current.id;
+  const pageGeneration = generation;
+  explaining.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const action = explanation.can_regenerate
+      ? regenerateRcaExplanation : retryRcaExplanation;
+    await action(requestId);
+    if (pageGeneration !== generation) return;
+    const refreshed = await getRcaHistoryDetail(requestId);
+    if (pageGeneration === generation) {
+      record.value = refreshed;
+      notice.value = "Explanation attempt saved. Collectors were not rerun.";
+    }
+  } catch (e) {
+    if (pageGeneration === generation) {
+      error.value = `Could not receive the explanation: ${
+        e instanceof Error ? e.message : String(e)
+      }. Refresh history to check the attempt before trying again.`;
+      if (record.value?.explanation) {
+        record.value.explanation.can_retry = false;
+        record.value.explanation.can_regenerate = false;
+      }
+    }
+  } finally {
+    explaining.value = false;
+  }
+}
 async function copy(text: string) {
   try { await navigator.clipboard.writeText(text); notice.value = "Copied to clipboard."; }
   catch { notice.value = "Clipboard unavailable. Select the displayed text and copy it manually."; }
@@ -49,7 +90,7 @@ function download() {
   <section>
     <h1>RCA Request History</h1>
     <RouterLink to="/rca/history">Back to History</RouterLink>
-    <button :disabled="busy" @click="load">Refresh</button>
+    <button :disabled="busy || explaining" @click="load">Refresh</button>
     <button v-if="record" @click="copy(pretty(record))">Copy JSON</button>
     <button v-if="record" @click="download">Download JSON</button>
     <p v-if="busy" role="status">Loading request…</p><p v-if="error" role="alert">{{ error }}</p>
@@ -89,6 +130,17 @@ function download() {
       </section>
       <section v-if="tab === 'AI Explanations'">
         <p>Every recorded explanation attempt is retained. A failed explanation does not mean collection failed.</p>
+        <button
+          v-if="record.explanation?.can_retry || record.explanation?.can_regenerate"
+          :disabled="busy || explaining"
+          @click="explainAgain">
+          {{ record.explanation?.can_regenerate
+            ? "Regenerate AI Explanation" : "Retry AI Explanation" }}
+        </button>
+        <p v-if="explaining" role="status">Generating explanation from saved evidence…</p>
+        <p>Uses the API server's currently loaded model settings.
+          After changing model settings in .env, restart the API server.
+          Collectors will not run again.</p>
         <article v-for="event in explanations" :key="event.id">
           <h2>{{ event.status }}</h2><p>{{ time(event.started_at) }} — {{ time(event.completed_at) }}</p>
           <h3>Attempt and model metadata</h3><pre>{{ pretty(event.arguments) }}</pre>

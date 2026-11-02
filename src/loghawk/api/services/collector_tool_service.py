@@ -684,12 +684,14 @@ def _start_explanation(request_id, state, userid):
     return _perform_explanation(request_id, attempt, origin)
 
 
-def retry_explanation(request_id: str, userid: str, *, origin_software: str) -> dict:
+def retry_explanation(request_id: str, userid: str, *,
+                      origin_software: str, regenerate: bool = False) -> dict:
     """Explain stored evidence only. This path cannot call a collector or its dispatcher."""
     if not config.LH_LLM_TOOL_CALLING_ENABLED:
         raise ValueError("Collector assistant is disabled.")
     attempt = store.begin_explanation(
         request_id, userid, origin_software, config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS,
+        regenerate=regenerate,
     )
     return _perform_explanation(request_id, attempt, origin_software)
 
@@ -707,7 +709,7 @@ def _perform_explanation(request_id, attempt, origin):
     error = None
     metadata = {}
     invocation_id = store.begin_invocation(request_id,
-        "explanation_retry" if attempt["attempts"] > 1 else "initial_explanation",
+        attempt["stage"],
         redact_audit_metadata(store.settings_snapshot()), config.LH_LLM_PROVIDER, attempt["attempt_id"])
     try:
         messages = _explanation_messages(attempt["context"], execution, invocation_id)

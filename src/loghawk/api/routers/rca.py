@@ -52,6 +52,22 @@ def retry_explanation(request_id: str, user: dict = Depends(require_webui_user))
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/chat/{request_id}/explanation/regenerate")
+def regenerate_explanation(
+    request_id: str, user: dict = Depends(require_webui_user),
+) -> dict:
+    from loghawk.api.services import collector_tool_service
+    try:
+        return collector_tool_service.retry_explanation(
+            request_id, user["userid"],
+            origin_software="web", regenerate=True,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/history")
 def history(user: dict = Depends(require_webui_user), search: str = Query("", max_length=300),
             userid: str = Query("", max_length=200), origin: str = Query("", max_length=20),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ApiError, sendRcaMessage, confirmRcaCollector, retryRcaExplanation } from "../services/api";
+import { ApiError, sendRcaMessage, confirmRcaCollector, retryRcaExplanation, regenerateRcaExplanation } from "../services/api";
 import type { RcaMessage, RcaAnswer, RcaExecutionSummary } from "../types/api";
 type ChatEntry = RcaMessage & { requestId?: string; execution?: RcaExecutionSummary; explanation?: RcaAnswer["explanation"] };
 const messages = ref<ChatEntry[]>([]);
@@ -47,7 +47,10 @@ function receive(answer: RcaAnswer) {
   if (answer.explanation && answer.request_id) {
     // Keep historical execution snapshots; only the latest explanation can be retried.
     for (const entry of messages.value) {
-      if (entry.requestId === answer.request_id && entry.explanation) entry.explanation.can_retry = false;
+      if (entry.requestId === answer.request_id && entry.explanation) {
+        entry.explanation.can_retry = false;
+        entry.explanation.can_regenerate = false;
+      }
     }
   }
   if (answer.response || answer.execution) messages.value.push({
@@ -56,12 +59,18 @@ function receive(answer: RcaAnswer) {
   });
 }
 async function retryExplanation(message: ChatEntry) {
-  if (busy.value || pending.value || uncertain.value || !message.requestId || !message.explanation?.can_retry) return;
+  if (busy.value || pending.value || uncertain.value || !message.requestId) return;
+  const explanation = message.explanation;
+  if (!explanation?.can_retry && !explanation?.can_regenerate) return;
   busy.value = true;
   error.value = "";
-  try { receive(await retryRcaExplanation(message.requestId)); }
+  try {
+    const action = explanation.can_regenerate
+      ? regenerateRcaExplanation : retryRcaExplanation;
+    receive(await action(message.requestId));
+  }
   catch (e) {
-    error.value = `Could not receive the AI explanation: ${e instanceof Error ? e.message : String(e)}. This retry does not execute collectors.`;
+    error.value = `Could not receive the AI explanation: ${e instanceof Error ? e.message : String(e)}. Check RCA History before trying again. Collectors are not rerun by this action.`;
   }
   finally { busy.value = false; }
 }
@@ -160,9 +169,13 @@ async function decide(approved: boolean) {
           <p>The assistant's narrative below is not execution confirmation.</p>
         </section>
         <div class="message-text">{{ message.content }}</div>
-        <div v-if="message.explanation?.can_retry">
-          <button :disabled="busy || !!pending || uncertain" @click="retryExplanation(message)">Retry AI Explanation</button>
-          <p>Uses saved evidence. Collectors will not run again.</p>
+        <div v-if="message.explanation?.can_retry || message.explanation?.can_regenerate">
+          <button :disabled="busy || !!pending || uncertain" @click="retryExplanation(message)">
+            {{ message.explanation?.can_regenerate
+              ? "Regenerate AI Explanation" : "Retry AI Explanation" }}
+          </button>
+          <p>Uses saved evidence and the API server's currently loaded model settings.
+            Collectors will not run again.</p>
         </div>
       </article>
     </div>

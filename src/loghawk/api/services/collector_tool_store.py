@@ -129,7 +129,8 @@ def execution_summary(request_id: str) -> dict:
 
 
 def begin_explanation(request_id: str, userid: str, origin_software: str,
-                      timeout: int, context: dict | None = None) -> dict:
+                      timeout: int, context: dict | None = None,
+                      *, regenerate: bool = False) -> dict:
     """Atomically claim a text-only explanation; retain no runnable collector state."""
     timestamp = now()
     with connect("server") as db:
@@ -141,13 +142,23 @@ def begin_explanation(request_id: str, userid: str, origin_software: str,
         if context is None:
             expired = (previous and previous.get("status") == "RUNNING"
                        and row["expires_at"] <= timestamp)
-            if not previous or (previous.get("status") != "FAILED" and not expired):
-                raise ValueError("Explanation is not retryable or another attempt is still running.")
+            eligible = (
+                previous and previous.get("status") == "COMPLETED"
+                if regenerate
+                else previous and (previous.get("status") == "FAILED" or expired)
+            )
+            if not eligible:
+                raise ValueError("Explanation is not eligible for this action or another attempt is still running.")
             context = previous["context"]
         elif row["status"] != "PROCESSING" or previous:
             raise ValueError("This request has already entered its explanation stage.")
         explanation = {"status": "RUNNING", "attempt_id": uuid4().hex,
                        "attempts": (previous or {}).get("attempts", 0) + 1,
+                       "stage": (
+                           "explanation_regeneration" if regenerate
+                           else "explanation_retry" if previous
+                           else "initial_explanation"
+                       ),
                        "context": context, "response": "", "error": None}
         lease = (datetime.now(UTC) + timedelta(seconds=timeout + 60)).isoformat()
         result = db.execute(
@@ -191,6 +202,7 @@ def explanation_info(request_id: str) -> dict | None:
         explanation["status"] == "RUNNING" and row["expires_at"] <= now()
     )
     return {"status": explanation["status"], "can_retry": retryable,
+            "can_regenerate": explanation["status"] == "COMPLETED",
             "attempts": explanation["attempts"]}
 
 
@@ -332,6 +344,14 @@ def history_detail(request_id, user):
     detail["invocations"] = [_json_fields(r, ["settings_json", "usage_json"]) for r in invocations]
     detail["evidence_views"] = [_json_fields(r, ["transformation_json"]) for r in views]
     detail["execution"] = execution_summary(request_id)
+    detail["explanation"] = explanation_info(request_id)
+    if detail["explanation"]:
+        own_web_request = (
+            row["userid"] == user["userid"]
+            and row["origin_software"] == "web"
+        )
+        detail["explanation"]["can_retry"] &= own_web_request
+        detail["explanation"]["can_regenerate"] &= own_web_request
     return detail
 
 
