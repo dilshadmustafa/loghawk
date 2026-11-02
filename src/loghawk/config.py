@@ -190,11 +190,12 @@ def _tool_calling_positive_int(name: str, default: int) -> int:
     return value
 
 
-LH_LLM_TOOL_CONTEXT_LENGTH = _tool_calling_positive_int("LH_LLM_TOOL_CONTEXT_LENGTH", 4096)
-LH_LLM_TOOL_MAX_TOKENS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_TOKENS", 1024)
-LH_LLM_TOOL_MAX_CALLS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_CALLS", 3)
-LH_LLM_TOOL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_TIMEOUT_SECONDS", 120)
-LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS", 180)
+LH_LLM_TOOL_CONTEXT_LENGTH = _tool_calling_positive_int("LH_LLM_TOOL_CONTEXT_LENGTH", 8192)
+LH_LLM_TOOL_MAX_TOKENS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_TOKENS", 2048)
+LH_LLM_TOOL_MAX_DISCOVERY_CALLS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_DISCOVERY_CALLS", 5)
+LH_LLM_TOOL_MAX_EXECUTION_REQUESTS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_EXECUTION_REQUESTS", 5)
+LH_LLM_TOOL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_TIMEOUT_SECONDS", 300)
+LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS", 300)
 LH_LLM_TOOL_MAX_RESULT_CHARS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_RESULT_CHARS", 6000)
 
 _raw_llm_fallback_models = os.getenv("LH_LLM_FALLBACK_MODELS", "").strip()

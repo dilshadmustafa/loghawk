@@ -209,7 +209,8 @@ def explanation_info(request_id: str) -> dict | None:
 # History reads never expose runnable confirmation state or secret-bearing context.
 def settings_snapshot() -> dict:
     from loghawk import config
-    names = ("MODEL", "CONTEXT_LENGTH", "MAX_TOKENS", "MAX_CALLS", "TIMEOUT_SECONDS",
+    names = ("MODEL", "CONTEXT_LENGTH", "MAX_TOKENS", "MAX_DISCOVERY_CALLS",
+             "MAX_EXECUTION_REQUESTS", "TIMEOUT_SECONDS",
              "EXPLANATION_TIMEOUT_SECONDS", "MAX_RESULT_CHARS")
     return {"LH_LLM_TOOL_" + name: getattr(config, "LH_LLM_TOOL_" + name) for name in names}
 

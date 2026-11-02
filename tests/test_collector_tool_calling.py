@@ -43,7 +43,8 @@ class ToolTests(unittest.TestCase):
         self.addCleanup(self.engine.dispose)
         for name, value in {
             "LH_LLM_TOOL_CALLING_ENABLED": True, "LH_LLM_TOOL_CONTEXT_LENGTH": 16000,
-            "LH_LLM_TOOL_MAX_TOKENS": 1024, "LH_LLM_TOOL_MAX_CALLS": 3,
+            "LH_LLM_TOOL_MAX_TOKENS": 1024, "LH_LLM_TOOL_MAX_DISCOVERY_CALLS": 5,
+            "LH_LLM_TOOL_MAX_EXECUTION_REQUESTS": 5,
             "LH_LLM_TOOL_TIMEOUT_SECONDS": 120, "LH_LLM_TOOL_MAX_RESULT_CHARS": 2000,
         }.items():
             self.patch(config, name, value)
@@ -162,7 +163,7 @@ class ToolTests(unittest.TestCase):
         self.runner.assert_not_called()
 
     def test_invalid_arguments_count_towards_limit(self):
-        self.patch(config, "LH_LLM_TOOL_MAX_CALLS", 1)
+        self.patch(config, "LH_LLM_TOOL_MAX_EXECUTION_REQUESTS", 1)
         task = self.collector()
         self.model.complete_tool_turn.side_effect = [self.call(task, {"undeclared": "value"}), self.call(task)]
         result = self.start()
@@ -170,7 +171,7 @@ class ToolTests(unittest.TestCase):
         self.runner.assert_not_called()
 
     def test_excessive_parallel_calls_rejected_before_any_execution(self):
-        self.patch(config, "LH_LLM_TOOL_MAX_CALLS", 1)
+        self.patch(config, "LH_LLM_TOOL_MAX_EXECUTION_REQUESTS", 1)
         task = self.collector()
         response = self.call(task)
         response["tool_calls"].extend(self.call(task, call_id="call-2")["tool_calls"])

@@ -2325,11 +2325,12 @@ Configure these values in `.env` on the API server:
 |---|---|---|
 | `LH_LLM_TOOL_CALLING_ENABLED` | Enable collector tool calling in Web RCA and signed-in Console chat | `false` |
 | `LH_LLM_TOOL_MODEL` | Tool-capable model using the configured LiteLLM provider | `qwen3:4b-instruct` |
-| `LH_LLM_TOOL_CONTEXT_LENGTH` | Input/output context budget; also sets Ollama context length | `4096` |
-| `LH_LLM_TOOL_MAX_TOKENS` | Maximum generated tokens per model response | `1024` |
-| `LH_LLM_TOOL_MAX_CALLS` | Tool-call limit per request, including discovery | `3` |
-| `LH_LLM_TOOL_TIMEOUT_SECONDS` | Shared discovery/execution processing budget; excludes human confirmation wait | `120` |
-| `LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS` | Separate budget for final explanation and each explanation retry | `180` |
+| `LH_LLM_TOOL_CONTEXT_LENGTH` | Input/output context budget; also sets Ollama context length | `8192` |
+| `LH_LLM_TOOL_MAX_TOKENS` | Maximum generated tokens per model response | `2048` |
+| `LH_LLM_TOOL_MAX_DISCOVERY_CALLS` | Maximum discovery calls per request, including pagination and rejected discovery arguments | `5` |
+| `LH_LLM_TOOL_MAX_EXECUTION_REQUESTS` | Maximum execution requests, including rejected requests; confirmation does not count again | `5` |
+| `LH_LLM_TOOL_TIMEOUT_SECONDS` | Shared discovery/execution processing budget; excludes human confirmation wait | `300` |
+| `LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS` | Separate budget for final explanation and each explanation retry | `300` |
 | `LH_LLM_TOOL_MAX_RESULT_CHARS` | Maximum characters per model tool result; also bounds discovery responses | `6000` |
 
 Example using the current repository settings:
@@ -2338,10 +2339,11 @@ Example using the current repository settings:
 LH_LLM_TOOL_CALLING_ENABLED=true
 LH_LLM_TOOL_MODEL=qwen3:4b-instruct
 LH_LLM_TOOL_CONTEXT_LENGTH=8192
-LH_LLM_TOOL_MAX_TOKENS=1024
-LH_LLM_TOOL_MAX_CALLS=3
+LH_LLM_TOOL_MAX_TOKENS=2048
+LH_LLM_TOOL_MAX_DISCOVERY_CALLS=5
+LH_LLM_TOOL_MAX_EXECUTION_REQUESTS=5
 LH_LLM_TOOL_TIMEOUT_SECONDS=300
-LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS=180
+LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS=300
 LH_LLM_TOOL_MAX_RESULT_CHARS=6000
 ```
 
