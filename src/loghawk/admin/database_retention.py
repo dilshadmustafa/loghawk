@@ -110,6 +110,11 @@ def schema(connection, role):
                 name == "rca_evidence_views" and referred in {"llm_tool_calls", "rca_llm_invocations"})
             if not allowed:
                 raise ValueError("An unsupported incoming database relationship prevents retention cleanup.")
+    if role == "server" and "rca_investigations" in inspector.get_table_names():
+        # Include relationship tables in maintenance locks; they are not deletion targets.
+        for name in inspector.get_table_names():
+            if name.startswith("rca_") and name not in tables:
+                tables[name] = sa.Table(name, metadata, autoload_with=connection)
     return tables
 
 
@@ -145,6 +150,26 @@ def date_reason(row, cutoff, required):
 
 
 def request_reason(connection, tables, row, cutoff, batch_size):
+    if "rca_investigations" in tables:
+        protected = connection.execute(sa.text("""
+            SELECT i.id FROM rca_investigations i WHERE i.status = 'OPEN' AND (
+                EXISTS (SELECT 1 FROM rca_investigation_requests l
+                        WHERE l.investigation_id=i.id AND l.request_id=:request_id)
+                OR EXISTS (SELECT 1 FROM rca_investigation_findings f
+                           WHERE f.investigation_id=i.id AND f.request_id=:request_id)
+                OR EXISTS (
+                    SELECT 1 FROM rca_evidence_sources s JOIN llm_tool_calls c ON c.id=s.tool_call_id
+                    WHERE c.request_id=:request_id AND (
+                        s.investigation_id=i.id
+                        OR EXISTS (SELECT 1 FROM rca_investigation_evidence e WHERE e.investigation_id=i.id AND e.source_id=s.id)
+                        OR EXISTS (SELECT 1 FROM rca_incident_evidence e JOIN rca_investigation_incidents l ON l.incident_id=e.incident_id WHERE l.investigation_id=i.id AND e.source_id=s.id)
+                        OR EXISTS (SELECT 1 FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=i.id AND e.source_id=s.id)
+                    )
+                )
+            ) LIMIT 1
+        """), {"request_id": row["id"]}).first()
+        if protected:
+            return "open_investigation_reference"
     if row["status"] not in TERMINAL | {"EXPIRED"}:
         return "active_or_unknown_status"
     reason = date_reason(row, cutoff, ("created_at", "updated_at"))

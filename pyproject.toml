@@ -17,6 +17,7 @@ dependencies = [
     "lancedb==0.40.0",
     "litellm",
     "boto3",
+    "pyarrow",
     "fastapi",
     "python-multipart",
     "uvicorn[standard]",
@@ -34,3 +35,5 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "loghawk.builtin_tasks" = ["manifest.json", "general_tasks/*.sh", "general_tasks/*.ps1", "general_tasks/*.cmd", "collector_tasks/*.sh", "collector_tasks/*.ps1", "collector_tasks/*.cmd", "remediation_tasks/*.sh", "remediation_tasks/*.ps1", "remediation_tasks/*.cmd", "rollback_tasks/*.sh", "rollback_tasks/*.ps1", "rollback_tasks/*.cmd"]
+
+"loghawk.prompts" = ["investigation/*.txt"]

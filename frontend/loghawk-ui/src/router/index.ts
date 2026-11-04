@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from "vue-router";
 import BuiltinTasksView from "../views/BuiltinTasksView.vue";
 import RcaChatView from "../views/RcaChatView.vue";
+import InvestigationsView from "../views/InvestigationsView.vue";
+import InvestigationDetailView from "../views/InvestigationDetailView.vue";
 import RcaHistoryView from "../views/RcaHistoryView.vue";
 import RcaHistoryDetailView from "../views/RcaHistoryDetailView.vue";
 import PipelineRunsView from "../views/PipelineRunsView.vue";
@@ -25,6 +27,8 @@ const router = createRouter({
     { path: "/builtin-tasks", name: "builtin-tasks", component: BuiltinTasksView, meta: { requiresAuth: true } },
     { path: "/rca/history", name: "rca-history", component: RcaHistoryView, meta: { requiresAuth: true } },
     { path: "/rca/history/:id", name: "rca-history-detail", component: RcaHistoryDetailView, meta: { requiresAuth: true } },
+    { path: "/rca/investigations", component: InvestigationsView, meta: { requiresAuth: true } },
+    { path: "/rca/investigations/:id", component: InvestigationDetailView, meta: { requiresAuth: true } },
     { path: "/rca/chat", name: "rca-chat", component: RcaChatView, meta: { requiresAuth: true } },
     { path: "/login", name: "login", component: LoginView },
     { path: "/account", name: "account", component: AccountSettingsView, meta: { requiresAuth: true } },

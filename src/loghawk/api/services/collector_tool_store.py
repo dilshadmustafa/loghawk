@@ -344,6 +344,8 @@ def history_detail(request_id, user):
     detail["events"] = [_json_fields(r, ["arguments_json"]) for r in events]
     detail["invocations"] = [_json_fields(r, ["settings_json", "usage_json"]) for r in invocations]
     detail["evidence_views"] = [_json_fields(r, ["transformation_json"]) for r in views]
+    from loghawk.api.services.investigation_context import saved
+    detail["investigation"] = saved(request_id)
     detail["execution"] = execution_summary(request_id)
     detail["explanation"] = explanation_info(request_id)
     if detail["explanation"]:

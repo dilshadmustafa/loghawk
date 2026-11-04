@@ -1,0 +1,8 @@
+FROM python:3.12-slim
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+COPY app.py /app/app.py
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["python", "/app/app.py"]
+CMD ["serve"]

@@ -64,3 +64,16 @@ class ConsoleApiClient:
                 return job
             time.sleep(2)
 
+
+    def upload_investigation_files(self, investigation_id: str, paths: list[Path], evidence_type: str = "other", record_path: str = "") -> dict:
+        from urllib.parse import quote
+        opened = []
+        try:
+            parts = []
+            for path in paths:
+                stream = path.open("rb"); opened.append(stream)
+                parts.append(("files", (path.name, stream)))
+            return self._request("POST", f"/api/v1/investigations/{quote(investigation_id, safe='')}/sources/upload",
+                                 files=parts, data={"evidence_type": evidence_type, "record_path": record_path}, timeout=300).json()
+        finally:
+            for stream in opened: stream.close()

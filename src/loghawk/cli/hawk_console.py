@@ -378,6 +378,8 @@ class HawkConsole(App[None]):
     def __init__(self, api_token: str | None = None, api_user: dict | None = None) -> None:
         super().__init__()
         self._api_client = ConsoleApiClient(api_token) if api_token else None
+        self._investigation_id: str | None = None
+        self._investigation_busy = False
         self._api_user = dict(api_user or {})
         self._task_workspace = (
             ConsoleApiTaskWorkspace(self._api_client)
@@ -776,7 +778,13 @@ class HawkConsole(App[None]):
         if event.input.id == "task-message-input":
             self._submit_task_message(text)
             return
+        if event.input.id in {"llm-input", "command-one-input", "command-two-input"} and text.split(" ", 1)[0].lower() in {"/investigate", "/investigation"}:
+            self._handle_investigation_command(text)
+            return
         if event.input.id == "llm-input":
+            if self._investigation_busy:
+                self.notify("Wait for the investigation operation to finish.", severity="warning")
+                return
             if text.casefold() == "/help":
                 self._show_help()
                 return
@@ -856,6 +864,100 @@ class HawkConsole(App[None]):
         output.write(f"$ {text}\n")
         self.run_worker(self._run_command(terminal_id, text), name=f"{terminal_id}-command")
 
+    def _handle_investigation_command(self, text: str) -> None:
+        if self._api_client is None:
+            self.notify("Investigations require signed-in Hawk Console.", severity="warning")
+            return
+        if self._investigation_busy or self._chat_busy or self._pending_collector_call or self._pending_llm_command is not None:
+            self.notify("Finish the current request or confirmation first.", severity="warning")
+            return
+        self._investigation_busy = True
+        self._run_investigation_command(text, self._investigation_id)
+
+    @work(thread=True, exclusive=True, group="hawk-investigation")
+    def _run_investigation_command(self, text: str, active_id: str | None) -> None:
+        next_id = active_id
+        try:
+            assert self._api_client is not None
+            command, _, argument = text.partition(" ")
+            base = "/api/v1/investigations"
+            if command.lower() == "/investigate":
+                if not argument.strip(): raise ValueError("Usage: /investigate <problem description>")
+                result = self._api_client.post_json(base, {"problem": argument.strip(), "reported_context": {}})
+                next_id = result["id"]
+            else:
+                action, _, payload = argument.strip().partition(" ")
+                action = action.lower()
+                if action == "list":
+                    offset = int(payload or "0")
+                    result = self._api_client.get_json(f"{base}?offset={offset}")
+                elif action == "open":
+                    result = self._api_client.get_json(f"{base}/{quote(payload.strip(), safe='')}")
+                    if not result.get("can_modify"): raise ValueError("Only your own open investigation can be activated for chat.")
+                    next_id = result["id"]
+                else:
+                    if not active_id: raise ValueError("Create /investigate <problem> or /investigation open <id> first.")
+                    path = f"{base}/{quote(active_id, safe='')}"
+                    if not action:
+                        result = self._api_client.get_json(path)
+                    elif action == "close":
+                        result = self._api_client.post_json(path + "/close", {})
+                        next_id = None
+                    elif action == "upload":
+                        args = [part.strip('"') for part in shlex.split(payload, posix=False)]
+                        if not args: raise ValueError('Usage: /investigation upload "<file or folder>" [evidence-type]')
+                        source = Path(args[0]).expanduser()
+                        supported = {".csv", ".parquet", ".json", ".jsonl", ".log", ".txt"}
+                        paths = sorted(p for p in source.rglob("*") if p.is_file() and not p.is_symlink() and p.suffix.lower() in supported) if source.is_dir() else [source]
+                        if not paths or any(not p.is_file() or p.suffix.lower() not in supported for p in paths): raise ValueError("Select supported evidence files.")
+                        if len(paths) > config.LH_INVESTIGATION_MAX_IMPORT_FILES: raise ValueError("Too many files; select a smaller folder or upload in batches.")
+                        result = self._api_client.upload_investigation_files(active_id, paths, args[1] if len(args)>1 else "other")
+                    elif action == "s3":
+                        listing = json.loads(payload) if payload.lstrip().startswith("{") else {"uri": payload.strip().strip('"')}
+                        result = self._api_client.get_json(path + "/s3?uri=" + quote(listing["uri"], safe='') + "&token=" + quote(listing.get("token", ""), safe=''))
+                    elif action == "preview":
+                        args = payload.split()
+                        if not args: raise ValueError("Usage: /investigation preview <source-id> [offset]")
+                        result = self._api_client.get_json(path + f"/sources/{quote(args[0], safe='')}?offset={int(args[1]) if len(args)>1 else 0}")
+                    elif action == "link":
+                        result = self._api_client.post_json(path + "/incident-links", {"incident_id": payload.strip()})
+                    elif action == "collector":
+                        result = self._api_client.post_json(path + "/sources/collector", {"tool_call_id": payload.strip()})
+                    elif action in {"select", "incident", "finding", "import-s3", "mapping", "reparse"}:
+                        body = json.loads(payload)
+                        if not isinstance(body, dict): raise ValueError("Supply a JSON object.")
+                        if action in {"mapping", "reparse"}:
+                            source_id = body.pop("source_id")
+                            endpoint = path + f"/sources/{quote(source_id, safe='')}/{action}"
+                            result = self._api_client.put_json(endpoint, body) if action=="mapping" else self._api_client.post_json(endpoint, body, timeout=300)
+                        else:
+                            endpoint = {"select":"evidence", "incident":"incidents", "finding":"findings", "import-s3":"sources/s3"}[action]
+                            result = self._api_client.post_json(path + "/" + endpoint, body, timeout=300)
+                    else:
+                        raise ValueError("Unknown investigation command. Use /help.")
+            self.app.call_from_thread(self._finish_investigation_command, next_id, result, None)
+        except Exception as exc:
+            self.app.call_from_thread(self._finish_investigation_command, active_id, None, str(exc))
+
+    def _finish_investigation_command(self, active_id, result, error) -> None:
+        self._investigation_busy = False
+        if error:
+            self.query_one("#llm-output", RichLog).write("Investigation: " + error)
+            return
+        if active_id != self._investigation_id:
+            self._chat_history.clear()
+            self.query_one("#llm-output", RichLog).write("Investigation context changed; started a fresh chat context.")
+        self._investigation_id = active_id
+        self._show_help()
+        output = self.query_one("#help-output", RichLog)
+        output.clear()
+        output.write("Investigation: " + (active_id or "none active"))
+        output.write(json.dumps(result, ensure_ascii=False, indent=2))
+        output.write('Preview: /investigation preview <source-id> [offset]\n'
+                     'Attach: /investigation select {"source_id":"...","records":[1],"incident_id":null}\n'
+                     'Create incident: /investigation incident {"source_id":"...","record_number":1}\n'
+                     'Use /help for mapping, findings and other commands. Close this pane to return to the Editor.')
+
     def _show_help(self) -> None:
         """Display the command reference without discarding the Editor's current view."""
         self._close_rca_output()
@@ -892,6 +994,15 @@ class HawkConsole(App[None]):
                 "AI/LLM",
                 "Ask a question using indexed documents. If mentioning filenames, put double quotes around a filename with spaces.",
             ),
+            ("/investigate", "<problem description>", "All 3 · signed in", "Create and activate a persistent investigation."),
+            ("/investigation", "list | open <id> | close", "All 3 · signed in", "List, activate or close an investigation. No arguments displays it in the Editor."),
+            ("/investigation upload", '"<file or folder>" [stage-a|stage-b|stage-c|raw-logs|other]', "All 3 · signed in", "Upload CSV, Parquet, JSON, JSONL, LOG or TXT evidence. Preview and attach records explicitly."),
+            ("/investigation s3", "s3://bucket/key-or-prefix/", "All 3 · signed in", "List internal S3 files. For another page, supply JSON with uri and token from next_token. import-s3 imports selected objects."),
+            ("/investigation preview", "<source-id> [offset]", "All 3 · signed in", "Display parsed records and record numbers in the Editor."),
+            ("/investigation select", '{"source_id":"...","records":[1],"incident_id":null}', "All 3 · signed in", "Attach/update selected records for this target; null records means all. Earlier request snapshots remain unchanged."),
+            ("/investigation incident", '{"source_id":"...","record_number":1}', "All 3 · signed in", "Create an incident from one imported record; link <incident-id> reuses an owned incident."),
+            ("/investigation finding", '{"content":"...","evidence":[]}', "All 3 · signed in", "Add a user finding; evidence entries reference source_id, records and supports/contradicts. supersedes_id creates a revision."),
+            ("/investigation mapping", '{"source_id":"...","mapping":{"incident_id":"case_id"}}', "All 3 · signed in", "Map source columns. reparse accepts source_id, format and record_path such as /incidents for failed imports."),
             ("/command", "<request>", "AI/LLM", "Ask the LLM to propose shell command(s). Review, edit, then confirm before execution."),
             ("/collectlist", "None", "Command 1 or 2 · signed in", "List built-in collectors and custom Tasks with the Collector kind."),
             ("/collectpolicy", "<built-in-name> <policy>", "Command 1 or 2 - signed in", "Administrator/Power User: set manual, ai-assisted, auto-approved or disabled for a built-in collector."),
@@ -1602,7 +1713,7 @@ class HawkConsole(App[None]):
                     messages = [*self._chat_history, {"role": "user", "content": prompt}]
                     result = self._api_client.post_json(
                         "/api/v1/console/chat",
-                        {"messages": messages, "review_arguments": review_arguments},
+                        {"messages": messages, "review_arguments": review_arguments, "investigation_id": self._investigation_id},
                         timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS
                                 + config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30)
                     )
@@ -1775,6 +1886,7 @@ class HawkConsole(App[None]):
     def _new_chat(self, confirmed: bool = False) -> None:
         if (
             self._chat_busy
+            or self._investigation_busy
             or self._pending_collector_call is not None
             or self._pending_llm_command is not None
             or self._awaiting_llm_command_final_confirmation
@@ -1790,6 +1902,7 @@ class HawkConsole(App[None]):
                 callback=lambda yes: self._new_chat(confirmed=True) if yes else None,
             )
             return
+        self._investigation_id = None
         self._chat_history.clear()
         self._latest_rca_output = ""
         self._rca_retry_request_id = None

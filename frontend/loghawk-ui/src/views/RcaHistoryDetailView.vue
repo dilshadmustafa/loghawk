@@ -97,6 +97,11 @@ function download() {
     <p role="status">{{ notice }}</p>
     <template v-if="record">
       <p>Request ID: <code>{{ record.id }}</code> · {{ record.userid }} · {{ record.origin_software }}</p>
+      <section v-if="record.investigation">
+        <RouterLink :to="`/rca/investigations/${record.investigation.investigation_id}`">Open Investigation</RouterLink>
+        <details><summary>Saved request context snapshot</summary><pre>{{ pretty(record.investigation.snapshot) }}</pre></details>
+        <p>This snapshot preserves the inputs selected for this request. Regeneration does not add later attachments.</p>
+      </section>
       <nav aria-label="History sections"><button v-for="name in tabs" :key="name" :aria-pressed="tab === name" @click="tab = name">{{ name }}</button></nav>
       <section v-if="tab === 'Overview'">
         <h2>Question</h2><p class="text">{{ record.question_text ?? 'Not recorded' }}</p>

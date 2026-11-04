@@ -1,0 +1,21 @@
+{
+  "normal": {
+    "mode": "normal"
+  },
+  "payment-errors": {
+    "service": "payment-service",
+    "mode": "error",
+    "duration_seconds": 180
+  },
+  "payment-timeout": {
+    "service": "payment-service",
+    "mode": "delay",
+    "delay_seconds": 1.2,
+    "duration_seconds": 180
+  },
+  "inventory-errors": {
+    "service": "inventory-service",
+    "mode": "error",
+    "duration_seconds": 180
+  }
+}

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useRoute, useRouter, onBeforeRouteUpdate } from "vue-router";
 import { ApiError, sendRcaMessage, confirmRcaCollector, retryRcaExplanation, regenerateRcaExplanation } from "../services/api";
 import type { RcaMessage, RcaAnswer, RcaExecutionSummary } from "../types/api";
 type ChatEntry = RcaMessage & { requestId?: string; execution?: RcaExecutionSummary; explanation?: RcaAnswer["explanation"] };
+const route = useRoute(), router = useRouter();
+const investigationId = computed(() => typeof route.query.investigation === "string" ? route.query.investigation : "");
 const messages = ref<ChatEntry[]>([]);
 const draft = ref("");
 const busy = ref(false);
@@ -24,8 +27,13 @@ function confirmNewChat() {
   error.value = "";
   argumentDraft.value = "";
   newChatDialog.value?.close();
+  void router.replace({path: "/rca/chat", query: {}});
 }
 
+onBeforeRouteUpdate(() => {
+  if (busy.value || pending.value || uncertain.value) return false;
+  messages.value = []; error.value = ""; argumentDraft.value = "";
+});
 const blockedReason = computed(() => {
   if (busy.value) return "A request is processing. Please wait.";
   if (uncertain.value) return "Sending is paused because the previous request outcome is uncertain. Check the error above.";
@@ -82,7 +90,7 @@ async function send() {
   draft.value = "";
   busy.value = true;
   error.value = "";
-  try { receive(await sendRcaMessage(messages.value.map(({ role, content }) => ({ role, content })), reviewInputArgs.value)); }
+  try { receive(await sendRcaMessage(messages.value.map(({ role, content }) => ({ role, content })), reviewInputArgs.value, investigationId.value)); }
   catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     if (e instanceof ApiError && e.executionNotStarted) {
@@ -123,6 +131,9 @@ async function decide(approved: boolean) {
 <template>
   <section class="rca-chat">
     <h1>AI-Assisted RCA</h1>
+    <p v-if="investigationId">Investigation:
+      <RouterLink :to="`/rca/investigations/${investigationId}`">{{ investigationId }}</RouterLink>.
+      Each request captures its current incident and evidence selection.</p>
     <button :disabled="busy || !!pending || uncertain" @click="requestNewChat">
       New Chat
     </button>

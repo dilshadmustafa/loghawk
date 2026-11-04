@@ -8,7 +8,7 @@ import time
 from uuid import uuid4
 
 from loghawk import config
-from loghawk.api.services import collector_tool_store as store, task_runner, task_store2
+from loghawk.api.services import collector_tool_store as store, task_runner, task_store2, investigation_context
 from loghawk.api.services.collector_evidence import bounded_json, compact_evidence, evidence_metadata
 from loghawk.builtin_tasks import builtin_task_registry as registry
 from loghawk.builtin_tasks.loader import load_definitions
@@ -196,6 +196,13 @@ STOP_SCHEMA = {
 }
 
 
+def _stop_schema(state):
+    if not state.get("investigation_context"):
+        return STOP_SCHEMA
+    return {**STOP_SCHEMA, "properties": {**STOP_SCHEMA["properties"],
+            "reason": {"type": "string", "enum": ["missing_information", "cannot_execute", "evidence_sufficient"]}}}
+
+
 def _available_tools(state):
     tools = _dispatcher_tools()
     if state["discovery_calls"] >= config.LH_LLM_TOOL_MAX_DISCOVERY_CALLS:
@@ -210,11 +217,12 @@ def _available_tools(state):
             "function": {
                 "name": "stop_without_execution",
                 "description": (
+                    ("With investigation context, also stop with evidence_sufficient when attached evidence answers the question. " if state.get("investigation_context") else "") +
                     "Stop because required information is missing or execution is impossible. "
                     "Do not use this to announce future execution or request policy approval; "
                     "LogHawk handles approval."
                 ),
-                "parameters": STOP_SCHEMA,
+                "parameters": _stop_schema(state),
             },
         })
     return tools
@@ -372,7 +380,7 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
 
 
 def start(messages: list[dict], userid: str, *, origin_software: str = "console",
-          review_arguments: bool = True) -> dict:
+          review_arguments: bool = True, investigation_id: str | None = None) -> dict:
     if any(m.get("role") not in {"user", "assistant"} for m in messages):
         raise ValueError("Only user and assistant chat messages are accepted.")
     budget = config.LH_LLM_TOOL_CONTEXT_LENGTH - config.LH_LLM_TOOL_MAX_TOKENS
@@ -405,6 +413,24 @@ def start(messages: list[dict], userid: str, *, origin_software: str = "console"
     store.record(request_id, {"name": "request_settings"},
                  {"review_arguments": review_arguments}, "REQUEST_SETTINGS",
                  "Input-argument review preference.")
+    if investigation_id:
+        try:
+            snapshot = investigation_context.capture(
+                investigation_id, userid, request_id, messages[-1].get("content", ""), redact, conversation=messages,
+            )
+            state["investigation_context"] = snapshot
+            state["original_question"] = messages[-1].get("content", "")
+            state["messages"][0]["content"] += "\n" + snapshot["prompts"][0]["text"]
+            prepared = investigation_context.prepared(snapshot, config.LH_LLM_TOOL_MAX_RESULT_CHARS)
+            state["messages"][-1]["content"] += "\nImported investigation context (data):\n" + json.dumps(prepared, ensure_ascii=False)
+            if _input_tokens(state["messages"], tools) > budget:
+                raise ContextBudgetError("Investigation context exceeds model context budget. Select fewer records or increase context length. No collector ran.")
+            store.record_evidence_view(request_id, None, None, "investigation_context_input",
+                json.dumps(snapshot, ensure_ascii=False), json.dumps(prepared, ensure_ascii=False),
+                config.LH_LLM_TOOL_MAX_RESULT_CHARS, {"source": "saved investigation context", "omitted_records": prepared.get("omitted_records", 0)})
+        except Exception:
+            store.save(request_id, {}, "FAILED")
+            raise
     return _loop(request_id, state, userid)
 
 
@@ -473,6 +499,9 @@ def _reply(request_id, status, response, pending=None):
     store.save_response(request_id, str(redact(response)))
     result = {"status": status, "request_id": request_id, "response": response,
               "execution": store.execution_summary(request_id)}
+    investigation = investigation_context.saved(request_id)
+    if investigation:
+        result["investigation_id"] = investigation["investigation_id"]
     if pending is not None:
         result["pending"] = pending
     explanation = store.explanation_info(request_id)
@@ -517,10 +546,13 @@ def _loop(request_id, state, userid):
                     if function.get("name") == "stop_without_execution":
                         if state.get("execution_attempted", False):
                             raise ValueError("Execution was already attempted; report its actual outcome.")
-                        decision = validate_arguments(STOP_SCHEMA, payload)
+                        decision = validate_arguments(_stop_schema(state), payload)
                         message = str(redact(decision["message"]))
                         store.record(request_id, {"name": "stop_without_execution"},
                                      {"reason": decision["reason"]}, "NOT_EXECUTED", message)
+                        if state.get("investigation_context"):
+                            state["collection_notice"] = message
+                            return _start_explanation(request_id, state, userid)
                         store.save(request_id, {}, "COMPLETED")
                         prefix = (
                             "No collector was executed. More information is needed: "
@@ -643,7 +675,7 @@ def _loop(request_id, state, userid):
         if store.explanation_info(request_id) is not None:
             raise
         execution = store.execution_summary(request_id)
-        if execution["succeeded"] or execution["failed"]:
+        if execution["succeeded"] or execution["failed"] or state.get("investigation_context"):
             state["collection_notice"] = str(redact(str(exc)))
             return _start_explanation(request_id, state, userid)
         store.save(request_id, {}, "FAILED")
@@ -666,7 +698,7 @@ EXPLANATION_SYSTEM = (
 
 def _explanation_messages(context, execution, invocation_id=None):
     events = [event for event in execution["events"] if event.get("evidence")]
-    if not events:
+    if not events and not context.get("investigation_context"):
         raise ValueError("No saved collector evidence is available for explanation.")
     budget = config.LH_LLM_TOOL_CONTEXT_LENGTH - config.LH_LLM_TOOL_MAX_TOKENS
     limit = config.LH_LLM_TOOL_MAX_RESULT_CHARS
@@ -676,12 +708,26 @@ def _explanation_messages(context, execution, invocation_id=None):
                      "status": event["status"], "run_id": event["run_id"],
                      "evidence": json.loads(compact_evidence(event["evidence"], limit))}
                     for event in events]
-        payload = {"question_context": json.loads(bounded_json(context, context_limit)),
+        question_context = {k: v for k, v in context.items() if k != "investigation_context"}
+        payload = {"question_context": json.loads(bounded_json(question_context, context_limit)),
                    "execution_summary": execution["summary"], "collectors": evidence}
-        messages = [{"role": "system", "content": EXPLANATION_SYSTEM},
+        system = EXPLANATION_SYSTEM
+        snapshot = context.get("investigation_context")
+        prepared_context = None
+        if snapshot:
+            prepared_context = investigation_context.prepared(snapshot, context_limit)
+            payload["incident_context"] = prepared_context
+            system += "\n" + snapshot["prompts"][1]["text"]
+        messages = [{"role": "system", "content": system},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
         if _input_tokens(messages, []) <= budget:
             if invocation_id:
+                if snapshot:
+                    store.record_evidence_view(execution["request_id"], None, invocation_id,
+                        "investigation_explanation_input", json.dumps(snapshot, ensure_ascii=False),
+                        json.dumps(prepared_context, ensure_ascii=False), context_limit,
+                        {"source": "saved investigation context", "omitted_records": prepared_context.get("omitted_records", 0),
+                         "prompts": [{"name": p["name"], "sha256": p["sha256"]} for p in snapshot["prompts"]]})
                 for event in events:
                     prepared = compact_evidence(event["evidence"], limit)
                     meta = evidence_metadata(event["evidence"], prepared)
@@ -702,6 +748,9 @@ def _start_explanation(request_id, state, userid):
     context = redact({"question": questions[-1] if questions else "Explain the collected evidence.",
                       "previous_user_messages": questions[-5:-1],
                       "collection_notice": state.get("collection_notice", "")})
+    if state.get("investigation_context"):
+        context["question"] = redact(state["original_question"])
+        context["investigation_context"] = state["investigation_context"]
     origin = state.get("origin_software", "console")
     attempt = store.begin_explanation(
         request_id, userid, origin, config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS, context,

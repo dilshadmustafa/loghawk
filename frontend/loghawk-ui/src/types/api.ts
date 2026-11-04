@@ -192,6 +192,7 @@ export interface RcaExecutionSummary {
   }[];
 }
 export interface RcaAnswer {
+  investigation_id?: string;
   explanation?: {
     status: "RUNNING" | "COMPLETED" | "FAILED";
     can_retry: boolean;
@@ -263,10 +264,34 @@ export interface RcaEvidenceView {
   model_evidence_text: string;
 }
 export interface RcaHistoryDetail {
+  investigation?: {investigation_id: string; snapshot: Record<string, unknown>} | null;
   id: string; userid: string; origin_software: string; status: string;
   created_at: string; updated_at: string; question_text: string | null; response_text: string | null;
   settings: Record<string, unknown> | null; events: RcaHistoryEvent[];
   invocations: RcaInvocation[]; evidence_views: RcaEvidenceView[];
   execution: RcaExecutionSummary;
   explanation?: RcaAnswer["explanation"] | null;
+}
+
+export interface InvestigationSource {
+  id: string; name: string; status: string; evidence_type: string; format: string;
+  record_count: number; error?: string; sha256?: string; original_uri?: string;
+  snapshot_uri?: string; mapping: Record<string, string>; tool_call_id?: string;
+}
+export interface InvestigationRecord {
+  id: string; record_number: number; source_line_number?: number | null; original_record: Record<string, unknown>;
+}
+export interface Investigation {
+  id: string; userid: string; problem: string; status: string;
+  created_at: string; updated_at: string; can_modify: boolean;
+  reported_context: Record<string, unknown>;
+  incidents: {id: string; source_incident_id: string; primary_details: Record<string, unknown>}[];
+  sources: InvestigationSource[];
+  evidence_links: Record<string, unknown>[]; incident_evidence: Record<string, unknown>[];
+  findings: {id: string; content: string; origin: string; userid: string; created_at: string;
+             request_id?: string; supersedes_id?: string; evidence: unknown[]}[];
+  requests: {request_id: string; created_at: string; status: string | null; origin_software: string | null; evidence_removed: boolean}[];
+}
+export interface InvestigationPreview extends InvestigationSource {
+  records: InvestigationRecord[]; next_offset: number | null;
 }

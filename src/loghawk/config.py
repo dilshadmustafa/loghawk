@@ -794,3 +794,9 @@ if __name__ == '__main__':
     main()
 
 
+
+# Investigation source snapshots and bounded import requests.
+LH_INVESTIGATION_SOURCE_S3_PREFIX = os.getenv("LH_INVESTIGATION_SOURCE_S3_PREFIX", "investigations/sources/").strip()
+LH_INVESTIGATION_MAX_IMPORT_MB = _tool_calling_positive_int("LH_INVESTIGATION_MAX_IMPORT_MB", 100)
+LH_INVESTIGATION_MAX_IMPORT_FILES = _tool_calling_positive_int("LH_INVESTIGATION_MAX_IMPORT_FILES", 20)
+LH_INVESTIGATION_MAX_RECORDS_PER_FILE = _tool_calling_positive_int("LH_INVESTIGATION_MAX_RECORDS_PER_FILE", 10000)

@@ -212,9 +212,9 @@ export const importTaskToN8n = (id: string, artifactId: string) =>
 export const externalSourceUrl = (source: ExternalS3Source) =>
   `s3://${source.bucket}/${source.folder ? `${source.folder.replace(/^\/+|\/+$/g, "")}/` : ""}`;
 
-export const sendRcaMessage = (messages: import("../types/api").RcaMessage[], reviewArguments = true) =>
+export const sendRcaMessage = (messages: import("../types/api").RcaMessage[], reviewArguments = true, investigationId?: string) =>
   request<import("../types/api").RcaAnswer>("/rca/chat", {
-    method: "POST", body: JSON.stringify({ messages, review_arguments: reviewArguments }),
+    method: "POST", body: JSON.stringify({ messages, review_arguments: reviewArguments, investigation_id: investigationId || null }),
   });
 export const confirmRcaCollector = (requestId: string, confirmationId: string, approved: boolean, reviewedArguments?: Record<string, unknown>) =>
   request<import("../types/api").RcaAnswer>(`/rca/chat/${encodeURIComponent(requestId)}/confirm`, {
@@ -256,3 +256,27 @@ export const getRcaHistory = (query: URLSearchParams) =>
   request<import("../types/api").RcaHistoryPage>(`/rca/history?${query.toString()}`);
 export const getRcaHistoryDetail = (id: string) =>
   request<import("../types/api").RcaHistoryDetail>(`/rca/history/${encodeURIComponent(id)}`);
+
+export const listInvestigations = (offset = 0) =>
+  request<import("../types/api").Investigation[]>(`/investigations?offset=${offset}`);
+export const createInvestigation = (problem: string, reported_context: Record<string, unknown>) =>
+  request<import("../types/api").Investigation>("/investigations", { method: "POST", body: JSON.stringify({problem, reported_context}) });
+export const getInvestigation = (id: string) =>
+  request<import("../types/api").Investigation>(`/investigations/${encodeURIComponent(id)}`);
+export const investigationAction = <T = import("../types/api").Investigation>(id: string, action: string, body: unknown, method = "POST") =>
+  request<T>(`/investigations/${encodeURIComponent(id)}/${action}`, {method, body: JSON.stringify(body)});
+export const previewInvestigationSource = (id: string, source: string, offset = 0) =>
+  request<import("../types/api").InvestigationPreview>(`/investigations/${encodeURIComponent(id)}/sources/${encodeURIComponent(source)}?offset=${offset}`);
+export const uploadInvestigationFiles = (id: string, files: File[], evidenceType: string, recordPath: string) => {
+  const body = new FormData();
+  files.forEach(file => body.append("files", file, file.name));
+  body.append("evidence_type", evidenceType); body.append("record_path", recordPath);
+  return requestMultipart<{sources: {id: string; status: string; name: string; error?: string}[]}>(`/investigations/${encodeURIComponent(id)}/sources/upload`, body);
+};
+export type InvestigationS3File = {uri: string; size: number; etag?: string};
+export const resolveInvestigationS3 = (id: string, uris: string[]) =>
+  request<{files: InvestigationS3File[]; total_bytes: number}>(
+    `/investigations/${encodeURIComponent(id)}/s3/resolve`, {method: "POST", body: JSON.stringify({uris})});
+export const listInvestigationS3 = (id: string, uri: string, token = "", browse = false) =>
+  request<{files: InvestigationS3File[]; folders?: {uri: string}[]; next_token: string | null}>(
+    `/investigations/${encodeURIComponent(id)}/s3?uri=${encodeURIComponent(uri)}&browse=${browse}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
