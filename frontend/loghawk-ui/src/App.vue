@@ -89,7 +89,7 @@ const navGroups = [
       { label: "List Rollback Tasks", to: "/tasks?kind=rollback" },
     ],
   },
-  { id: "rca", label: "AI Investigation", short: "RCA", links: [{ label: "Investigations", to: "/rca/investigations" }, { label: "RCA Chat", to: "/rca/chat" }, { label: "RCA History", to: "/rca/history" }] },
+  { id: "rca", label: "AI Investigation", short: "RCA", links: [{ label: "Create Investigation", to: "/rca/investigations/new" }, { label: "List Investigations", to: "/rca/investigations" }, { label: "Create Incident", to: "/rca/incidents/new" }, { label: "List Incidents", to: "/rca/incidents" }, { label: "RCA Chat", to: "/rca/chat" }, { label: "RCA History", to: "/rca/history" }] },
   { id: "account", label: "Account", short: "A", links: [] },
 ];
 const selectedGroup = ref(groupForPath(route.path));

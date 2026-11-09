@@ -15,7 +15,7 @@ def capture(key,userid,request_id,question,redact,conversation=None):
                      prompt_snapshot("investigation/incident_context.txt"),
                      prompt_snapshot("investigation/evidence_explanation.txt")]}
         links=list(db.execute("SELECT source_id,selection_json FROM rca_investigation_evidence WHERE investigation_id=?",(key,)).fetchall())
-        for row in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? ORDER BY i.id",(key,)).fetchall():
+        for row in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? AND i.deleted_at IS NULL ORDER BY i.id",(key,)).fetchall():
             context["incidents"].append(store.decoded(row))
             links.extend(db.execute("SELECT source_id,selection_json FROM rca_incident_evidence WHERE incident_id=?",(row["id"],)).fetchall())
         findings=db.execute("SELECT f.* FROM rca_investigation_findings f WHERE investigation_id=? AND NOT EXISTS (SELECT 1 FROM rca_investigation_findings newer WHERE newer.supersedes_id=f.id) ORDER BY created_at,id",(key,)).fetchall()

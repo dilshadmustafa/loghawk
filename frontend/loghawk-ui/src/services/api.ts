@@ -212,10 +212,17 @@ export const importTaskToN8n = (id: string, artifactId: string) =>
 export const externalSourceUrl = (source: ExternalS3Source) =>
   `s3://${source.bucket}/${source.folder ? `${source.folder.replace(/^\/+|\/+$/g, "")}/` : ""}`;
 
-export const sendRcaMessage = (messages: import("../types/api").RcaMessage[], reviewArguments = true, investigationId?: string) =>
-  request<import("../types/api").RcaAnswer>("/rca/chat", {
-    method: "POST", body: JSON.stringify({ messages, review_arguments: reviewArguments, investigation_id: investigationId || null }),
-  });
+export const sendRcaMessage = (
+  messages: import("../types/api").RcaMessage[],
+  reviewArguments = false,
+  redactEvidence = true,
+  investigationId?: string,
+) => request<import("../types/api").RcaAnswer>("/rca/chat", {
+  method: "POST", body: JSON.stringify({
+    messages, review_arguments: reviewArguments, redact_evidence: redactEvidence,
+    investigation_id: investigationId || null,
+  }),
+});
 export const confirmRcaCollector = (requestId: string, confirmationId: string, approved: boolean, reviewedArguments?: Record<string, unknown>) =>
   request<import("../types/api").RcaAnswer>(`/rca/chat/${encodeURIComponent(requestId)}/confirm`, {
     method: "POST", body: JSON.stringify({ confirmation_id: confirmationId, approved, arguments: reviewedArguments }),
@@ -257,8 +264,12 @@ export const getRcaHistory = (query: URLSearchParams) =>
 export const getRcaHistoryDetail = (id: string) =>
   request<import("../types/api").RcaHistoryDetail>(`/rca/history/${encodeURIComponent(id)}`);
 
-export const listInvestigations = (offset = 0) =>
-  request<import("../types/api").Investigation[]>(`/investigations?offset=${offset}`);
+export type InvestigationListFilters = {q?: string; status?: string; created_from?: string; created_to?: string};
+export const listInvestigations = (offset = 0, filters: InvestigationListFilters = {}) => {
+  const query = new URLSearchParams({offset: String(offset)});
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value);
+  return request<import("../types/api").Investigation[]>(`/investigations?${query.toString()}`);
+};
 export const createInvestigation = (problem: string, reported_context: Record<string, unknown>) =>
   request<import("../types/api").Investigation>("/investigations", { method: "POST", body: JSON.stringify({problem, reported_context}) });
 export const getInvestigation = (id: string) =>
@@ -280,3 +291,41 @@ export const resolveInvestigationS3 = (id: string, uris: string[]) =>
 export const listInvestigationS3 = (id: string, uri: string, token = "", browse = false) =>
   request<{files: InvestigationS3File[]; folders?: {uri: string}[]; next_token: string | null}>(
     `/investigations/${encodeURIComponent(id)}/s3?uri=${encodeURIComponent(uri)}&browse=${browse}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+
+
+export type IncidentS3File = {uri: string; size: number; etag?: string};
+export type IncidentS3Listing = {files: IncidentS3File[]; folders?: {uri: string}[]; next_token: string | null};
+export const listIncidents = (query: URLSearchParams) =>
+  request<import("../types/api").Incident[]>("/incidents?" + query.toString());
+export const deleteIncident = (id: string) =>
+  request<void>("/incidents/" + encodeURIComponent(id), {method: "DELETE"});
+export const restoreIncident = (id: string) =>
+  request<import("../types/api").Incident>("/incidents/" + encodeURIComponent(id) + "/restore", {method: "POST"});
+export const createIncident = (payload: {
+  incident_id: string; summary: string; start_time: string; end_time: string;
+  severity: string; primary_service: string; services: string[];
+}) => request<import("../types/api").Incident>("/incidents", {
+  method: "POST", body: JSON.stringify(payload),
+});
+export const getIncident = (id: string) =>
+  request<import("../types/api").Incident>("/incidents/" + encodeURIComponent(id));
+export const incidentAction = <T = import("../types/api").Incident>(id: string, action: string, body: unknown, method = "POST") =>
+  request<T>("/incidents/" + encodeURIComponent(id) + "/" + action, {method, body: JSON.stringify(body)});
+export const previewIncidentSource = (id: string, source: string, offset = 0) =>
+  request<import("../types/api").InvestigationPreview>("/incidents/" + encodeURIComponent(id) + "/sources/" + encodeURIComponent(source) + "?offset=" + offset);
+export const uploadIncidentFiles = (id: string, files: File[], evidenceType: string, recordPath = "") => {
+  const body = new FormData();
+  files.forEach(file => body.append("files", file, file.name));
+  body.append("evidence_type", evidenceType); body.append("record_path", recordPath);
+  return requestMultipart<{sources: {id: string; status: string; name: string; error?: string}[]}>( "/incidents/" + encodeURIComponent(id) + "/sources/upload", body);
+};
+export const listIncidentS3 = (id: string, uri: string) =>
+  request<IncidentS3Listing>("/incidents/" + encodeURIComponent(id) + "/s3?uri=" + encodeURIComponent(uri));
+export const resolveIncidentS3 = (id: string, uris: string[]) =>
+  request<{files: IncidentS3File[]; total_bytes: number}>("/incidents/" + encodeURIComponent(id) + "/s3/resolve", {
+    method: "POST", body: JSON.stringify({uris}),
+  });
+export const importIncidentS3 = (id: string, objects: IncidentS3File[], evidenceType: string, recordPath = "") =>
+  request<{sources: {id: string; status: string; name: string; error?: string}[]}>( "/incidents/" + encodeURIComponent(id) + "/sources/s3", {
+    method: "POST", body: JSON.stringify({objects, evidence_type: evidenceType, record_path: recordPath || null}),
+  });

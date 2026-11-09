@@ -5,7 +5,8 @@ from loghawk.llm import get_llm_client
 import loghawk.config as config
 
 def chat(chat_messages: list[dict], userid: str, *, origin_software: str,
-         review_arguments: bool = True, investigation_id: str | None = None) -> dict:
+         review_arguments: bool = False, redact_evidence: bool = True,
+         investigation_id: str | None = None) -> dict:
     if investigation_id and not config.LH_LLM_TOOL_CALLING_ENABLED:
         raise HTTPException(status_code=422, detail="Enable LLM tool calling to use investigation context.",
                             headers={"X-LogHawk-Execution": "not-started"})
@@ -14,7 +15,8 @@ def chat(chat_messages: list[dict], userid: str, *, origin_software: str,
         try:
             return collector_tool_service.start(
                 chat_messages, userid, origin_software=origin_software,
-                review_arguments=review_arguments, investigation_id=investigation_id,
+                review_arguments=review_arguments, redact_evidence=redact_evidence,
+                investigation_id=investigation_id,
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc), headers={"X-LogHawk-Execution": "not-started"}) from exc

@@ -1,4 +1,5 @@
 """Authenticated investigation and evidence APIs shared by both clients."""
+from datetime import date
 from typing import Literal
 from uuid import uuid4
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -25,6 +26,9 @@ class SourceType(BaseModel):
 class Incident(BaseModel):
     source_id: str
     record_number: int=Field(ge=1)
+class IncidentBatch(BaseModel):
+    source_id: str
+    record_numbers: list[int]=Field(min_length=1,max_length=500)
 class LinkIncident(BaseModel):
     incident_id: str
 class Mapping(BaseModel):
@@ -64,8 +68,18 @@ def allowed(key,user):
     with connect("server") as db:store.require(db,key,user,write=True)
 
 @router.get("")
-def listing(offset:int=Query(0,ge=0),limit:int=Query(50,ge=1,le=100),user=Depends(require_authenticated_user)):
-    return call(store.listing,user,offset,limit)
+def listing(
+    offset:int=Query(0,ge=0),
+    limit:int=Query(50,ge=1,le=100),
+    q:str=Query("",max_length=200),
+    status:Literal["OPEN","CLOSED"]|None=None,
+    created_from:date|None=None,
+    created_to:date|None=None,
+    user=Depends(require_authenticated_user),
+):
+    if created_from and created_to and created_from>created_to:
+        raise HTTPException(422,"Created-from date must be on or before created-to date.")
+    return call(store.listing,user,offset,limit,q,status,created_from,created_to)
 @router.post("",status_code=201)
 def create(body:Create,user=Depends(require_authenticated_user)):
     if not body.problem.strip():raise HTTPException(422,"Describe the investigation problem.")
@@ -113,6 +127,10 @@ def attach(key:str,body:Selection,user=Depends(require_authenticated_user)):
 @router.post("/{key}/incidents")
 def incident(key:str,body:Incident,user=Depends(require_authenticated_user)):
     return call(store.add_incident,key,user,body.source_id,body.record_number)
+
+@router.post("/{key}/incidents/batch")
+def incidents_batch(key:str,body:IncidentBatch,user=Depends(require_authenticated_user)):
+    return call(store.add_incidents,key,user,body.source_id,body.record_numbers)
 @router.post("/{key}/incident-links")
 def incident_link(key:str,body:LinkIncident,user=Depends(require_authenticated_user)):
     return call(store.link_incident,key,user,body.incident_id)

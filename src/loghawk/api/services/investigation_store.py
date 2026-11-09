@@ -1,5 +1,6 @@
 """Server-owned investigations and shared evidence. No model execution here."""
 import json
+from datetime import date, timedelta
 from uuid import uuid4
 from loghawk.database.database_layer import connect
 from loghawk.database.timestamps import utc_now
@@ -36,6 +37,8 @@ def owned(db, table, key, userid):
     row = db.execute(f"SELECT * FROM {table} WHERE id = ? AND userid = ?", (key, userid)).fetchone()
     if not row:
         raise PermissionError("Incident or evidence not owned by this investigation's owner.")
+    if table == "rca_incidents" and row["deleted_at"]:
+        raise ValueError("This incident is deleted. Restore it before linking it to an investigation.")
     return row
 
 def create(user, problem, reported_context):
@@ -45,12 +48,28 @@ def create(user, problem, reported_context):
                    (key,user["userid"],problem,encode(reported_context),"OPEN",now,now))
     return detail(key,user)
 
-def listing(user, offset=0, limit=50):
+def listing(user, offset=0, limit=50, query="", status=None, created_from=None, created_to=None):
+    clauses=[]
+    values=[]
+    if user.get("role") not in MANAGERS:
+        clauses.append("userid=?")
+        values.append(user["userid"])
+    term=str(query or "").strip().lower()
+    if term:
+        clauses.append("(INSTR(LOWER(problem),?)>0 OR INSTR(LOWER(userid),?)>0)")
+        values.extend((term,term))
+    if status:
+        clauses.append("status=?")
+        values.append(status)
+    if created_from:
+        clauses.append("created_at>=?")
+        values.append(f"{created_from.isoformat()}T00:00:00")
+    if created_to:
+        clauses.append("created_at<?")
+        values.append(f"{(created_to+timedelta(days=1)).isoformat()}T00:00:00")
+    where=" WHERE "+" AND ".join(clauses) if clauses else ""
     with connect("server") as db:
-        if user.get("role") in MANAGERS:
-            rows=db.execute("SELECT * FROM rca_investigations ORDER BY created_at DESC,id LIMIT ? OFFSET ?",(limit,offset)).fetchall()
-        else:
-            rows=db.execute("SELECT * FROM rca_investigations WHERE userid=? ORDER BY created_at DESC,id LIMIT ? OFFSET ?",(user["userid"],limit,offset)).fetchall()
+        rows=db.execute(f"SELECT * FROM rca_investigations{where} ORDER BY created_at DESC,id LIMIT ? OFFSET ?",(*values,limit,offset)).fetchall()
     return [decoded(r) for r in rows]
 
 def detail(key,user):
@@ -58,11 +77,11 @@ def detail(key,user):
         row=require(db,key,user)
         result=decoded(row)
         result["can_modify"]=row["userid"]==user["userid"] and row["status"]=="OPEN"
-        result["incidents"]=[decoded(r) for r in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? ORDER BY l.created_at",(key,)).fetchall()]
+        result["incidents"]=[decoded(r) for r in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? AND i.deleted_at IS NULL ORDER BY l.created_at",(key,)).fetchall()]
         result["sources"]=[decoded(r) for r in db.execute("SELECT DISTINCT s.* FROM rca_evidence_sources s WHERE s.investigation_id=? OR s.id IN (SELECT source_id FROM rca_investigation_evidence WHERE investigation_id=?) OR s.id IN (SELECT e.source_id FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id WHERE i.investigation_id=?) OR s.id IN (SELECT e.source_id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=?) ORDER BY s.created_at",(key,key,key,key)).fetchall()]
         result["sources"] = [source for source in result["sources"] if source["status"] not in {"DISMISSED", "REMOVED"}]
         result["evidence_links"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_evidence WHERE investigation_id=?",(key,)).fetchall()]
-        result["incident_evidence"]=[decoded(r) for r in db.execute("SELECT e.* FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id WHERE i.investigation_id=?",(key,)).fetchall()]
+        result["incident_evidence"]=[decoded(r) for r in db.execute("SELECT e.* FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id JOIN rca_incidents incident ON incident.id=e.incident_id WHERE i.investigation_id=? AND incident.deleted_at IS NULL",(key,)).fetchall()]
         result["findings"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_findings WHERE investigation_id=? ORDER BY created_at,id",(key,)).fetchall()]
         for finding in result["findings"]:
             finding["evidence"]=[decoded(r) for r in db.execute("SELECT * FROM rca_finding_evidence WHERE finding_id=?",(finding["id"],)).fetchall()]
@@ -133,7 +152,7 @@ def add_incident(key,user,source_id,record_number):
         # Repeated import of the exact source record reuses its incident. Matching
         # external incident IDs in different sources are not automatically merged.
         existing=None
-        for candidate in db.execute("SELECT * FROM rca_incidents WHERE userid=?",(parent["userid"],)).fetchall():
+        for candidate in db.execute("SELECT * FROM rca_incidents WHERE userid=? AND deleted_at IS NULL",(parent["userid"],)).fetchall():
             if json.loads(candidate["primary_details_json"]).get("source_record_id")==row["id"]:
                 existing=candidate["id"];break
         if existing:
@@ -146,6 +165,63 @@ def add_incident(key,user,source_id,record_number):
             db.execute("INSERT INTO rca_investigation_incidents (id,investigation_id,incident_id,created_at) VALUES (?,?,?,?)",(uuid4().hex,key,incident,now))
             db.execute("INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)",(uuid4().hex,incident,source_id,encode([record_number]),now))
     return detail(key,user)
+
+def add_incidents(key, user, source_id, record_numbers):
+    """Atomically create/link a batch after validating every Stage C row."""
+    if len(record_numbers) > 500:
+        raise ValueError("Select no more than 500 incident records at a time.")
+    if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in record_numbers):
+        raise ValueError("Incident record numbers must be positive integers.")
+    numbers = sorted(set(record_numbers))
+    if not numbers:
+        raise ValueError("Select at least one incident record.")
+    with connect("server") as db:
+        parent = require(db, key, user, write=True)
+        source = owned(db, "rca_evidence_sources", source_id, parent["userid"])
+        if source["investigation_id"] != key or source["status"] != "READY" or source["evidence_type"] != "stage-c":
+            raise ValueError("Choose a ready Stage C incident source imported into this investigation.")
+        slots = ",".join("?" for _ in numbers)
+        rows = db.execute(f"SELECT * FROM rca_evidence_records WHERE source_id=? AND record_number IN ({slots})", (source_id, *numbers)).fetchall()
+        by_number = {row["record_number"]: row for row in rows}
+        if set(by_number) != set(numbers):
+            raise ValueError("The selection contains records that are not in this source. Refresh and select again.")
+        mapping = json.loads(source["mapping_json"])
+        validated = []
+        problems = []
+        fields = ("incident_id", "start_time", "end_time", "entity_id", "max_severity", "primary_service", "services", "duration_seconds", "anomaly_count", "service_count", "correlation_score")
+        for number in numbers:
+            row = by_number[number]
+            original = json.loads(row["original_record_json"])
+            details = {field: original[mapping.get(field, field)] for field in fields if mapping.get(field, field) in original}
+            missing = [field for field in ("incident_id", "start_time", "end_time") if details.get(field) is None or not str(details[field]).strip()]
+            if missing:
+                problems.append(f"Record {number}: missing {', '.join(missing)}")
+            else:
+                details["source_record_id"] = row["id"]
+                validated.append((number, row, details))
+        if problems:
+            raise ValueError("Cannot create incidents. Fix or deselect incomplete records: " + "; ".join(problems[:20]))
+        incident_ids = []
+        for number, evidence_row, details in validated:
+            existing = None
+            candidates = db.execute("SELECT id,primary_details_json FROM rca_incidents WHERE userid=? AND deleted_at IS NULL", (parent["userid"],)).fetchall()
+            for candidate in candidates:
+                if json.loads(candidate["primary_details_json"]).get("source_record_id") == evidence_row["id"]:
+                    existing = candidate["id"]
+                    break
+            now = utc_now()
+            if existing:
+                if not db.execute("SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?", (key, existing)).fetchone():
+                    db.execute("INSERT INTO rca_investigation_incidents (id,investigation_id,incident_id,created_at) VALUES (?,?,?,?)", (uuid4().hex, key, existing, now))
+                incident_id = existing
+            else:
+                incident_id = uuid4().hex
+                db.execute("INSERT INTO rca_incidents (id,userid,source_incident_id,primary_details_json,created_at,updated_at) VALUES (?,?,?,?,?,?)", (incident_id, parent["userid"], str(details["incident_id"]), encode(details), now, now))
+                db.execute("INSERT INTO rca_investigation_incidents (id,investigation_id,incident_id,created_at) VALUES (?,?,?,?)", (uuid4().hex, key, incident_id, now))
+                db.execute("INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)", (uuid4().hex, incident_id, source_id, encode([number]), now))
+            incident_ids.append(incident_id)
+    return {"incident_ids": incident_ids, "created_or_linked": len(incident_ids)}
+
 
 def link_incident(key,user,incident_id):
     with connect("server") as db:

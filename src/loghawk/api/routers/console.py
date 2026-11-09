@@ -20,7 +20,8 @@ router = APIRouter(dependencies=[Depends(require_console_user)])
 
 class ChatRequest(BaseModel):
     messages: list[dict[str, str]] = Field(min_length=1)
-    review_arguments: StrictBool = True
+    review_arguments: StrictBool = False
+    redact_evidence: StrictBool = True
     investigation_id: str | None = Field(default=None, max_length=64)
 
 
@@ -54,7 +55,8 @@ def chat(body: ChatRequest, user: dict = Depends(require_console_user)) -> dict:
     from loghawk.api.services import assistant_chat_service
     return assistant_chat_service.chat(
         body.messages, user["userid"], origin_software="console",
-        review_arguments=body.review_arguments, investigation_id=body.investigation_id,
+        review_arguments=body.review_arguments, redact_evidence=body.redact_evidence,
+        investigation_id=body.investigation_id,
     )
 
 

@@ -13,7 +13,8 @@ const error = ref("");
 const pending = ref<RcaAnswer | null>(null);
 const uncertain = ref(false);
 const argumentDraft = ref("");
-const reviewInputArgs = ref(true);
+const reviewInputArgs = ref(false);
+const redactEvidence = ref(true);
 const newChatDialog = ref<HTMLDialogElement | null>(null);
 
 function requestNewChat() {
@@ -90,7 +91,10 @@ async function send() {
   draft.value = "";
   busy.value = true;
   error.value = "";
-  try { receive(await sendRcaMessage(messages.value.map(({ role, content }) => ({ role, content })), reviewInputArgs.value, investigationId.value)); }
+  try { receive(await sendRcaMessage(
+    messages.value.map(({ role, content }) => ({ role, content })),
+    reviewInputArgs.value, redactEvidence.value, investigationId.value,
+  )); }
   catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
     if (e instanceof ApiError && e.executionNotStarted) {
@@ -148,10 +152,14 @@ async function decide(approved: boolean) {
       <input type="checkbox" v-model="reviewInputArgs" :disabled="busy || !!pending || uncertain" />
       Review Input Args
     </label>
-    <p>Discuss an operational issue and gather evidence using approved collectors.
-       When checked, review and edit collector arguments before execution.
+    <p>Unchecked by default. When checked, review and edit collector arguments before execution.
        When unchecked, auto-approved collectors proceed automatically; their arguments appear with the result.
        AI-assisted collectors still require execution confirmation.</p>
+    <label>
+      <input type="checkbox" v-model="redactEvidence" :disabled="busy || !!pending || uncertain" />
+      Redact sensitive values in collector evidence
+    </label>
+    <p>Checked by default. If unchecked, successful collector results are saved and sent to the configured model without sensitive-value redaction. Use this only when you are comfortable retaining and sharing those values.</p>
     <p>Collector tool calling must be enabled on the API server. Chat is kept while this page is open.</p>
     <div aria-live="polite">
       <article v-for="(message, index) in messages" :key="index" class="message">
@@ -172,7 +180,11 @@ async function decide(approved: boolean) {
               </details>
               <details v-if="event.evidence">
                 <summary>Collector evidence</summary>
-                <p>Redacted collector results; output may be truncated.</p>
+                <p>
+                  {{ message.execution.evidence_redaction_enabled
+                    ? "Sensitive-value redaction was enabled for this request; output may also be truncated."
+                    : "Sensitive-value redaction was disabled for this request; output may also be truncated." }}
+                </p>
                 <pre>{{ formatEvidence(event.evidence) }}</pre>
               </details>
             </li>

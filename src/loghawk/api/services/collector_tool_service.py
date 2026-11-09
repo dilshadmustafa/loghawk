@@ -328,7 +328,8 @@ def _remaining(deadline):
     return remaining
 
 
-def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False):
+def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False,
+             redact_evidence=True):
     call_id = store.record(request_id, target, redact(arguments), "RUNNING", "")
     result = {}
     try:
@@ -366,21 +367,40 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
     evidence = {"collector": target["name"], "version": target["version"], "arguments": arguments,
                 "run_id": result.get("run_id"), "recorded_at": store.now(), "result": result}
     try:
-        text = json.dumps(redact(evidence), ensure_ascii=False)
+        if redact_evidence:
+            saved_evidence = redact(evidence)
+        else:
+            # The opt-out applies to successful collector output only. Keep arguments
+            # and failed-run diagnostics redacted.
+            saved_evidence = dict(evidence)
+            saved_evidence["arguments"] = redact(arguments)
+            if isinstance(result, dict) and result.get("status") == "FAILED":
+                saved_evidence["result"] = redact(result)
+        text = json.dumps(saved_evidence, ensure_ascii=False)
     except (TypeError, ValueError, RecursionError):
         text = json.dumps({"collector": target["name"], "version": target["version"],
                            "run_id": result.get("run_id"), "status": status,
                            "notice": "Collector output could not be serialized safely."})
-    # Preserve returned, redacted evidence independently of the model's smaller input.
+    # Preserve collector evidence independently of the model's smaller input.
+    # Its saved redaction state is recorded with the request settings.
     store.record(request_id, target, {}, status, text, result.get("run_id"), call_id)
     prepared = compact_evidence(text, config.LH_LLM_TOOL_MAX_RESULT_CHARS)
+    metadata = evidence_metadata(text, prepared)
+    metadata["sensitive_value_redaction_enabled"] = redact_evidence
+    metadata["redacted"] = redact_evidence
+    metadata["character_counts"] = {
+        "collector_result": len(text),
+        "after_redaction": len(text) if redact_evidence else None,
+        "sent_to_model": len(prepared),
+    }
     store.record_evidence_view(request_id, call_id, None, "collection_compaction", text, prepared,
-                               config.LH_LLM_TOOL_MAX_RESULT_CHARS, evidence_metadata(text, prepared))
+                               config.LH_LLM_TOOL_MAX_RESULT_CHARS, metadata)
     return prepared
 
 
 def start(messages: list[dict], userid: str, *, origin_software: str = "console",
-          review_arguments: bool = True, investigation_id: str | None = None) -> dict:
+          review_arguments: bool = False, redact_evidence: bool = True,
+          investigation_id: str | None = None) -> dict:
     if any(m.get("role") not in {"user", "assistant"} for m in messages):
         raise ValueError("Only user and assistant chat messages are accepted.")
     budget = config.LH_LLM_TOOL_CONTEXT_LENGTH - config.LH_LLM_TOOL_MAX_TOKENS
@@ -403,16 +423,17 @@ def start(messages: list[dict], userid: str, *, origin_software: str = "console"
             break
     state = {"messages": transcript, "catalog": {},
              "discovery_calls": 0, "execution_requests": 0, "queue": [],
-             "review_arguments": review_arguments,
+             "review_arguments": review_arguments, "redact_evidence": redact_evidence,
              "origin_software": origin_software,
              "execution_attempted": False, "narration_corrections": 0,
              "discovery_ids": [], "remaining": config.LH_LLM_TOOL_TIMEOUT_SECONDS, "budget": budget}
     request_id = store.create(userid, origin_software)
-    store.initialize_history(request_id, str(redact(messages[-1].get("content", ""))),
-                             redact_audit_metadata(store.settings_snapshot()))
+    settings = redact_audit_metadata(store.settings_snapshot())
+    settings.update({"review_arguments": review_arguments, "redact_evidence": redact_evidence})
+    store.initialize_history(request_id, str(redact(messages[-1].get("content", ""))), settings)
     store.record(request_id, {"name": "request_settings"},
-                 {"review_arguments": review_arguments}, "REQUEST_SETTINGS",
-                 "Input-argument review preference.")
+                 {"review_arguments": review_arguments, "redact_evidence": redact_evidence},
+                 "REQUEST_SETTINGS", "RCA request privacy and input-review preferences.")
     if investigation_id:
         try:
             snapshot = investigation_context.capture(
@@ -487,7 +508,8 @@ def resume(request_id: str, userid: str, confirmation_id: str, approved: bool, *
                  "CONFIRMED", ("Input arguments reviewed by the authenticated request owner."
                                if state.get("review_arguments", True)
                                else "Execution confirmed by the authenticated request owner."))
-    text = _execute(request_id, pending["target"], reviewed, userid, deadline, confirmed=True)
+    text = _execute(request_id, pending["target"], reviewed, userid, deadline, confirmed=True,
+                     redact_evidence=state.get("redact_evidence", True))
     state["execution_attempted"] = True
     state.setdefault("evidence_call_ids", {})[pending["call_id"]] = store.latest_execution_event(request_id)
     state["messages"].append({"role": "tool", "tool_call_id": pending["call_id"], "content": text})
@@ -582,7 +604,8 @@ def _loop(request_id, state, userid):
                                       {"collector": target["name"], "version": target["version"],
                                        "review_arguments": review_arguments,
                                        "arguments": redact(arguments), "confirmation_id": pending["confirmation_id"]})
-                    text = _execute(request_id, target, arguments, userid, deadline)
+                    text = _execute(request_id, target, arguments, userid, deadline,
+                                    redact_evidence=state.get("redact_evidence", True))
                     state["execution_attempted"] = True
                     state.setdefault("evidence_call_ids", {})[call["id"]] = store.latest_execution_event(request_id)
                 state["messages"].append({"role": "tool", "tool_call_id": call["id"], "content": text})
@@ -613,6 +636,7 @@ def _loop(request_id, state, userid):
                     _remaining(deadline), require_tool,
                     state.get("evidence_call_ids", {}),
                     narration_correction=state.pop("next_turn_is_narration_correction", False),
+                    redact_evidence=state.get("redact_evidence", True),
                 )
             except Exception as exc:
                 state["assistant_error"] = str(redact(str(exc)))
@@ -731,6 +755,14 @@ def _explanation_messages(context, execution, invocation_id=None):
                 for event in events:
                     prepared = compact_evidence(event["evidence"], limit)
                     meta = evidence_metadata(event["evidence"], prepared)
+                    redaction_enabled = bool(execution.get("evidence_redaction_enabled", True))
+                    meta["sensitive_value_redaction_enabled"] = redaction_enabled
+                    meta["redacted"] = redaction_enabled
+                    meta["character_counts"] = {
+                        "collector_result": len(event["evidence"]),
+                        "after_redaction": len(event["evidence"]) if redaction_enabled else None,
+                        "sent_to_model": len(prepared),
+                    }
                     meta["context_reduction"] = limit < config.LH_LLM_TOOL_MAX_RESULT_CHARS
                     meta["question_context_limit_chars"] = context_limit
                     store.record_evidence_view(execution["request_id"], event.get("call_id"), invocation_id,
@@ -814,7 +846,8 @@ def _perform_explanation(request_id, attempt, origin):
 
 
 def _audited_tool_turn(request_id, messages, tools, timeout, require_tool,
-                       evidence_call_ids, *, narration_correction=False):
+                       evidence_call_ids, *, narration_correction=False,
+                       redact_evidence=True):
     started = time.monotonic()
     stage = "narration_correction" if narration_correction else "discovery_tool_selection"
     invocation_id = store.begin_invocation(request_id, stage,
@@ -825,11 +858,15 @@ def _audited_tool_turn(request_id, messages, tools, timeout, require_tool,
         for message in messages:
             if message.get("role") != "tool":
                 continue
-            prepared = str(redact(message.get("content", "")))
+            content = str(message.get("content", ""))
             call_id = evidence_call_ids.get(message.get("tool_call_id"))
             original = store.saved_execution_evidence(request_id, call_id) if call_id else None
+            prepared = content if call_id and not redact_evidence else str(redact(content))
             details = evidence_metadata(original, prepared) if original is not None else {
                 "source": "Discovery result or legacy tool result; no saved execution link"}
+            if original is not None:
+                details["sensitive_value_redaction_enabled"] = redact_evidence
+                details["redacted"] = redact_evidence
             details["tool_call_reference"] = message.get("tool_call_id")
             store.record_evidence_view(request_id, call_id, invocation_id, "dispatcher_tool_input",
                                        original, prepared, None, details)

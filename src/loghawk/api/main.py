@@ -10,6 +10,7 @@ from loghawk.api.routers.builtin_tasks import router as builtin_tasks_router
 from loghawk.api.routers.builtin_collectors import router as builtin_collectors_router
 from loghawk.api.routers.rca import router as rca_router
 from loghawk.api.routers.investigations import router as investigations_router
+from loghawk.api.routers.incidents import router as incidents_router
 from loghawk.api.routers.console import router as console_router
 from loghawk.api.routers.collectors import router as collectors_router
 from loghawk.api.routers.pipeline_runs import router as pipeline_runs_router
@@ -37,6 +38,7 @@ app.include_router(builtin_tasks_router, prefix="/api/v1/builtin-tasks", tags=["
 app.include_router(builtin_collectors_router, prefix="/api/v1/builtin-collectors", tags=["built-in collectors"])
 app.include_router(rca_router, prefix="/api/v1/rca", tags=["RCA"])
 app.include_router(investigations_router, prefix="/api/v1/investigations", tags=["investigations"])
+app.include_router(incidents_router, prefix="/api/v1/incidents", tags=["incidents"])
 app.include_router(console_router, prefix="/api/v1/console", tags=["console"])
 app.include_router(collectors_router, prefix="/api/v1/console/collectors", tags=["collectors"])
 app.include_router(

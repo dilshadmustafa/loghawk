@@ -180,7 +180,7 @@ class _UploadStream:
         pass
 
 
-def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=None,original_uri=None):
+def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=None,original_uri=None,incident_id=None):
     name,fmt=validate_source(name,evidence_type)
     now=utc_now();source_id=uuid4().hex
     prefix=config.LH_INVESTIGATION_SOURCE_S3_PREFIX.strip("/")
@@ -188,10 +188,22 @@ def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=Non
     object_key=f"{prefix}/{key}/{source_id}/original.{fmt}"
     snapshot=f"s3://{config.LH_S3_BUCKET}/{object_key}"
     with connect("server") as db:
-        store.require(db,key,user,write=True)
-        duplicate=db.execute("SELECT id FROM rca_evidence_sources WHERE investigation_id=? AND sha256=? AND status='READY'",(key,digest)).fetchone()
+        if incident_id:
+            incident = db.execute("SELECT id,userid FROM rca_incidents WHERE id=?", (incident_id,)).fetchone()
+            if not incident or incident["userid"] != user["userid"]:
+                raise PermissionError("Incident not found or access denied.")
+            duplicate = db.execute(
+                "SELECT s.id FROM rca_evidence_sources s JOIN rca_incident_evidence e ON e.source_id=s.id "
+                "WHERE e.incident_id=? AND s.sha256=? AND s.status='READY'", (incident_id,digest)
+            ).fetchone()
+        else:
+            store.require(db,key,user,write=True)
+            duplicate=db.execute("SELECT id FROM rca_evidence_sources WHERE investigation_id=? AND sha256=? AND status='READY'",(key,digest)).fetchone()
         if duplicate:return {"id":duplicate["id"],"status":"DUPLICATE","name":name}
-        db.execute("INSERT INTO rca_evidence_sources (id,userid,investigation_id,name,original_uri,snapshot_uri,sha256,size_bytes,evidence_type,format,status,error,mapping_json,record_path,record_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(source_id,user["userid"],key,name,original_uri,snapshot,digest,size,evidence_type,fmt,"IMPORTING",None,"{}",record_path,0,now,now))
+        db.execute("INSERT INTO rca_evidence_sources (id,userid,investigation_id,name,original_uri,snapshot_uri,sha256,size_bytes,evidence_type,format,status,error,mapping_json,record_path,record_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(source_id,user["userid"],key,name,original_uri,snapshot,size,digest,evidence_type,fmt,"IMPORTING",None,"{}",record_path,0,now,now))
+        if incident_id:
+            db.execute("INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)",
+                       (uuid4().hex,incident_id,source_id,"[]",now))
     try:
         stream.seek(0)
         _s3_client().upload_fileobj(
@@ -208,7 +220,7 @@ def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=Non
         with connect("server") as db:db.execute("UPDATE rca_evidence_sources SET status='FAILED',error=?,updated_at=? WHERE id=?",(error,utc_now(),source_id))
         return {"id":source_id,"status":"FAILED","name":name,"error":error}
 
-def import_s3(key,user,objects,evidence_type,record_path=None):
+def import_s3(key,user,objects,evidence_type,record_path=None,incident_id=None):
     if not 1<=len(objects)<=config.LH_INVESTIGATION_MAX_IMPORT_FILES:raise ValueError("Invalid number of selected objects.")
     for item in objects:
         _,name=s3_parts(item["uri"])
@@ -222,7 +234,7 @@ def import_s3(key,user,objects,evidence_type,record_path=None):
             try:temp,size,digest=stage(response["Body"],remaining)
             finally:response["Body"].close()
             remaining-=size;staged.append((item["uri"],name,temp,size,digest))
-        return [import_staged(key,user,name,temp,size,digest,evidence_type,record_path,uri) for uri,name,temp,size,digest in staged]
+        return [import_staged(key,user,name,temp,size,digest,evidence_type,record_path,uri,incident_id) for uri,name,temp,size,digest in staged]
     finally:
         for _,_,temp,_,_ in staged:temp.close()
 

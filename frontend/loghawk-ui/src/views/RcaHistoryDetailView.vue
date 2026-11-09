@@ -113,7 +113,8 @@ function download() {
         <p>Older requests may lack questions, settings or model-usage metadata. Not recorded means unavailable, not zero.</p>
       </section>
       <section v-if="tab === 'Evidence & Inputs'">
-        <p>Saved evidence is redacted before model compaction. Source/runner limits still apply. Redaction masks sensitive values; compaction changes representation; truncation omits content. Character counts are not token counts.</p>
+        <p v-if="record.settings?.redact_evidence !== false">Sensitive-value redaction was enabled for this request. Evidence may also be compacted for model input or limited by its source/runner. Character counts are not token counts.</p>
+        <p v-else>Sensitive-value redaction was disabled for this request. Collector results may contain sensitive values and were available to the configured model. Evidence may also be compacted for model input or limited by its source/runner.</p>
         <article v-for="event in collectors" :key="event.id">
           <h2>{{ event.collector_name }} · Version {{ event.collector_version }} · {{ event.status }}</h2>
           <p>Event: {{ event.id }} · Run: {{ event.run_id ?? 'No run recorded' }}</p>

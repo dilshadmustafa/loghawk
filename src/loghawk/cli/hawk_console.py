@@ -437,8 +437,10 @@ class HawkConsole(App[None]):
 
         with Container(id="editor-pane", classes="pane"):
             yield Static("Editor · /help · use /taskedit <name> or /tasknew", classes="pane-title")
-            yield TickCheckbox("Review Input Args", value=True, id="review-input-args",
+            yield TickCheckbox("Review Input Args", value=False, id="review-input-args",
                            disabled=self._api_client is None)
+            yield TickCheckbox("Redact sensitive values in collector evidence", value=True,
+                           id="redact-collector-evidence", disabled=self._api_client is None)
             with Container(id="task-create-pane"):
                 yield Static("Create Task", classes="pane-title")
                 with Container(id="task-create-fields"):
@@ -837,8 +839,12 @@ class HawkConsole(App[None]):
             )
             review_checkbox = self.query_one("#review-input-args", Checkbox)
             review_arguments = review_checkbox.value
+            redact_checkbox = self.query_one("#redact-collector-evidence", Checkbox)
+            redact_evidence = redact_checkbox.value
             review_checkbox.disabled = True
-            self._run_chat(text, use_rag=use_rag, review_arguments=review_arguments)
+            redact_checkbox.disabled = True
+            self._run_chat(text, use_rag=use_rag, review_arguments=review_arguments,
+                           redact_evidence=redact_evidence)
             return
 
         terminal_id = "command-one" if event.input.id == "command-one-input" else "command-two"
@@ -1700,7 +1706,8 @@ class HawkConsole(App[None]):
         self.query_one("#llm-output", RichLog).write("Command canceled.\n")
 
     @work(thread=True, exclusive=True, group="hawk-llm")
-    def _run_chat(self, prompt: str, use_rag: bool = False, review_arguments: bool = True) -> None:
+    def _run_chat(self, prompt: str, use_rag: bool = False, review_arguments: bool = False,
+                  redact_evidence: bool = True) -> None:
         response_parts: list[str] = []
         try:
             if self._api_client is not None:
@@ -1713,7 +1720,8 @@ class HawkConsole(App[None]):
                     messages = [*self._chat_history, {"role": "user", "content": prompt}]
                     result = self._api_client.post_json(
                         "/api/v1/console/chat",
-                        {"messages": messages, "review_arguments": review_arguments, "investigation_id": self._investigation_id},
+                        {"messages": messages, "review_arguments": review_arguments,
+                         "redact_evidence": redact_evidence, "investigation_id": self._investigation_id},
                         timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS
                                 + config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30)
                     )
@@ -1877,7 +1885,10 @@ class HawkConsole(App[None]):
                     evidence = json.dumps(json.loads(evidence), indent=2, ensure_ascii=False)
                 except (ValueError, TypeError):
                     pass
-                lines.extend(["", "Collector evidence (redacted; may be truncated):", evidence])
+                evidence_label = ("Collector evidence (sensitive values redacted; may be truncated):"
+                                  if execution.get("evidence_redaction_enabled", True)
+                                  else "Collector evidence (sensitive-value redaction disabled; may be truncated):")
+                lines.extend(["", evidence_label, evidence])
         lines.extend(["", "AI/LLM explanation (not execution confirmation):",
                       str(result.get("response", "")), "",
                       "Saved collector evidence is independent of the compact model input; source output may be limited."])
@@ -2042,6 +2053,7 @@ class HawkConsole(App[None]):
 
     def _finish_chat(self, error: str | None, response: str | None) -> None:
         self.query_one("#review-input-args", Checkbox).disabled = self._api_client is None
+        self.query_one("#redact-collector-evidence", Checkbox).disabled = self._api_client is None
         self.query_one("#retry-rca-explanation", Button).disabled = (
             self._api_client is None or not self._rca_retry_request_id
         )

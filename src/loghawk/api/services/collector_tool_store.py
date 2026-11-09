@@ -89,7 +89,7 @@ def record(request_id: str, target: dict, arguments: dict, status: str,
 def execution_summary(request_id: str) -> dict:
     """Summarize recorded outcomes, never model assertions or discovery success."""
     with connect("server") as db:
-        request = db.execute("SELECT status FROM llm_tool_requests WHERE id = ?", (request_id,)).fetchone()
+        request = db.execute("SELECT status, settings_json FROM llm_tool_requests WHERE id = ?", (request_id,)).fetchone()
         if request is None:
             raise ValueError("Tool request not found.")
         rows = db.execute(
@@ -117,6 +117,11 @@ def execution_summary(request_id: str) -> dict:
                        "status": status, "run_id": row["run_id"],
                        "evidence": row["result_text"] if status in {"COMPLETED", "FAILED"} else None,
                        "reason": row["result_text"] if status in {"REJECTED", "CANCELLED"} else None})
+    try:
+        request_settings = json.loads(request["settings_json"] or "{}")
+    except (TypeError, ValueError):
+        request_settings = {}
+    evidence_redaction_enabled = request_settings.get("redact_evidence", True) is not False
     waiting = request["status"] == "PENDING"
     parts = [f"{value} {key}" for key, value in counts.items() if value]
     if waiting:
@@ -125,6 +130,7 @@ def execution_summary(request_id: str) -> dict:
         parts.append("No collector execution was recorded")
     return {"request_id": request_id, "request_status": request["status"],
             "discovery_calls": discovery_calls, **counts, "awaiting_confirmation": waiting,
+            "evidence_redaction_enabled": evidence_redaction_enabled,
             "summary": "; ".join(parts) + ".", "events": events}
 
 

@@ -8,7 +8,8 @@ router = APIRouter(dependencies=[Depends(require_webui_user)])
 
 class ChatRequest(BaseModel):
     messages: list[dict[str, str]] = Field(min_length=1)
-    review_arguments: StrictBool = True
+    review_arguments: StrictBool = False
+    redact_evidence: StrictBool = True
     investigation_id: str | None = Field(default=None, max_length=64)
 
 class Confirmation(BaseModel):
@@ -21,7 +22,8 @@ def chat(body: ChatRequest, user: dict = Depends(require_webui_user)) -> dict:
     try:
         return assistant_chat_service.chat(
             body.messages, user["userid"], origin_software="web",
-            review_arguments=body.review_arguments, investigation_id=body.investigation_id,
+            review_arguments=body.review_arguments, redact_evidence=body.redact_evidence,
+            investigation_id=body.investigation_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

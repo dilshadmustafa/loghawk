@@ -321,11 +321,12 @@ rca_incidents = Table(
     Column("id", String, primary_key=True), Column("userid", String, nullable=False),
     Column("source_incident_id", String), Column("primary_details_json", Text, nullable=False),
     Column("created_at", String, nullable=False), Column("updated_at", String, nullable=False),
+    Column("deleted_at", String), Column("deleted_by", String),
 )
 rca_evidence_sources = Table(
     "rca_evidence_sources", SERVER_METADATA,
     Column("id", String, primary_key=True), Column("userid", String, nullable=False),
-    Column("investigation_id", String, ForeignKey("rca_investigations.id"), nullable=False),
+    Column("investigation_id", String, ForeignKey("rca_investigations.id"), nullable=True),
     Column("name", String, nullable=False), Column("original_uri", Text),
     Column("snapshot_uri", Text), Column("sha256", String), Column("size_bytes", Integer),
     Column("evidence_type", String, nullable=False), Column("format", String, nullable=False),
