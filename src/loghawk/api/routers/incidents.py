@@ -54,11 +54,10 @@ def call(fn, *args, **kwargs):
 def listing(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
             q: str = Query("", max_length=200), severity: str | None = Query(None, max_length=100),
             service: str | None = Query(None, max_length=300), created_from: date | None = None,
-            created_to: date | None = None, status: Literal["active", "deleted"] = "active",
-            user=Depends(require_authenticated_user)):
+            created_to: date | None = None, user=Depends(require_authenticated_user)):
     if created_from and created_to and created_from > created_to:
         raise HTTPException(422, "Created-from date must be on or before created-to date.")
-    return call(store.listing, user, offset, limit, q, severity, service, created_from, created_to, status)
+    return call(store.listing, user, offset, limit, q, severity, service, created_from, created_to)
 
 
 @router.post("", status_code=201)
@@ -80,12 +79,7 @@ def create(body: IncidentCreate, user=Depends(require_authenticated_user)):
 
 @router.delete("/{incident_id}", status_code=204)
 def delete(incident_id: str, user=Depends(require_authenticated_user)) -> None:
-    call(store.soft_delete, incident_id, user)
-
-
-@router.post("/{incident_id}/restore")
-def restore(incident_id: str, user=Depends(require_authenticated_user)):
-    return call(store.restore, incident_id, user)
+    call(store.permanently_delete, incident_id, user)
 
 
 @router.get("/{incident_id}")

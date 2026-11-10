@@ -299,8 +299,6 @@ export const listIncidents = (query: URLSearchParams) =>
   request<import("../types/api").Incident[]>("/incidents?" + query.toString());
 export const deleteIncident = (id: string) =>
   request<void>("/incidents/" + encodeURIComponent(id), {method: "DELETE"});
-export const restoreIncident = (id: string) =>
-  request<import("../types/api").Incident>("/incidents/" + encodeURIComponent(id) + "/restore", {method: "POST"});
 export const createIncident = (payload: {
   incident_id: string; summary: string; start_time: string; end_time: string;
   severity: string; primary_service: string; services: string[];

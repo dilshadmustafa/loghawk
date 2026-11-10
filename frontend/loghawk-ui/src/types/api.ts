@@ -305,8 +305,7 @@ export interface Incident {
   id: string; userid: string; source_incident_id: string;
   primary_details: Record<string, unknown>; created_at: string; updated_at: string;
   can_modify: boolean;
-  can_delete?: boolean; can_restore?: boolean;
-  deleted_at?: string | null; deleted_by?: string | null;
+  can_delete?: boolean;
   evidence_count?: number;
   investigations: {id: string; problem: string; status: string; created_at: string}[];
   sources: IncidentEvidenceSource[];

@@ -25,7 +25,7 @@ def _incident(db, incident_id, user, *, write=False, include_deleted=False):
     if not row or (row["userid"] != user["userid"] and user.get("role") not in MANAGERS):
         raise PermissionError("Incident not found or access denied.")
     if row["deleted_at"] and not include_deleted:
-        raise ValueError("This incident is in Deleted incidents. Restore it before making changes.")
+        raise ValueError("This incident has been permanently deleted or is no longer available.")
     if write and row["userid"] != user["userid"]:
         raise PermissionError("Only the incident owner can modify it.")
     return row
@@ -54,11 +54,8 @@ def create(user, source_incident_id, summary, start_time, end_time, severity, pr
     return detail(key, user)
 
 
-def listing(user, offset=0, limit=50, query="", severity=None, service=None, created_from=None, created_to=None, status="active"):
-    if status not in {"active", "deleted"}:
-        raise ValueError("Incident status must be active or deleted.")
-    clauses, values = [], []
-    clauses.append("deleted_at IS NULL" if status == "active" else "deleted_at IS NOT NULL")
+def listing(user, offset=0, limit=50, query="", severity=None, service=None, created_from=None, created_to=None):
+    clauses, values = ["deleted_at IS NULL"], []
     if user.get("role") not in MANAGERS:
         clauses.append("userid=?")
         values.append(user["userid"])
@@ -78,7 +75,7 @@ def listing(user, offset=0, limit=50, query="", severity=None, service=None, cre
     if created_to:
         clauses.append("created_at<?")
         values.append(f"{(created_to + timedelta(days=1)).isoformat()}T00:00:00")
-    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    where = " WHERE " + " AND ".join(clauses)
     with connect("server") as db:
         rows = db.execute(
             f"SELECT i.*, (SELECT COUNT(*) FROM rca_incident_evidence e WHERE e.incident_id=i.id) AS evidence_count "
@@ -88,19 +85,16 @@ def listing(user, offset=0, limit=50, query="", severity=None, service=None, cre
     result = []
     for row in rows:
         item = _details(row)
-        item["can_delete"] = status == "active" and (row["userid"] == user["userid"] or user.get("role") == "Administrator")
-        item["can_restore"] = status == "deleted" and (row["userid"] == user["userid"] or user.get("role") == "Administrator")
+        item["can_delete"] = row["userid"] == user["userid"] or user.get("role") == "Administrator"
         result.append(item)
     return result
 
-
 def detail(incident_id, user):
     with connect("server") as db:
-        row = _incident(db, incident_id, user, include_deleted=True)
+        row = _incident(db, incident_id, user)
         result = _details(row)
-        result["can_modify"] = row["userid"] == user["userid"] and row["deleted_at"] is None
-        result["can_delete"] = row["deleted_at"] is None and (row["userid"] == user["userid"] or user.get("role") == "Administrator")
-        result["can_restore"] = row["deleted_at"] is not None and (row["userid"] == user["userid"] or user.get("role") == "Administrator")
+        result["can_modify"] = row["userid"] == user["userid"]
+        result["can_delete"] = row["userid"] == user["userid"] or user.get("role") == "Administrator"
         result["investigations"] = [dict(item) for item in db.execute(
             "SELECT i.id,i.problem,i.status,i.created_at FROM rca_investigations i "
             "JOIN rca_investigation_incidents l ON l.investigation_id=i.id "
@@ -119,28 +113,16 @@ def detail(incident_id, user):
     return result
 
 
-def soft_delete(incident_id, user):
+def permanently_delete(incident_id, user):
+    """Permanently remove an incident and its dependent links, retaining evidence and RCA snapshots."""
     with connect("server") as db:
         row = _incident(db, incident_id, user, include_deleted=True)
-        if row["deleted_at"]:
-            raise ValueError("This incident is already deleted.")
         if row["userid"] != user["userid"] and user.get("role") != "Administrator":
-            raise PermissionError("Only the incident owner or an Administrator can delete it.")
-        db.execute("UPDATE rca_incidents SET deleted_at=?,deleted_by=?,updated_at=? WHERE id=?",
-                   (utc_now(), user["userid"], utc_now(), incident_id))
-    return {"incident_id": incident_id, "deleted": True}
-
-
-def restore(incident_id, user):
-    with connect("server") as db:
-        row = _incident(db, incident_id, user, include_deleted=True)
-        if not row["deleted_at"]:
-            raise ValueError("This incident is already active.")
-        if row["userid"] != user["userid"] and user.get("role") != "Administrator":
-            raise PermissionError("Only the incident owner or an Administrator can restore it.")
-        db.execute("UPDATE rca_incidents SET deleted_at=NULL,deleted_by=NULL,updated_at=? WHERE id=?",
-                   (utc_now(), incident_id))
-    return detail(incident_id, user)
+            raise PermissionError("Only the incident owner or an Administrator can permanently delete it.")
+        db.execute("DELETE FROM rca_investigation_incidents WHERE incident_id=?", (incident_id,))
+        db.execute("DELETE FROM rca_incident_evidence WHERE incident_id=?", (incident_id,))
+        db.execute("DELETE FROM rca_incidents WHERE id=?", (incident_id,))
+    return {"incident_id": incident_id, "permanently_deleted": True}
 
 
 def attach(incident_id, user, source_id, selection=None):

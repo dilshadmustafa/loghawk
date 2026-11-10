@@ -351,7 +351,19 @@ def remove_ready_source(key, user, source_id):
                                 (user["userid"],)).fetchall()
         )
         if referenced or incident_reference:
-            raise ValueError("This source is still referenced by an attachment, incident or finding. Remove the relevant attachment or revise the finding first. Incident primary evidence must be retained.")
+            reasons = []
+            if referenced:
+                reasons.append("it is linked by an attachment or finding")
+            if incident_reference:
+                reasons.append(
+                    "one of its records is used as an incident's primary evidence"
+                )
+            raise ValueError(
+                "This source cannot be removed because "
+                + " and ".join(reasons)
+                + ". Remove the related attachment or revise the finding first. "
+                "Incident primary evidence must remain available."
+            )
         db.execute("UPDATE rca_evidence_sources SET status='REMOVED',updated_at=? WHERE id=?",
                    (utc_now(), source_id))
     return {"source_id": source_id}
