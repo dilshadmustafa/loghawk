@@ -160,7 +160,7 @@ def request_reason(connection, tables, row, cutoff, batch_size):
                 OR EXISTS (
                     SELECT 1 FROM rca_evidence_sources s JOIN llm_tool_calls c ON c.id=s.tool_call_id
                     WHERE c.request_id=:request_id AND (
-                        s.investigation_id=i.id
+                        EXISTS (SELECT 1 FROM rca_investigation_sources m WHERE m.investigation_id=i.id AND m.source_id=s.id)
                         OR EXISTS (SELECT 1 FROM rca_investigation_evidence e WHERE e.investigation_id=i.id AND e.source_id=s.id)
                         OR EXISTS (SELECT 1 FROM rca_incident_evidence e JOIN rca_investigation_incidents l ON l.incident_id=e.incident_id WHERE l.investigation_id=i.id AND e.source_id=s.id)
                         OR EXISTS (SELECT 1 FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=i.id AND e.source_id=s.id)

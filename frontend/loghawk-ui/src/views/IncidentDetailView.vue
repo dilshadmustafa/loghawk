@@ -7,7 +7,7 @@ import type { IncidentS3File } from "../services/api";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 const route=useRoute(),router=useRouter(),id=computed(()=>String(route.params.id));
 const item=ref<Incident|null>(null),busy=ref(false),error=ref(""),notice=ref("");
-const deleteConfirmationOpen=ref(false);
+const deleteConfirmationOpen=ref(false),removedSourceId=ref("");
 const deleteConfirmationMessage=computed(()=>item.value?`Permanently delete incident “${item.value.source_incident_id||item.value.id}”? This cannot be undone. Its investigation and incident-evidence links will be removed. Imported evidence and saved RCA snapshots will be retained.`:"");
 const addOpen=ref(false),sourceMode=ref<"s3"|"local"|"collector"|"existing">("s3"),evidenceType=ref("other"),recordPath=ref(""),files=ref<File[]>([]),collectorCallId=ref(""),existingSourceId=ref("");
 const buckets=ref<string[]>([]),bucket=ref(""),browseUri=ref(""),filesAtLocation=ref<IncidentS3File[]>([]),folders=ref<{uri:string}[]>([]),s3Selected=ref<string[]>([]),reviewed=ref<IncidentS3File[]>([]);
@@ -30,10 +30,8 @@ async function attachSavedCollector(){const callId=collectorCallId.value.trim();
 async function attachExistingSource(){const sourceId=existingSourceId.value.trim();if(!sourceId)return;busy.value=true;error.value="";notice.value="";try{item.value=await incidentAction<Incident>(id.value,"evidence",{source_id:sourceId,records:null});existingSourceId.value="";notice.value="Existing source attached to the incident.";}catch(e){error.value=String(e);}finally{busy.value=false;}}
 function restoreIncidentSelection(sourceId:string){
   const source=item.value?.sources.find(s=>s.id===sourceId);
-  selected.value=Array.isArray(source?.attachment_selection)
-    ?source.attachment_selection.filter((number):number is number=>typeof number==="number")
-    :[];
-  allRecords.value=!!source&&source.attachment_selection===null;
+  selected.value=source?.is_attached&&Array.isArray(source.attachment_selection)?source.attachment_selection.filter((number):number is number=>typeof number==="number"):[];
+  allRecords.value=!!source?.is_attached&&source.attachment_selection===null;
 }
 async function openPreview(sourceId:string,offset=0){
   const switchingSource=previewSource.value!==sourceId;
@@ -46,7 +44,9 @@ async function openPreview(sourceId:string,offset=0){
 }
 function toggleRecord(number:number,event:Event){const checked=(event.target as HTMLInputElement).checked;selected.value=checked?[...new Set([...selected.value,number])]:selected.value.filter(n=>n!==number);allRecords.value=false;}
 async function attach(){if(!previewSource.value||(!allRecords.value&&!selected.value.length))return;busy.value=true;error.value="";try{item.value=await incidentAction(id.value,"evidence",{source_id:previewSource.value,records:allRecords.value?null:selected.value});notice.value="Evidence attached to the incident.";await load();}catch(e){error.value=String(e);}finally{busy.value=false;}}
-async function unlink(sourceId:string){if(!window.confirm("Remove this evidence attachment from the incident? The imported source and saved RCA snapshots are retained."))return;busy.value=true;error.value="";try{await incidentAction(id.value,"evidence/unlink",{source_id:sourceId});notice.value="Evidence detached from this incident; the imported source is retained.";if(previewSource.value===sourceId)preview.value=null;await load();}catch(e){error.value=String(e);}finally{busy.value=false;}}
+async function unlink(sourceId:string){if(!window.confirm("Remove the selected records from this incident? The source remains listed and stored."))return;busy.value=true;error.value="";try{await incidentAction(id.value,"evidence/unlink",{source_id:sourceId});notice.value="Attachment removed. The source remains linked.";if(previewSource.value===sourceId){preview.value=null;previewSource.value="";}await load();}catch(e){error.value=String(e);}finally{busy.value=false;}}
+async function removeSource(sourceId:string){if(!window.confirm("Remove this source from the incident? Stored evidence and links to other targets are retained."))return;busy.value=true;error.value="";try{await incidentAction(id.value,"sources/"+sourceId+"/remove",{});removedSourceId.value=sourceId;notice.value="Source removed from this incident. Stored evidence is retained.";if(previewSource.value===sourceId){preview.value=null;previewSource.value="";}await load();}catch(e){error.value=String(e);}finally{busy.value=false;}}
+async function undoRemoveSource(){if(!removedSourceId.value)return;busy.value=true;error.value="";try{await incidentAction(id.value,"sources/"+removedSourceId.value+"/restore",{});notice.value="Source link restored.";removedSourceId.value="";await load();}catch(e){error.value=String(e);}finally{busy.value=false;}}
 function pretty(value:unknown){return JSON.stringify(value,null,2)}
 function display(value:unknown){if(value==null||value==="")return "-";return Array.isArray(value)?value.join(", "):String(value)}
 function formatDate(value:string){const d=new Date(value);return Number.isNaN(d.getTime())?value:d.toLocaleString()}
@@ -58,7 +58,7 @@ onMounted(load);
 <section v-if="item" class="view incident-detail">
   <RouterLink to="/rca/incidents">Back to List Incidents</RouterLink>
   <header class="view-header"><div><p class="eyebrow">Incident - {{item.userid}} - Created {{formatDate(item.created_at)}}</p><h1>{{item.primary_details.summary||item.source_incident_id}}</h1><p>{{item.source_incident_id}}</p></div><div class="actions"><button v-if="item.can_modify" class="btn primary" :disabled="busy" @click="addOpen=!addOpen">{{addOpen?'Cancel Add Evidence':'Add Evidence'}}</button><button v-if="item.can_delete" class="btn danger" :disabled="busy" @click="deleteConfirmationOpen=true">Permanently Delete</button></div></header>
-  <p v-if="error" class="error" role="alert">{{error}}</p><p v-if="notice" class="notice" role="status">{{notice}}</p>
+  <p v-if="error" class="error" role="alert">{{error}}</p><p v-if="notice" class="notice" role="status">{{notice}} <button v-if="removedSourceId" type="button" @click="undoRemoveSource">Undo</button></p>
   <section class="card"><h2>Incident details</h2><dl class="details"><div><dt>Start</dt><dd>{{display(item.primary_details.start_time)}}</dd></div><div><dt>End</dt><dd>{{display(item.primary_details.end_time)}}</dd></div><div><dt>Maximum severity</dt><dd>{{display(item.primary_details.max_severity)}}</dd></div><div><dt>Primary service</dt><dd>{{display(item.primary_details.primary_service)}}</dd></div><div><dt>Related services</dt><dd>{{display(item.primary_details.services)}}</dd></div><div><dt>Incident record ID</dt><dd>{{item.id}}</dd></div></dl><details><summary>Full incident details</summary><pre>{{pretty(item.primary_details)}}</pre></details></section>
   <section v-if="addOpen&&item.can_modify" class="card stack"><h2>Add Evidence</h2><p>Import a source, preview its records, then attach selected records or all records to this incident.</p>
     <label>Source<select v-model="sourceMode"><option value="s3">Internal S3</option><option value="local">Local files / Folder</option><option value="collector">Saved collector evidence</option><option value="existing">Existing source</option></select></label>
@@ -113,8 +113,8 @@ onMounted(load);
         <td class="source-name">{{sourceLabel(source)}}</td>
         <td>{{source.evidence_type}}</td>
         <td><span class="status-pill" :class="{'status-failed':source.status==='FAILED'}">{{source.status}}</span><p v-if="source.error" class="error source-error">{{source.error}}</p></td>
-        <td>{{source.attachment_selection?.length===0?'Not attached':source.attachment_selection===null?'All records':source.attachment_selection?.length}}</td>
-        <td><div class="actions"><button type="button" :disabled="busy||source.status!=='READY'" @click="openPreview(source.id)">Preview / Select</button><button v-if="item.can_modify" type="button" class="danger" :disabled="busy" @click="unlink(source.id)">Remove Attachment</button></div></td>
+        <td>{{!source.is_attached?'Not attached':source.attachment_selection===null?'All records':source.attachment_selection?.length}}</td>
+        <td><div class="actions"><button type="button" :disabled="busy||source.status!=='READY'" @click="openPreview(source.id)">Preview / Select</button><button v-if="item.can_modify&&source.is_attached" type="button" class="danger" :disabled="busy" @click="unlink(source.id)">Remove Attachment</button><button v-if="item.can_modify&&!source.is_attached" type="button" :disabled="busy" @click="removeSource(source.id)">Remove</button></div></td>
       </tr>
     </tbody></table></div>
   </section>

@@ -278,6 +278,7 @@ export interface InvestigationSource {
   id: string; name: string; status: string; evidence_type: string; format: string;
   record_count: number; error?: string; sha256?: string; original_uri?: string;
   snapshot_uri?: string; mapping: Record<string, string>; tool_call_id?: string;
+  is_directly_linked?: boolean | number;
 }
 export interface InvestigationRecord {
   id: string; record_number: number; source_line_number?: number | null; original_record: Record<string, unknown>;
@@ -304,6 +305,7 @@ export interface IncidentImportPreview extends InvestigationSource {
   records: IncidentImportRecord[]; next_offset: number | null;
 }
 export interface IncidentEvidenceSource extends InvestigationSource {
+  is_attached: boolean;
   attachment_selection: number[] | null;
   attached_at?: string;
 }

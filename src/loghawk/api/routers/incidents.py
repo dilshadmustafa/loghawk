@@ -166,6 +166,14 @@ def attach(incident_id: str, body: EvidenceSelection, user=Depends(require_authe
 def unlink(incident_id: str, body: EvidenceSelection, user=Depends(require_authenticated_user)):
     return call(store.unlink, incident_id, user, body.source_id)
 
+@router.post("/{incident_id}/sources/{source_id}/remove")
+def remove_source(incident_id: str, source_id: str, user=Depends(require_authenticated_user)):
+    return call(store.remove_source, incident_id, user, source_id)
+
+@router.post("/{incident_id}/sources/{source_id}/restore")
+def restore_source(incident_id: str, source_id: str, user=Depends(require_authenticated_user)):
+    return call(store.restore_source, incident_id, user, source_id)
+
 
 @router.get("/{incident_id}/sources/{source_id}")
 def preview(incident_id: str, source_id: str, offset: int = Query(0, ge=0),

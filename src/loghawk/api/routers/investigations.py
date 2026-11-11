@@ -9,6 +9,7 @@ from loghawk.api.routers.auth import require_authenticated_user
 from loghawk.api.services import investigation_store as store, evidence_import_service as imports
 from loghawk.database.database_layer import connect
 from loghawk.database.timestamps import utc_now
+from loghawk.api.services import evidence_membership as membership
 
 router=APIRouter()
 class Create(BaseModel):
@@ -187,9 +188,12 @@ def collector_source(key:str,body:CollectorEvidence,user=Depends(require_authent
             parent=store.require(db,key,user,write=True)
             event=db.execute("SELECT c.* FROM llm_tool_calls c JOIN llm_tool_requests r ON c.request_id=r.id WHERE c.id=? AND r.userid=?",(body.tool_call_id,parent["userid"])).fetchone()
             if not event or event["status"] not in {"COMPLETED","FAILED"} or not event["run_id"]:raise ValueError("Select an owned collector execution event with a run ID.")
-            existing=db.execute("SELECT id FROM rca_evidence_sources WHERE investigation_id=? AND tool_call_id=?",(key,body.tool_call_id)).fetchone()
-            if existing:return {"id":existing["id"],"status":"DUPLICATE"}
+            existing=db.execute("SELECT id FROM rca_evidence_sources WHERE userid=? AND tool_call_id=?",(parent["userid"],body.tool_call_id)).fetchone()
+            if existing:
+                membership.ensure(db,"investigation",key,existing["id"])
+                return {"id":existing["id"],"status":"DUPLICATE"}
             source,now=uuid4().hex,utc_now()
-            db.execute("INSERT INTO rca_evidence_sources (id,userid,investigation_id,name,evidence_type,format,status,mapping_json,record_count,tool_call_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",(source,user["userid"],key,event["collector_name"],"other","collector","READY","{}",0,body.tool_call_id,now,now))
+            db.execute("INSERT INTO rca_evidence_sources (id,userid,name,evidence_type,format,status,mapping_json,record_count,tool_call_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",(source,user["userid"],event["collector_name"],"other","collector","READY","{}",0,body.tool_call_id,now,now))
+            membership.ensure(db,"investigation",key,source,now)
         return {"id":source,"status":"READY"}
     return call(save)

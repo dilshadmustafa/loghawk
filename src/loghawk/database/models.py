@@ -326,7 +326,6 @@ rca_incidents = Table(
 rca_evidence_sources = Table(
     "rca_evidence_sources", SERVER_METADATA,
     Column("id", String, primary_key=True), Column("userid", String, nullable=False),
-    Column("investigation_id", String, ForeignKey("rca_investigations.id"), nullable=True),
     Column("name", String, nullable=False), Column("original_uri", Text),
     Column("snapshot_uri", Text), Column("sha256", String), Column("size_bytes", Integer),
     Column("evidence_type", String, nullable=False), Column("format", String, nullable=False),
@@ -351,6 +350,22 @@ rca_investigation_incidents = Table(
     Column("incident_id", String, ForeignKey("rca_incidents.id"), nullable=False),
     Column("created_at", String, nullable=False),
     UniqueConstraint("investigation_id", "incident_id", name="uq_rca_investigation_incident"),
+)
+rca_incident_sources = Table(
+    "rca_incident_sources", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("incident_id", String, ForeignKey("rca_incidents.id"), nullable=False),
+    Column("source_id", String, ForeignKey("rca_evidence_sources.id"), nullable=False),
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("incident_id", "source_id", name="uq_rca_incident_source"),
+)
+rca_investigation_sources = Table(
+    "rca_investigation_sources", SERVER_METADATA,
+    Column("id", String, primary_key=True),
+    Column("investigation_id", String, ForeignKey("rca_investigations.id"), nullable=False),
+    Column("source_id", String, ForeignKey("rca_evidence_sources.id"), nullable=False),
+    Column("created_at", String, nullable=False),
+    UniqueConstraint("investigation_id", "source_id", name="uq_rca_investigation_source"),
 )
 rca_incident_evidence = Table(
     "rca_incident_evidence", SERVER_METADATA,
@@ -391,8 +406,9 @@ rca_investigation_requests = Table(
     Column("snapshot_json", Text, nullable=False), Column("created_at", String, nullable=False),
 )
 for _table in (rca_investigations, rca_incidents, rca_evidence_sources,
-               rca_evidence_records, rca_investigation_incidents, rca_incident_evidence,
-               rca_investigation_evidence, rca_investigation_findings, rca_finding_evidence,
+               rca_evidence_records, rca_investigation_incidents, rca_incident_sources,
+               rca_investigation_sources, rca_incident_evidence, rca_investigation_evidence,
+               rca_investigation_findings, rca_finding_evidence,
                rca_investigation_requests):
     Index(_table.name + "_created_at", _table.c.created_at)
 Index("rca_sources_owner_hash", rca_evidence_sources.c.userid, rca_evidence_sources.c.sha256)

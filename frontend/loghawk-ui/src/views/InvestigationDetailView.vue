@@ -55,7 +55,7 @@ const currentFindings=computed(()=>record.value?.findings.filter(f=>!record.valu
 const findingLinks=computed(()=>currentFindings.value.flatMap(f=>f.evidence.map(asObject)));
 const allLinks=computed(()=>[...(record.value?.evidence_links||[]),...(record.value?.incident_evidence||[]),...findingLinks.value]);
 const attachedCount=computed(()=>new Set(allLinks.value.map(link=>String(link.source_id))).size);
-const failedSources=computed(()=>record.value?.sources.filter(source=>source.status==="FAILED" && asObject(source).investigation_id===record.value?.id)||[]);
+const failedSources=computed(()=>record.value?.sources.filter(source=>source.status==="FAILED" && asObject(source).is_directly_linked===1)||[]);
 const readySources=computed(()=>record.value?.sources.filter(s=>s.status==="READY")||[]);
 const previewColumns=computed(()=>[...new Set(preview.value?.records.flatMap(row=>Object.keys(row.original_record))||[])].slice(0,6));
 const sourceName=(id:unknown)=>record.value?.sources.find(s=>s.id===id)?.name||String(id);
@@ -67,6 +67,12 @@ function attachmentRows(id:string){
     ...(record.value?.incident_evidence.filter(l=>l.source_id===id).map(l=>({id:String(l.id),incident_id:String(l.incident_id),label:incidentName(l.incident_id)+" · "+selectionText(l.selection),removable:true}))||[]),
     ...findingLinks.value.filter(l=>l.source_id===id).map(l=>({id:String(l.id),incident_id:null as string|null,label:"Finding · "+String(l.relationship)+" · "+selectionText(l.selection),removable:false})),
   ];
+}
+function canRemoveDirectSource(id:string){
+  const source=record.value?.sources.find(item=>item.id===id);
+  return !!source && source.status==="READY" && asObject(source).is_directly_linked===1
+    && !record.value?.evidence_links.some(link=>String(link.source_id)===id)
+    && !findingLinks.value.some(link=>String(link.source_id)===id);
 }
 function editType(id:string){const source=record.value?.sources.find(s=>s.id===id);if(source){editTypeId.value=id;editTypeValue.value=source.evidence_type;}}
 async function saveType(){
@@ -397,7 +403,7 @@ function findingEvidence(value:unknown){const ref=asObject(value);return `${sour
         <tr v-for="source in record.sources" :key="source.id"><td>{{source.name}}<p v-if="source.error" class="error">{{source.error}}</p></td><td>
           <template v-if="editTypeId===source.id && record.can_modify"><label>Evidence type<select v-model="editTypeValue" :disabled="busy"><option v-for="(label,key) in evidenceLabels" :key="key" :value="key">{{label}}</option></select></label><div class="actions"><button :disabled="busy" @click="saveType">Save</button><button :disabled="busy" @click="editTypeId=''">Cancel</button></div><p class="muted">Updates this source wherever it is referenced. Saved RCA snapshots stay unchanged.</p></template>
           <template v-else>{{evidenceLabels[source.evidence_type]||source.evidence_type}}<button v-if="record.can_modify && ['READY','FAILED'].includes(source.status)" :disabled="busy" @click="editType(source.id)">Change Type</button></template>
-        </td><td><span class="pill" :class="{failed:source.status==='FAILED'}">{{source.status}}</span></td><td>{{source.record_count}}</td><td><ul v-if="attachmentRows(source.id).length" class="compact-list"><li v-for="link in attachmentRows(source.id)" :key="link.id">{{link.label}}<button v-if="record.can_modify && link.removable" :disabled="busy" @click="removeEvidence(source.id,link.incident_id)">Remove Attachment</button><button v-else-if="record.can_modify" @click="tab='findings'">Revise Finding</button></li></ul><span v-else class="muted">Not attached</span></td><td><button :disabled="busy" @click="showSource(source.id)">{{source.status==='FAILED'?'Inspect error':'Preview / Select'}}</button><button v-if="record.can_modify && source.status==='READY' && asObject(source).investigation_id===record.id && !attachmentRows(source.id).length" :disabled="busy" :aria-label="'Remove imported source '+source.name" @click="removeSource(source.id)">Remove</button><button v-if="record.can_modify && failedSources.some(item=>item.id===source.id)" :disabled="busy" :aria-label="'Remove failed import '+source.name" @click="clearFailedSources(source.id)">Remove</button></td></tr>
+        </td><td><span class="pill" :class="{failed:source.status==='FAILED'}">{{source.status}}</span></td><td>{{source.record_count}}</td><td><ul v-if="attachmentRows(source.id).length" class="compact-list"><li v-for="link in attachmentRows(source.id)" :key="link.id">{{link.label}}<button v-if="record.can_modify && link.removable" :disabled="busy" @click="removeEvidence(source.id,link.incident_id)">Remove Attachment</button><button v-else-if="record.can_modify" @click="tab='findings'">Revise Finding</button></li></ul><span v-else class="muted">Not attached</span></td><td><button :disabled="busy" @click="showSource(source.id)">{{source.status==='FAILED'?'Inspect error':'Preview / Select'}}</button><button v-if="record.can_modify && canRemoveDirectSource(source.id)" :disabled="busy" :aria-label="'Remove imported source '+source.name" @click="removeSource(source.id)">Remove</button><button v-if="record.can_modify && failedSources.some(item=>item.id===source.id)" :disabled="busy" :aria-label="'Remove failed import '+source.name" @click="clearFailedSources(source.id)">Remove</button></td></tr>
       </tbody></table></div>
 
       <section v-if="preview" ref="previewPanel" tabindex="-1" class="card preview">

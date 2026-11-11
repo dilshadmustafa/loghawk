@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from uuid import uuid4
 from loghawk.database.database_layer import connect
 from loghawk.database.timestamps import utc_now
+from loghawk.api.services import evidence_membership as membership
 
 MANAGERS = {"Administrator", "Power User"}
 
@@ -73,33 +74,26 @@ def listing(user, offset=0, limit=50, query="", status=None, created_from=None, 
     return [decoded(r) for r in rows]
 
 def detail(key,user):
-    with connect("server") as db:
-        row=require(db,key,user)
-        result=decoded(row)
-        result["can_modify"]=row["userid"]==user["userid"] and row["status"]=="OPEN"
-        result["incidents"]=[decoded(r) for r in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? AND i.deleted_at IS NULL ORDER BY l.created_at",(key,)).fetchall()]
-        result["sources"]=[decoded(r) for r in db.execute("SELECT DISTINCT s.* FROM rca_evidence_sources s WHERE s.investigation_id=? OR s.id IN (SELECT source_id FROM rca_investigation_evidence WHERE investigation_id=?) OR s.id IN (SELECT e.source_id FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id WHERE i.investigation_id=?) OR s.id IN (SELECT e.source_id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=?) ORDER BY s.created_at",(key,key,key,key)).fetchall()]
-        result["sources"] = [source for source in result["sources"] if source["status"] not in {"DISMISSED", "REMOVED"}]
-        result["evidence_links"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_evidence WHERE investigation_id=?",(key,)).fetchall()]
-        result["incident_evidence"]=[decoded(r) for r in db.execute("SELECT e.* FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id JOIN rca_incidents incident ON incident.id=e.incident_id WHERE i.investigation_id=? AND incident.deleted_at IS NULL",(key,)).fetchall()]
-        result["findings"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_findings WHERE investigation_id=? ORDER BY created_at,id",(key,)).fetchall()]
-        for finding in result["findings"]:
-            finding["evidence"]=[decoded(r) for r in db.execute("SELECT * FROM rca_finding_evidence WHERE finding_id=?",(finding["id"],)).fetchall()]
-        result["requests"]=[dict(r) for r in db.execute("SELECT l.id,l.request_id,l.created_at,r.status,r.origin_software FROM rca_investigation_requests l LEFT JOIN llm_tool_requests r ON r.id=l.request_id WHERE l.investigation_id=? ORDER BY l.created_at DESC",(key,)).fetchall()]
-        for request in result["requests"]:
-            request["evidence_removed"]=request["status"] is None
-    return result
+ with connect("server") as db:
+  row=require(db,key,user);result=decoded(row);result["can_modify"]=row["userid"]==user["userid"] and row["status"]=="OPEN"
+  result["incidents"]=[decoded(r) for r in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? AND i.deleted_at IS NULL ORDER BY l.created_at",(key,)).fetchall()]
+  result["sources"]=[decoded(r) for r in db.execute("SELECT DISTINCT s.*,EXISTS(SELECT 1 FROM rca_investigation_sources m WHERE m.investigation_id=? AND m.source_id=s.id) AS is_directly_linked FROM rca_evidence_sources s WHERE s.id IN (SELECT source_id FROM rca_investigation_sources WHERE investigation_id=?) OR s.id IN (SELECT source_id FROM rca_investigation_evidence WHERE investigation_id=?) OR s.id IN (SELECT m.source_id FROM rca_incident_sources m JOIN rca_investigation_incidents i ON i.incident_id=m.incident_id WHERE i.investigation_id=?) OR s.id IN (SELECT e.source_id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=?) ORDER BY s.created_at",(key,key,key,key,key)).fetchall()]
+  result["sources"]=[s for s in result["sources"] if s["status"] not in {"DISMISSED","REMOVED"}]
+  result["evidence_links"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_evidence WHERE investigation_id=?",(key,)).fetchall()]
+  result["incident_evidence"]=[decoded(r) for r in db.execute("SELECT e.* FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id JOIN rca_incidents x ON x.id=e.incident_id WHERE i.investigation_id=? AND x.deleted_at IS NULL",(key,)).fetchall()]
+  result["findings"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_findings WHERE investigation_id=? ORDER BY created_at,id",(key,)).fetchall()]
+  for f in result["findings"]:f["evidence"]=[decoded(r) for r in db.execute("SELECT * FROM rca_finding_evidence WHERE finding_id=?",(f["id"],)).fetchall()]
+  result["requests"]=[dict(r) for r in db.execute("SELECT l.id,l.request_id,l.created_at,r.status,r.origin_software FROM rca_investigation_requests l LEFT JOIN llm_tool_requests r ON r.id=l.request_id WHERE l.investigation_id=? ORDER BY l.created_at DESC",(key,)).fetchall()]
+  for r in result["requests"]:r["evidence_removed"]=r["status"] is None
+ return result
 
 def source_access(db,key,source_id,user,write=False):
-    parent=require(db,key,user,write=write)
-    source=owned(db,"rca_evidence_sources",source_id,parent["userid"])
-    if source["investigation_id"] != key:
-        linked=db.execute("SELECT id FROM rca_investigation_evidence WHERE investigation_id=? AND source_id=?",(key,source_id)).fetchone()
-        indirect=db.execute("SELECT e.id FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id WHERE i.investigation_id=? AND e.source_id=?",(key,source_id)).fetchone()
-        finding=db.execute("SELECT e.id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=? AND e.source_id=?",(key,source_id)).fetchone()
-        if not linked and not indirect and not finding and not write:
-            raise PermissionError("Source is not attached to this investigation.")
-    return source
+ parent=require(db,key,user,write=write);source=owned(db,"rca_evidence_sources",source_id,parent["userid"])
+ direct=membership.exists(db,"investigation",key,source_id)
+ incident=db.execute("SELECT m.id FROM rca_incident_sources m JOIN rca_investigation_incidents i ON i.incident_id=m.incident_id WHERE i.investigation_id=? AND m.source_id=? LIMIT 1",(key,source_id)).fetchone()
+ finding=db.execute("SELECT e.id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=? AND e.source_id=? LIMIT 1",(key,source_id)).fetchone()
+ if not direct and not incident and not finding:raise PermissionError("Source is not linked to this investigation or one of its incidents.")
+ return source
 
 def preview(key,source_id,user,offset=0,limit=100):
     with connect("server") as db:
@@ -121,23 +115,37 @@ def select_records(db,source,selection):
     return numbers
 
 def attach(key,user,source_id,selection=None,incident_id=None):
-    with connect("server") as db:
-        parent=require(db,key,user,write=True)
-        source=owned(db,"rca_evidence_sources",source_id,parent["userid"])
-        selected=select_records(db,source,selection)
-        if incident_id:
-            owned(db,"rca_incidents",incident_id,parent["userid"])
-            if not db.execute("SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?",(key,incident_id)).fetchone(): raise ValueError("Attach the incident to this investigation first.")
-            table,column,target="rca_incident_evidence","incident_id",incident_id
-        else: table,column,target="rca_investigation_evidence","investigation_id",key
-        payload=encode(selected)
-        existing=db.execute(f"SELECT id FROM {table} WHERE {column}=? AND source_id=?",(target,source_id)).fetchone()
-        if existing:
-            # Selection changes affect future requests only; saved snapshots are immutable.
-            db.execute(f"UPDATE {table} SET selection_json=? WHERE {column}=? AND source_id=?",(payload,target,source_id))
-        else:
-            db.execute(f"INSERT INTO {table} (id,{column},source_id,selection_json,created_at) VALUES (?,?,?,?,?)",(uuid4().hex,target,source_id,payload,utc_now()))
-    return detail(key,user)
+ with connect("server") as db:
+  parent=require(db,key,user,write=True);source=owned(db,"rca_evidence_sources",source_id,parent["userid"]);selected=select_records(db,source,selection)
+  if incident_id:
+   owned(db,"rca_incidents",incident_id,parent["userid"])
+   if not db.execute("SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?",(key,incident_id)).fetchone():raise ValueError("Attach the incident to this investigation first.")
+   table,column,target="rca_incident_evidence","incident_id",incident_id;membership.ensure(db,"incident",incident_id,source_id)
+  else:table,column,target="rca_investigation_evidence","investigation_id",key;membership.ensure(db,"investigation",key,source_id)
+  payload=encode(selected);old=db.execute(f"SELECT id FROM {table} WHERE {column}=? AND source_id=?",(target,source_id)).fetchone()
+  if old:db.execute(f"UPDATE {table} SET selection_json=? WHERE id=?",(payload,old["id"]))
+  else:db.execute(f"INSERT INTO {table} (id,{column},source_id,selection_json,created_at) VALUES (?,?,?,?,?)",(uuid4().hex,target,source_id,payload,utc_now()))
+ return detail(key,user)
+
+def _ensure_incident_source_record(db, incident_id, source_id, record_number, now):
+    membership.ensure(db, "incident", incident_id, source_id, now)
+    link = db.execute(
+        "SELECT id,selection_json FROM rca_incident_evidence WHERE incident_id=? AND source_id=?",
+        (incident_id, source_id),
+    ).fetchone()
+    if link:
+        selected = json.loads(link["selection_json"])
+        if selected is None or record_number in selected:
+            return
+        selected = sorted(set([*selected, record_number]))
+        db.execute("UPDATE rca_incident_evidence SET selection_json=? WHERE id=?",
+                   (encode(selected), link["id"]))
+    else:
+        db.execute(
+            "INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)",
+            (uuid4().hex, incident_id, source_id, encode([record_number]), now),
+        )
+
 
 def add_incident(key,user,source_id,record_number):
     with connect("server") as db:
@@ -163,7 +171,7 @@ def add_incident(key,user,source_id,record_number):
             incident,now=uuid4().hex,utc_now()
             db.execute("INSERT INTO rca_incidents (id,userid,source_incident_id,primary_details_json,created_at,updated_at) VALUES (?,?,?,?,?,?)",(incident,parent["userid"],str(details.get("incident_id") or ""),encode(details),now,now))
             db.execute("INSERT INTO rca_investigation_incidents (id,investigation_id,incident_id,created_at) VALUES (?,?,?,?)",(uuid4().hex,key,incident,now))
-            db.execute("INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)",(uuid4().hex,incident,source_id,encode([record_number]),now))
+        _ensure_incident_source_record(db, incident, source_id, record_number, utc_now())
     return detail(key,user)
 
 def add_incidents(key, user, source_id, record_numbers):
@@ -178,7 +186,7 @@ def add_incidents(key, user, source_id, record_numbers):
     with connect("server") as db:
         parent = require(db, key, user, write=True)
         source = owned(db, "rca_evidence_sources", source_id, parent["userid"])
-        if source["investigation_id"] != key or source["status"] != "READY" or source["evidence_type"] != "stage-c":
+        if not membership.exists(db,"investigation",key,source_id) or source["status"] != "READY" or source["evidence_type"] != "stage-c":
             raise ValueError("Choose a ready Stage C incident source imported into this investigation.")
         slots = ",".join("?" for _ in numbers)
         rows = db.execute(f"SELECT * FROM rca_evidence_records WHERE source_id=? AND record_number IN ({slots})", (source_id, *numbers)).fetchall()
@@ -218,7 +226,7 @@ def add_incidents(key, user, source_id, record_numbers):
                 incident_id = uuid4().hex
                 db.execute("INSERT INTO rca_incidents (id,userid,source_incident_id,primary_details_json,created_at,updated_at) VALUES (?,?,?,?,?,?)", (incident_id, parent["userid"], str(details["incident_id"]), encode(details), now, now))
                 db.execute("INSERT INTO rca_investigation_incidents (id,investigation_id,incident_id,created_at) VALUES (?,?,?,?)", (uuid4().hex, key, incident_id, now))
-                db.execute("INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)", (uuid4().hex, incident_id, source_id, encode([number]), now))
+            _ensure_incident_source_record(db, incident_id, source_id, number, now)
             incident_ids.append(incident_id)
     return {"incident_ids": incident_ids, "created_or_linked": len(incident_ids)}
 
@@ -331,97 +339,37 @@ def add_finding(key,user,content,evidence,supersedes_id=None,request_id=None):
             db.execute("INSERT INTO rca_finding_evidence (id,finding_id,source_id,relationship,selection_json,created_at) VALUES (?,?,?,?,?,?)",(uuid4().hex,finding,source["id"],item["relationship"],encode(selected),now))
     return detail(key,user)
 
-def remove_ready_source(key, user, source_id):
-    """Hide an unused successful import without deleting its records or snapshot."""
-    with connect("server") as db:
-        require(db, key, user, write=True)
-        source = owned(db, "rca_evidence_sources", source_id, user["userid"])
-        if source["investigation_id"] != key or source["status"] != "READY":
-            raise ValueError("Only ready sources imported into this investigation can be removed.")
-        referenced = any(
-            db.execute(f"SELECT id FROM {table} WHERE source_id=?", (source_id,)).fetchone()
-            for table in ("rca_investigation_evidence", "rca_incident_evidence", "rca_finding_evidence")
-        )
-        # Incident primary records remain references even after their evidence link is removed.
-        record_ids = {r["id"] for r in db.execute(
-            "SELECT id FROM rca_evidence_records WHERE source_id=?", (source_id,)).fetchall()}
-        incident_reference = any(
-            json.loads(r["primary_details_json"]).get("source_record_id") in record_ids
-            for r in db.execute("SELECT primary_details_json FROM rca_incidents WHERE userid=?",
-                                (user["userid"],)).fetchall()
-        )
-        if referenced or incident_reference:
-            reasons = []
-            if referenced:
-                reasons.append("it is linked by an attachment or finding")
-            if incident_reference:
-                reasons.append(
-                    "one of its records is used as an incident's primary evidence"
-                )
-            raise ValueError(
-                "This source cannot be removed because "
-                + " and ".join(reasons)
-                + ". Remove the related attachment or revise the finding first. "
-                "Incident primary evidence must remain available."
-            )
-        db.execute("UPDATE rca_evidence_sources SET status='REMOVED',updated_at=? WHERE id=?",
-                   (utc_now(), source_id))
-    return {"source_id": source_id}
+def remove_ready_source(key,user,source_id):
+ with connect("server") as db:
+  require(db,key,user,write=True);source=owned(db,"rca_evidence_sources",source_id,user["userid"])
+  if source["status"]!="READY" or not membership.exists(db,"investigation",key,source_id):raise ValueError("Only a ready source linked to this investigation can be removed.")
+  attached=db.execute("SELECT id FROM rca_investigation_evidence WHERE investigation_id=? AND source_id=?",(key,source_id)).fetchone()
+  finding=db.execute("SELECT e.id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=? AND e.source_id=? LIMIT 1",(key,source_id)).fetchone()
+  if attached or finding:raise ValueError("Remove this investigation's attachment or revise its finding first. Other links remain unchanged.")
+  membership.remove(db,"investigation",key,source_id)
+ return {"source_id":source_id}
 
+def restore_ready_source(key,user,source_id):
+ with connect("server") as db:
+  require(db,key,user,write=True);source=owned(db,"rca_evidence_sources",source_id,user["userid"])
+  if source["status"]!="READY":raise ValueError("Only a ready source can be restored.")
+  membership.ensure(db,"investigation",key,source_id)
+ return {"source_id":source_id}
 
-def restore_ready_source(key, user, source_id):
-    """Undo only successful-import removal, never promote a failed import to READY."""
-    with connect("server") as db:
-        require(db, key, user, write=True)
-        source = owned(db, "rca_evidence_sources", source_id, user["userid"])
-        if source["investigation_id"] != key or source["status"] != "REMOVED":
-            raise ValueError("This removed source cannot be restored. Refresh the investigation.")
-        db.execute("UPDATE rca_evidence_sources SET status='READY',updated_at=? WHERE id=?",
-                   (utc_now(), source_id))
-    return {"source_id": source_id}
-
-
-def clear_failed_sources(key, user, source_id=None):
-    """Dismiss unreferenced failed imports; retain snapshots and failure details."""
-    with connect("server") as db:
-        require(db, key, user, write=True)
-        rows = db.execute(
-            "SELECT id FROM rca_evidence_sources "
-            "WHERE investigation_id=? AND userid=? AND status='FAILED'",
-            (key, user["userid"]),
-        ).fetchall()
-        cleared, skipped = [], []
-        for row in rows:
-            sid = row["id"]
-            if source_id is not None and sid != source_id:
-                continue
-            referenced = any(
-                db.execute(
-                    f"SELECT id FROM {table} WHERE source_id=?", (sid,)
-                ).fetchone()
-                for table in (
-                    "rca_investigation_evidence",
-                    "rca_incident_evidence",
-                    "rca_finding_evidence",
-                )
-            )
-            if referenced:
-                skipped.append(sid)
-                continue
-            db.execute(
-                "UPDATE rca_evidence_sources "
-                "SET status='DISMISSED',updated_at=? WHERE id=?",
-                (utc_now(), sid),
-            )
-            cleared.append(sid)
-    return {"cleared": cleared, "skipped": skipped}
-
+def clear_failed_sources(key,user,source_id=None):
+ with connect("server") as db:
+  require(db,key,user,write=True)
+  rows=db.execute("SELECT s.id FROM rca_evidence_sources s JOIN rca_investigation_sources m ON m.source_id=s.id WHERE m.investigation_id=? AND s.userid=? AND s.status='FAILED'",(key,user["userid"])).fetchall()
+  cleared=[]
+  for r in rows:
+   if source_id is None or r["id"]==source_id:membership.remove(db,"investigation",key,r["id"]);cleared.append(r["id"])
+ return {"cleared":cleared,"skipped":[]}
 
 def close(key,user):
     with connect("server") as db:
         require(db,key,user,write=True)
         active=db.execute("SELECT r.id FROM llm_tool_requests r JOIN rca_investigation_requests l ON r.id=l.request_id WHERE l.investigation_id=? AND r.status IN ('PROCESSING','PENDING','EXPLAINING')",(key,)).fetchone()
-        importing=db.execute("SELECT id FROM rca_evidence_sources WHERE investigation_id=? AND status='IMPORTING'",(key,)).fetchone()
+        importing=db.execute("SELECT s.id FROM rca_evidence_sources s JOIN rca_investigation_sources m ON m.source_id=s.id WHERE m.investigation_id=? AND s.status='IMPORTING'",(key,)).fetchone()
         if active or importing:raise ValueError("Finish or cancel active requests/imports before closing this investigation.")
         db.execute("UPDATE rca_investigations SET status='CLOSED',updated_at=? WHERE id=?",(utc_now(),key))
     return detail(key,user)
