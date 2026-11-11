@@ -22,7 +22,7 @@ const entryName=(value:string)=>value.slice(uri.value.length) || value;
 watch(s3selected,()=>{reviewed.value=false;reviewedFiles.value=[];},{deep:true});
 function resetS3(){bucket.value="";uri.value="";s3files.value=[];s3folders.value=[];s3selected.value=[];nextToken.value=null;reviewed.value=false;reviewedFiles.value=[];s3Message.value="";}
 
-const selected=ref<number[]>([]), allRecords=ref(false), target=ref(""), mapping=ref("{}"), parseFormat=ref("json");
+const selected=ref<number[]>([]), allRecords=ref(false), mapping=ref("{}"), parseFormat=ref("json");
 const finding=ref(""), supersedes=ref(""), aiRequest=ref(""), callId=ref("");
 const pretty=(value:unknown)=>JSON.stringify(value,null,2);
 
@@ -34,14 +34,10 @@ const undoItems=ref<UndoItem[]>([]), editTypeId=ref(""), editTypeValue=ref("othe
 let nextUndoId=0;
 type FindingReference = {source_id:string; relationship:"supports"|"contradicts"; rows:string};
 const tab=ref<Tab>("overview"), addOpen=ref(false), closeOpen=ref(false);
-const incidentAddOpen=ref(false), incidentSource=ref("s3"), incidentFiles=ref<File[]>([]);
-const incidentSourceId=ref(""), incidentPage=ref<InvestigationPreview|null>(null), incidentOffset=ref(0);
-const incidentSelected=ref<Record<number,import("../types/api").InvestigationRecord>>({});
-const incidentS3Selection=ref<string[]>([]), incidentReviewFiles=ref<InvestigationS3File[]>([]), incidentReviewReady=ref(false);
 const importMode=ref("s3"), importResults=ref<ImportResult[]>([]), ignoredFiles=ref(0);
 const loading=ref(false), working=ref(""), previewOffset=ref(0), pageStarts=ref<number[]>([]);
 const previewPanel=ref<HTMLElement|null>(null), findingReferences=ref<FindingReference[]>([]);
-const copyNotice=ref(""), selectionDirty=ref(false), pendingIncident=ref("");
+const copyNotice=ref(""), selectionDirty=ref(false);
 let generation=0;
 const evidenceLabels:Record<string,string>={"stage-a":"Stage A · Features","stage-b":"Stage B · Anomalies","stage-c":"Stage C · Incidents","raw-logs":"Raw logs",other:"Other"};
 const tabs=computed(()=>[
@@ -82,8 +78,6 @@ async function saveType(){
   }
 }
 function syncRemovedPreview(){
-  if(target.value&&!record.value?.incidents.some(i=>i.id===target.value))target.value="";
-  if(pendingIncident.value&&!record.value?.incidents.some(i=>i.id===pendingIncident.value))pendingIncident.value="";
   if(preview.value&&!record.value?.sources.some(s=>s.id===preview.value?.id)){
     preview.value=null;sourceId.value="";selected.value=[];allRecords.value=false;selectionDirty.value=false;
   }else if(preview.value&&!selectionDirty.value)restoreSelection();
@@ -127,13 +121,11 @@ async function undoRemoval(item:UndoItem){
   if(saved&&record.value?.id===owner){undoItems.value=undoItems.value.filter(entry=>entry.id!==item.id);syncRemovedPreview();}
 }
 function restoreSelection(){
-  const link=target.value ? record.value?.incident_evidence.find(l=>l.source_id===sourceId.value && l.incident_id===target.value)
-    :record.value?.evidence_links.find(l=>l.source_id===sourceId.value);
+  const link=record.value?.evidence_links.find(l=>l.source_id===sourceId.value);
   selected.value=Array.isArray(link?.selection)?link.selection.filter((n):n is number=>typeof n==="number"):[];
   allRecords.value=!!link && link.selection===null;
   selectionDirty.value=false;
 }
-watch(target,restoreSelection);
 function openEvidence(){tab.value="evidence";addOpen.value=true;}
 async function copy(value:string){try{await navigator.clipboard.writeText(value);copyNotice.value="Copied to clipboard.";}catch{copyNotice.value="Clipboard unavailable. Select and copy the ID from Technical details."}}
 function moveTab(event:KeyboardEvent){
@@ -150,10 +142,10 @@ async function load(){
 }
 watch(()=>route.params.id,()=>{
   undoItems.value=[];editTypeId.value="";
-  generation++;record.value=null;preview.value=null;sourceId.value="";selected.value=[];allRecords.value=false;target.value="";
+  generation++;record.value=null;preview.value=null;sourceId.value="";selected.value=[];allRecords.value=false;
   error.value="";notice.value="";copyNotice.value="";tab.value="overview";addOpen.value=false;closeOpen.value=false;
   files.value=[];ignoredFiles.value=0;importResults.value=[];finding.value="";findingReferences.value=[];supersedes.value="";aiRequest.value="";
-  sharedSource.value="";sharedIncident.value="";callId.value="";recordPath.value="";evidenceType.value="other";pendingIncident.value="";
+  sharedSource.value="";sharedIncident.value="";callId.value="";recordPath.value="";evidenceType.value="other";
   pageStarts.value=[];previewOffset.value=0;selectionDirty.value=false;resetS3();void load();
 },{immediate:true});
 async function action(fn:(id:string)=>Promise<unknown>, message="Saved."){
@@ -165,8 +157,7 @@ async function action(fn:(id:string)=>Promise<unknown>, message="Saved."){
     if(result && typeof result==="object" && "sources" in result && Array.isArray(result.sources) && !("problem" in result)){
       importResults.value=result.sources.map(asObject).map(r=>({id:String(r.id),name:String(r.name),status:String(r.status),error:r.error?String(r.error):undefined}));
       const failed=importResults.value.filter(r=>r.status==="FAILED").length;
-      const nextStep=incidentAddOpen.value?"Select an imported file to preview its records and create incidents.":"Preview a source to attach records.";
-      notice.value=`Import finished: ${importResults.value.length-failed} ready/existing, ${failed} failed. ${nextStep}`;
+      notice.value=`Import finished: ${importResults.value.length-failed} ready/existing, ${failed} failed. Preview a source to attach records.`;
     }else notice.value=message;
     await load();return true;
   }catch(e){if(String(route.params.id)===id){error.value=String(e);await load();}return false;}
@@ -187,7 +178,7 @@ async function showSource(id:string,offset=0){
   try{
     const value=await previewInvestigationSource(owner,id,offset);
     if(String(route.params.id)!==owner)return;
-    if(sourceId.value!==id){pageStarts.value=[];sourceId.value=id;target.value=pendingIncident.value;pendingIncident.value="";restoreSelection();}
+    if(sourceId.value!==id){pageStarts.value=[];sourceId.value=id;restoreSelection();}
     preview.value=value;previewOffset.value=offset;mapping.value=pretty(value.mapping);parseFormat.value=value.format;
     tab.value="evidence";await nextTick();previewPanel.value?.focus({preventScroll:true});previewPanel.value?.scrollIntoView({block:"nearest"});
   }catch(e){if(String(route.params.id)===owner)error.value=String(e);}
@@ -243,7 +234,7 @@ function importReviewed(){
 
 watch([addOpen,importMode],()=>{if(addOpen.value && importMode.value==="s3" && !buckets.value.length)void loadBuckets();});
 async function attach(){
-  if(await action(id=>investigationAction(id,"evidence",{source_id:sourceId.value,records:allRecords.value?null:selected.value,incident_id:target.value||null}),"Evidence selection saved for future RCA requests."))selectionDirty.value=false;
+  if(await action(id=>investigationAction(id,"evidence",{source_id:sourceId.value,records:allRecords.value?null:selected.value}),"Evidence selection saved for future RCA requests."))selectionDirty.value=false;
 }
 async function reparse(){
   if(await action(id=>investigationAction(id,`sources/${sourceId.value}/reparse`,{format:parseFormat.value,record_path:recordPath.value||null}),"Parsing finished. Review the source status."))await showSource(sourceId.value,0);
@@ -267,62 +258,6 @@ async function addFinding(){
 async function closeInvestigation(){
   if(await action(id=>investigationAction(id,"close",{}),"Investigation closed. Saved evidence and history remain available."))closeOpen.value=false;
 }
-const incidentSources=computed(()=>record.value?.sources.filter(s=>s.status==="READY"&&s.evidence_type==="stage-c"&&asObject(s).investigation_id===record.value?.id)||[]);
-const selectedIncidentRows=computed(()=>Object.values(incidentSelected.value));
-const invalidIncidentRows=computed(()=>selectedIncidentRows.value.filter(row=>incidentMissing(row).length));
-function beginAddIncident(){
-  incidentAddOpen.value=!incidentAddOpen.value;
-  if(!incidentAddOpen.value)return;
-  incidentSource.value="s3";incidentFiles.value=[];incidentSourceId.value="";incidentPage.value=null;incidentOffset.value=0;incidentSelected.value={};
-  incidentS3Selection.value=[];incidentReviewFiles.value=[];incidentReviewReady.value=false;
-  if(!buckets.value.length)void loadBuckets();
-}
-function incidentValue(row:import("../types/api").InvestigationRecord,field:string){
-  const key=incidentPage.value?.mapping?.[field]||field;return row.original_record[key];
-}
-function incidentMissing(row:import("../types/api").InvestigationRecord){
-  return ["incident_id","start_time","end_time"].filter(field=>{const value=incidentValue(row,field);return value==null||!String(value).trim();});
-}
-function toggleIncidentRecord(row:import("../types/api").InvestigationRecord,event:Event){
-  const checked=(event.target as HTMLInputElement).checked,next={...incidentSelected.value};
-  if(checked)next[row.record_number]=row;else delete next[row.record_number];incidentSelected.value=next;
-}
-async function loadIncidentPage(offset=0){
-  if(!record.value||!incidentSourceId.value)return;
-  const owner=record.value.id;busy.value=true;working.value="Loading incident records…";error.value="";
-  try{const page=await previewInvestigationSource(owner,incidentSourceId.value,offset);if(String(route.params.id)===owner){incidentPage.value=page;incidentOffset.value=offset;}}
-  catch(e){if(String(route.params.id)===owner)error.value=String(e);}finally{busy.value=false;working.value="";}
-}
-async function chooseIncidentSource(sourceId:string){incidentSourceId.value=sourceId;incidentSelected.value={};incidentPage.value=null;await loadIncidentPage(0);}
-function setIncidentSourceFromResults(){const ready=importResults.value.filter(item=>item.status==="READY");const latest=ready[ready.length-1];if(latest){incidentSourceId.value=latest.id;void loadIncidentPage(0);}}
-function chooseIncidentFiles(event:Event){
-  const candidates=Array.from((event.target as HTMLInputElement).files||[]);
-  incidentFiles.value=candidates.filter(file=>/\.(csv|parquet|json|jsonl|log|txt)$/i.test(file.name));
-}
-async function uploadIncidentLocal(){
-  if(!incidentFiles.value.length)return;
-  if(await action(id=>uploadInvestigationFiles(id,incidentFiles.value,"stage-c",""),"Stage C incident files imported.")){incidentFiles.value=[];setIncidentSourceFromResults();}
-}
-async function reviewIncidentS3(){
-  if(!record.value||!incidentS3Selection.value.length)return;busy.value=true;error.value="";incidentReviewReady.value=false;incidentReviewFiles.value=[];
-  try{const result=await resolveInvestigationS3(record.value.id,[...incidentS3Selection.value]);incidentReviewFiles.value=result.files;incidentReviewReady.value=!!result.files.length;}
-  catch(e){error.value=String(e);}finally{busy.value=false;}
-}
-async function importIncidentS3(){
-  if(!incidentReviewReady.value||!incidentReviewFiles.value.length)return;
-  const objects=incidentReviewFiles.value.map(({uri,etag})=>({uri,etag}));
-  if(await action(id=>investigationAction(id,"sources/s3",{objects,evidence_type:"stage-c",record_path:null}),"Stage C incident files imported.")){
-    incidentS3Selection.value=[];incidentReviewFiles.value=[];incidentReviewReady.value=false;setIncidentSourceFromResults();
-  }
-}
-function selectIncidentPage(){const next={...incidentSelected.value};let remaining=Math.max(0,500-Object.keys(next).length);for(const row of incidentPage.value?.records||[]){if(next[row.record_number])continue;if(remaining<=0)break;next[row.record_number]=row;remaining--;}incidentSelected.value=next;}
-async function createSelectedIncidents(){
-  if(!incidentSourceId.value||!selectedIncidentRows.value.length||invalidIncidentRows.value.length)return;
-  if(!window.confirm(`Create or link ${selectedIncidentRows.value.length} selected incident(s)?`))return;
-  const ok=await action(id=>investigationAction(id,"incidents/batch",{source_id:incidentSourceId.value,record_numbers:selectedIncidentRows.value.map(row=>row.record_number)}),"Selected incidents created or linked.");
-  if(ok){incidentSelected.value={};incidentAddOpen.value=false;incidentSourceId.value="";incidentPage.value=null;}
-}
-function attachToIncident(id:string){pendingIncident.value=id;target.value=id;tab.value="evidence";}
 async function clearFailedSources(selectedSourceId?:string){
   if(busy.value||!record.value?.can_modify)return;
   const count=selectedSourceId?1:failedSources.value.length;
@@ -471,7 +406,6 @@ function findingEvidence(value:unknown){const ref=asObject(value);return `${sour
         <div v-if="preview.status==='FAILED'" class="alert failure"><h4>Import failed</h4><p>{{preview.error||'The source could not be parsed.'}}</p><fieldset v-if="record.can_modify" :disabled="busy"><label>Parse format<select v-model="parseFormat"><option v-for="format in ['csv','parquet','json','jsonl','log','txt']" :key="format">{{format}}</option></select></label><label>Nested JSON path (optional)<input v-model="recordPath" placeholder="/incidents" /></label><button @click="reparse">Retry Parsing Preserved Source</button></fieldset></div>
         <details v-if="preview.status==='READY' && record.can_modify"><summary>Advanced: column mapping</summary><fieldset :disabled="busy"><p>Map standard incident fields to source columns, for example {"incident_id":"case_id"}. Mapping becomes fixed after incident evidence is linked.</p><label>Mapping JSON<textarea v-model="mapping" rows="4" /></label><button @click="saveMapping">Save Column Mapping</button></fieldset></details>
         <fieldset v-if="record.can_modify && preview.status==='READY'" :disabled="busy" class="selection-controls">
-          <label>Attach to<select v-model="target"><option value="">Investigation directly</option><option v-for="incident in record.incidents" :key="incident.id" :value="incident.id">{{incident.source_incident_id||incident.id}}</option></select></label>
           <label class="check"><input v-model="allRecords" type="checkbox" @change="selectionDirty=true" />All records in this source</label>
           <button :disabled="allRecords||!preview.records.length" @click="selectPage">Select This Page</button><button :disabled="allRecords||!selected.length" @click="selected=[];selectionDirty=true">Clear Row Selection</button>
         </fieldset>
@@ -485,54 +419,13 @@ function findingEvidence(value:unknown){const ref=asObject(value);return `${sour
     </section>
 
     <section v-show="tab==='incidents'" id="panel-incidents" role="tabpanel" aria-labelledby="tab-incidents" class="stack">
-      <div class="section-heading"><div><h2>Incidents</h2><p class="muted">An investigation can include multiple incidents. Each incident can have multiple evidence sources.</p></div><button v-if="record.can_modify" class="primary" :disabled="busy" @click="beginAddIncident">{{incidentAddOpen?'Cancel Add Incident':'Add Incident'}}</button></div>
-      <section v-if="incidentAddOpen && record.can_modify" class="card stack">
-        <h3>Add Incident</h3>
-        <label>Source<select v-model="incidentSource" @change="incidentSourceId='';incidentPage=null;incidentSelected={};incidentS3Selection=[];incidentReviewFiles=[];incidentReviewReady=false"><option value="s3">Internal S3</option><option value="local">Local files / Folder</option></select></label>
-        <label>Evidence type<select disabled><option>Stage C Incidents</option></select></label>
-        <section v-if="incidentSource==='local'" class="stack">
-          <label>Choose files<input type="file" multiple accept=".csv,.parquet,.json,.jsonl,.log,.txt" @change="chooseIncidentFiles" /></label>
-          <label>Choose a folder<input type="file" multiple webkitdirectory accept=".csv,.parquet,.json,.jsonl,.log,.txt" @change="chooseIncidentFiles" /></label>
-          <p>{{incidentFiles.length}} supported file(s) selected.</p>
-          <button class="primary" :disabled="busy||!incidentFiles.length" @click="uploadIncidentLocal">Import Files</button>
-        </section>
-        <section v-else class="stack">
-          <div class="s3-toolbar"><label>Input bucket<select v-model="bucket" @change="changeBucket"><option value="">Select an input bucket</option><option v-for="name in buckets" :key="name" :value="name">{{name}}</option></select></label><button :disabled="busy" @click="loadBuckets">Refresh Buckets</button></div>
-          <template v-if="bucket">
-            <nav class="s3-breadcrumbs" aria-label="S3 folder location"><button @click="browseS3(browseRoot)">{{bucket}}</button><span v-for="crumb in breadcrumbs" :key="crumb.uri"> / <button @click="browseS3(crumb.uri)">{{crumb.name}}</button></span></nav>
-            <div class="s3-toolbar"><button :disabled="uri===browseRoot||busy" @click="browseS3(parentFolder)">Up one folder</button><button :disabled="busy" @click="browseS3(uri)">Refresh Folder</button><button :disabled="incidentS3Selection.includes(uri)||busy" @click="incidentS3Selection.push(uri)">Select This Folder</button></div>
-            <p class="s3-location">{{uri}}</p><div class="s3-table-wrap"><table class="s3-table"><thead><tr><th>Select</th><th>Name</th><th>Type</th><th>Size</th></tr></thead><tbody>
-              <tr v-for="folder in s3folders" :key="folder.uri"><td><input v-model="incidentS3Selection" type="checkbox" :value="folder.uri" /></td><td><button @click="browseS3(folder.uri)">{{entryName(folder.uri)}}</button></td><td>Folder</td><td>—</td></tr>
-              <tr v-for="file in s3files" :key="file.uri"><td><input v-model="incidentS3Selection" type="checkbox" :value="file.uri" /></td><td>{{entryName(file.uri)}}</td><td>{{file.uri.split('.').pop()?.toUpperCase()}}</td><td>{{formatSize(file.size)}}</td></tr>
-            </tbody></table></div>
-            <button v-if="nextToken" :disabled="busy" @click="browseS3(uri,true)">Load More Entries</button>
-            <button :disabled="busy||!incidentS3Selection.length" @click="reviewIncidentS3">Review Selected Files</button>
-            <div v-if="incidentReviewReady"><h4>Review import · {{incidentReviewFiles.length}} file(s)</h4><ul><li v-for="file in incidentReviewFiles" :key="file.uri">{{file.uri}} · {{formatSize(file.size)}} <button @click="incidentReviewFiles=incidentReviewFiles.filter(item=>item.uri!==file.uri)">Remove</button></li></ul><button class="primary" :disabled="busy||!incidentReviewFiles.length" @click="importIncidentS3">Import Files</button></div>
-          </template>
-        </section>
-        <section v-if="incidentSources.length" class="card">
-          <h4>Imported Files</h4><p>Select a file to preview its records and create incidents.</p>
-          <ul class="result-list"><li v-for="source in incidentSources" :key="source.id">
-            <strong>{{source.name}}</strong><br><span class="muted">{{source.original_uri||'Local upload'}} · {{source.record_count}} records</span>
-            <button :disabled="busy" @click="chooseIncidentSource(source.id)">{{incidentSourceId===source.id&&incidentPage?'Previewing':'Preview Records'}}</button>
-          </li></ul>
-        </section>
-        <p v-else class="muted">Imported Stage C files will appear here. Import a file to preview its records.</p>
-        <section v-if="incidentPage" class="card preview"><h4>Select incident records</h4><p>Selected records must include incident_id, start_time and end_time.</p>
-          <div class="table-wrap"><table><thead><tr><th>Select</th><th>Record</th><th>Incident ID</th><th>Start</th><th>End</th><th>Validation</th></tr></thead><tbody>
-            <tr v-for="row in incidentPage.records" :key="row.record_number"><td><input type="checkbox" :checked="!!incidentSelected[row.record_number]" :disabled="busy||(Object.keys(incidentSelected).length>=500&&!incidentSelected[row.record_number])" @change="toggleIncidentRecord(row,$event)" /></td><td>{{row.record_number}}</td><td>{{display(incidentValue(row,'incident_id'))}}</td><td>{{display(incidentValue(row,'start_time'))}}</td><td>{{display(incidentValue(row,'end_time'))}}</td><td><span v-if="incidentMissing(row).length" class="pill failed">Missing {{incidentMissing(row).join(', ')}}</span><span v-else class="pill">Valid</span></td></tr>
-          </tbody></table></div>
-          <div class="actions"><button :disabled="!incidentPage.records.length" @click="selectIncidentPage">Select This Page</button><button :disabled="!selectedIncidentRows.length" @click="incidentSelected={}">Clear Selection</button><button :disabled="busy||incidentOffset===0" @click="loadIncidentPage(Math.max(0,incidentOffset-100))">Previous</button><button :disabled="busy||incidentPage.next_offset==null" @click="loadIncidentPage(incidentPage.next_offset||0)">Next</button></div>
-          <p>Selected: {{selectedIncidentRows.length}} / 500 · Valid: {{selectedIncidentRows.length-invalidIncidentRows.length}} · Incomplete: {{invalidIncidentRows.length}}</p><p v-if="invalidIncidentRows.length" class="error">Deselect incomplete records or correct the source before creating incidents.</p>
-          <button class="primary" :disabled="busy||!selectedIncidentRows.length||!!invalidIncidentRows.length" @click="createSelectedIncidents">Create Incident(s)</button>
-        </section>
-      </section>
-      <div v-if="!record.incidents.length && !incidentAddOpen" class="card empty"><h3>No incidents linked</h3><p>Use Add Incident to import a Stage C source, preview its records, and create incidents. You can also investigate evidence directly without creating an incident.</p></div>
+      <div class="section-heading"><div><h2>Incidents</h2><p class="muted">Link existing incidents to this investigation, or unlink them. Manage incident evidence from the Evidence tab or the incident detail page.</p></div></div>
+      <div v-if="!record.incidents.length" class="card empty"><h3>No incidents linked</h3><p>Create an incident first, then link it here using its internal ID. <RouterLink to="/rca/incidents/new">Create Incident</RouterLink></p></div>
       <article v-for="incident in record.incidents" :key="incident.id" class="card">
         <div class="section-heading"><h3>{{incident.source_incident_id||'User-selected incident'}}</h3><span class="pill">{{display(incident.primary_details.max_severity)}}</span></div>
         <dl class="context-grid"><div><dt>Start</dt><dd>{{date(incident.primary_details.start_time)}}</dd></div><div><dt>End</dt><dd>{{date(incident.primary_details.end_time)}}</dd></div><div><dt>Primary service</dt><dd>{{display(incident.primary_details.primary_service)}}</dd></div><div><dt>Services</dt><dd>{{display(incident.primary_details.services)}}</dd></div></dl>
-        <h4>Attached evidence</h4><ul class="compact-list"><li v-for="link in record.incident_evidence.filter(l=>l.incident_id===incident.id)" :key="String(link.id)"><button :disabled="busy" @click="showSource(String(link.source_id))">{{sourceName(link.source_id)}}</button> · {{selectionText(link.selection)}} <button v-if="record.can_modify" :disabled="busy" @click="removeEvidence(String(link.source_id),incident.id)">Remove Evidence</button></li></ul>
-        <div v-if="record.can_modify" class="actions"><button :disabled="busy" @click="attachToIncident(incident.id)">Attach More Evidence</button><button :disabled="busy" @click="unlinkIncident(incident.id)">Unlink Incident</button></div>
+        <h4>Attached evidence</h4><ul v-if="record.incident_evidence.some(link=>link.incident_id===incident.id)" class="compact-list"><li v-for="link in record.incident_evidence.filter(l=>l.incident_id===incident.id)" :key="String(link.id)"><button :disabled="busy" @click="showSource(String(link.source_id))">{{sourceName(link.source_id)}}</button> · {{selectionText(link.selection)}}</li></ul><p v-else class="muted">No evidence attached to this incident.</p>
+        <div v-if="record.can_modify" class="actions"><button :disabled="busy" @click="unlinkIncident(incident.id)">Unlink Incident</button></div>
         <details><summary>All incident details</summary><p>Internal ID: <code>{{incident.id}}</code> <button @click="copy(incident.id)">Copy ID</button></p><pre>{{pretty(incident.primary_details)}}</pre></details>
       </article>
       <details v-if="record.can_modify" class="card"><summary>Link an existing incident</summary><fieldset :disabled="busy"><label>Existing owned incident ID<input v-model="sharedIncident" /></label><p>Use the internal ID from the incident's details. The incident must belong to this investigation's owner.</p><button :disabled="!sharedIncident.trim()" @click="action(id=>investigationAction(id,'incident-links',{incident_id:sharedIncident.trim()}),'Incident linked.')">Link Incident</button></fieldset></details>

@@ -297,6 +297,12 @@ export interface InvestigationPreview extends InvestigationSource {
   records: InvestigationRecord[]; next_offset: number | null;
 }
 
+export interface IncidentImportRecord extends InvestigationRecord {
+  missing_incident_fields: string[];
+}
+export interface IncidentImportPreview extends InvestigationSource {
+  records: IncidentImportRecord[]; next_offset: number | null;
+}
 export interface IncidentEvidenceSource extends InvestigationSource {
   attachment_selection: number[] | null;
   attached_at?: string;

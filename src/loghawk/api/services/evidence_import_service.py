@@ -185,7 +185,8 @@ def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=Non
     now=utc_now();source_id=uuid4().hex
     prefix=config.LH_INVESTIGATION_SOURCE_S3_PREFIX.strip("/")
     if not prefix or any(p in {".",".."} for p in prefix.split("/")):raise ValueError("Invalid investigation source prefix.")
-    object_key=f"{prefix}/{key}/{source_id}/original.{fmt}"
+    owner_folder = key or "standalone-incidents"
+    object_key=f"{prefix}/{owner_folder}/{source_id}/original.{fmt}"
     snapshot=f"s3://{config.LH_S3_BUCKET}/{object_key}"
     with connect("server") as db:
         if incident_id:
@@ -196,11 +197,16 @@ def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=Non
                 "SELECT s.id FROM rca_evidence_sources s JOIN rca_incident_evidence e ON e.source_id=s.id "
                 "WHERE e.incident_id=? AND s.sha256=? AND s.status='READY'", (incident_id,digest)
             ).fetchone()
-        else:
+        elif key:
             store.require(db,key,user,write=True)
             duplicate=db.execute("SELECT id FROM rca_evidence_sources WHERE investigation_id=? AND sha256=? AND status='READY'",(key,digest)).fetchone()
+        else:
+            duplicate=db.execute(
+                "SELECT id FROM rca_evidence_sources WHERE userid=? AND investigation_id IS NULL AND sha256=? AND status='READY'",
+                (user["userid"],digest),
+            ).fetchone()
         if duplicate:return {"id":duplicate["id"],"status":"DUPLICATE","name":name}
-        db.execute("INSERT INTO rca_evidence_sources (id,userid,investigation_id,name,original_uri,snapshot_uri,sha256,size_bytes,evidence_type,format,status,error,mapping_json,record_path,record_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(source_id,user["userid"],key,name,original_uri,snapshot,size,digest,evidence_type,fmt,"IMPORTING",None,"{}",record_path,0,now,now))
+        db.execute("INSERT INTO rca_evidence_sources (id,userid,investigation_id,name,original_uri,snapshot_uri,sha256,size_bytes,evidence_type,format,status,error,mapping_json,record_path,record_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(source_id,user["userid"],key,name,original_uri,snapshot,digest,size,evidence_type,fmt,"IMPORTING",None,"{}",record_path,0,now,now))
         if incident_id:
             db.execute("INSERT INTO rca_incident_evidence (id,incident_id,source_id,selection_json,created_at) VALUES (?,?,?,?,?)",
                        (uuid4().hex,incident_id,source_id,"[]",now))

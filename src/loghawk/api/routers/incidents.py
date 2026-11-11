@@ -41,6 +41,19 @@ class S3Import(BaseModel):
     record_path: str | None = None
 
 
+class IncidentImportS3(BaseModel):
+    objects: list[S3Object] = Field(min_length=1, max_length=100)
+    record_path: str | None = None
+
+
+class CollectorEvidence(BaseModel):
+    tool_call_id: str = Field(min_length=1, max_length=128)
+
+
+class CreateIncidentsFromImport(BaseModel):
+    record_numbers: list[int] = Field(min_length=1, max_length=500)
+
+
 def call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -75,6 +88,63 @@ def create(body: IncidentCreate, user=Depends(require_authenticated_user)):
         raise HTTPException(422, "Incident end time must be at or after its start time.")
     return call(store.create, user, body.incident_id, body.summary, body.start_time, body.end_time,
                 body.severity, body.primary_service, body.services, body.details)
+
+
+@router.get("/import/sources")
+def list_import_sources(user=Depends(require_authenticated_user)):
+    return call(store.list_import_sources, user)
+
+
+@router.get("/import/sources/{source_id}")
+def preview_import_source(source_id: str, offset: int = Query(0, ge=0),
+                         limit: int = Query(100, ge=1, le=100),
+                         user=Depends(require_authenticated_user)):
+    return call(store.preview_import_source, source_id, user, offset, limit)
+
+
+@router.post("/import/sources/{source_id}/create")
+def create_from_import(source_id: str, body: CreateIncidentsFromImport,
+                       user=Depends(require_authenticated_user)):
+    return call(store.create_from_import, user, source_id, body.record_numbers)
+
+
+@router.post("/import/upload")
+def upload_incident_file(files: list[UploadFile] = File(...),
+                         record_path: str = Form(""),
+                         user=Depends(require_authenticated_user)):
+    if not 1 <= len(files) <= config.LH_INVESTIGATION_MAX_IMPORT_FILES:
+        raise HTTPException(422, "Too many files in this import.")
+    for file in files:
+        call(imports.validate_source, file.filename or "unknown", "stage-c")
+    staged, remaining = [], imports.max_bytes()
+    try:
+        for file in files:
+            temp, size, digest = call(imports.stage, file.file, remaining)
+            remaining -= size
+            staged.append((file.filename or "unknown", temp, size, digest))
+        return {"sources": [call(imports.import_staged, None, user, name, temp, size, digest,
+                                  "stage-c", record_path or None)
+                           for name, temp, size, digest in staged]}
+    finally:
+        for _, temp, _, _ in staged:
+            temp.close()
+
+
+@router.get("/import/s3")
+def list_import_s3(uri: str = Query(...), token: str | None = None,
+                   browse: bool = True, user=Depends(require_authenticated_user)):
+    return call(imports.list_s3, uri, token, browse)
+
+
+@router.post("/import/s3/resolve")
+def resolve_import_s3(body: S3Selection, user=Depends(require_authenticated_user)):
+    return call(imports.resolve_s3_selection, body.uris)
+
+
+@router.post("/import/s3")
+def import_incident_s3(body: IncidentImportS3, user=Depends(require_authenticated_user)):
+    objects = [item.model_dump() for item in body.objects]
+    return {"sources": call(imports.import_s3, None, user, objects, "stage-c", body.record_path)}
 
 
 @router.delete("/{incident_id}", status_code=204)
@@ -143,3 +213,9 @@ def import_s3(incident_id: str, body: S3Import, user=Depends(require_authenticat
     call(store.authorize, incident_id, user, write=True)
     return {"sources": call(imports.import_s3, None, user, [item.model_dump() for item in body.objects],
                               body.evidence_type, body.record_path, incident_id)}
+
+
+@router.post("/{incident_id}/sources/collector")
+def add_collector_evidence(incident_id: str, body: CollectorEvidence,
+                           user=Depends(require_authenticated_user)):
+    return call(store.add_collector_evidence, incident_id, user, body.tool_call_id)

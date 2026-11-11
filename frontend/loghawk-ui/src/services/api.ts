@@ -299,6 +299,34 @@ export const listIncidents = (query: URLSearchParams) =>
   request<import("../types/api").Incident[]>("/incidents?" + query.toString());
 export const deleteIncident = (id: string) =>
   request<void>("/incidents/" + encodeURIComponent(id), {method: "DELETE"});
+export type IncidentImportSource = import("../types/api").InvestigationSource;
+export type IncidentImportFile = {uri: string; size: number; etag?: string};
+export type IncidentImportListing = {files: IncidentImportFile[]; folders?: {uri: string}[]; next_token: string | null};
+export const listIncidentImportSources = () =>
+  request<IncidentImportSource[]>("/incidents/import/sources");
+export const previewIncidentImportSource = (source: string, offset = 0) =>
+  request<import("../types/api").IncidentImportPreview>(`/incidents/import/sources/${encodeURIComponent(source)}?offset=${offset}`);
+export const createIncidentsFromImport = (source: string, record_numbers: number[]) =>
+  request<{incident_ids: string[]; created_or_linked: number}>(`/incidents/import/sources/${encodeURIComponent(source)}/create`, {
+    method: "POST", body: JSON.stringify({record_numbers}),
+  });
+export const uploadIncidentImportFiles = (files: File[], recordPath = "") => {
+  const body = new FormData();
+  files.forEach(file => body.append("files", file, file.name));
+  body.append("record_path", recordPath);
+  return requestMultipart<{sources: {id: string; status: string; name: string; record_count?: number; error?: string}[]}>("/incidents/import/upload", body);
+};
+export const listIncidentImportS3 = (uri: string, token = "", browse = true) =>
+  request<IncidentImportListing>(`/incidents/import/s3?uri=${encodeURIComponent(uri)}&browse=${browse}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
+export const resolveIncidentImportS3 = (uris: string[]) =>
+  request<{files: IncidentImportFile[]; total_bytes: number}>("/incidents/import/s3/resolve", {
+    method: "POST", body: JSON.stringify({uris}),
+  });
+export const importIncidentS3Files = (objects: IncidentImportFile[], recordPath = "") =>
+  request<{sources: {id: string; status: string; name: string; record_count?: number; error?: string}[]}>("/incidents/import/s3", {
+    method: "POST", body: JSON.stringify({objects, record_path: recordPath || null}),
+  });
+
 export const createIncident = (payload: {
   incident_id: string; summary: string; start_time: string; end_time: string;
   severity: string; primary_service: string; services: string[];
@@ -309,6 +337,10 @@ export const getIncident = (id: string) =>
   request<import("../types/api").Incident>("/incidents/" + encodeURIComponent(id));
 export const incidentAction = <T = import("../types/api").Incident>(id: string, action: string, body: unknown, method = "POST") =>
   request<T>("/incidents/" + encodeURIComponent(id) + "/" + action, {method, body: JSON.stringify(body)});
+export const addIncidentCollectorEvidence = (id: string, tool_call_id: string) =>
+  request<import("../types/api").Incident>("/incidents/" + encodeURIComponent(id) + "/sources/collector", {
+    method: "POST", body: JSON.stringify({tool_call_id}),
+  });
 export const previewIncidentSource = (id: string, source: string, offset = 0) =>
   request<import("../types/api").InvestigationPreview>("/incidents/" + encodeURIComponent(id) + "/sources/" + encodeURIComponent(source) + "?offset=" + offset);
 export const uploadIncidentFiles = (id: string, files: File[], evidenceType: string, recordPath = "") => {
