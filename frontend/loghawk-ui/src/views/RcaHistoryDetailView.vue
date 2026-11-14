@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { getRcaHistoryDetail, retryRcaExplanation, regenerateRcaExplanation } from "../services/api";
-import type { RcaHistoryDetail } from "../types/api";
+import type { RcaHistoryDetail, RcaLimits } from "../types/api";
 const route = useRoute();
 const record = ref<RcaHistoryDetail | null>(null);
 const busy = ref(false), error = ref(""), notice = ref("");
@@ -12,6 +12,8 @@ const tab = ref("Overview");
 const stageLabel = (stage: string) =>
   ({
     narration_correction: "Narration correction",
+    empty_response_recovery: "Empty-response recovery",
+    investigation_evaluation: "Investigation evaluation / next action",
     initial_explanation: "Initial explanation",
     explanation_retry: "Explanation retry",
     explanation_regeneration: "Explanation regeneration",
@@ -19,15 +21,17 @@ const stageLabel = (stage: string) =>
 const pretty = (value: unknown) => value == null ? "Not recorded" : JSON.stringify(value, null, 2);
 const evidence = (value: string | null) => { if (value == null) return "Not recorded"; try { return pretty(JSON.parse(value)); } catch { return value; } };
 const time = (value: string | null) => value ? new Date(value).toLocaleString() : "Not recorded";
+const savedMode = computed(() => record.value?.settings?.mode);
+const effectiveLimits = computed(() => record.value?.settings?.effective_limits as Partial<RcaLimits> | undefined);
 const explanations = computed(() => record.value?.events.filter(e => e.status.startsWith("EXPLANATION_")) ?? []);
 const collectors = computed(() => record.value?.events.filter(e =>
-  !e.status.startsWith("EXPLANATION_") && !["list_collectors", "request_settings", "stop_without_execution"].includes(e.collector_name)) ?? []);
+  !e.status.startsWith("EXPLANATION_") && (e.tool_type ? ["collector", "knowledge_search"].includes(e.tool_type) : !["list_collectors", "request_settings", "stop_without_execution"].includes(e.collector_name))) ?? []);
 const timeline = computed(() => {
   const r = record.value;
   if (!r) return [];
   return [
     { id: r.id, at: r.created_at, label: "Request created", detail: `${r.userid} · ${r.origin_software}` },
-    ...r.events.map(e => ({ id: e.id, at: e.started_at, label: `${e.collector_name} · ${e.status}`, detail: e.run_id ? `Run: ${e.run_id}` : e.id })),
+    ...r.events.map(e => ({ id: e.id, at: e.started_at, label: `${e.tool_type === "knowledge_search" ? "RAG search" : e.collector_name} · ${e.status}`, detail: e.run_id ? `Run: ${e.run_id}` : e.id })),
     ...r.invocations.map(i => ({ id: i.id, at: i.started_at, label: `${stageLabel(i.stage)} · ${i.status}`, detail: `${i.configured_model ?? 'Not recorded'} · Invocation ${i.invocation_number}` }))
   ].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
 });
@@ -106,7 +110,32 @@ function download() {
       <section v-if="tab === 'Overview'">
         <h2>Question</h2><p class="text">{{ record.question_text ?? 'Not recorded' }}</p>
         <p>Started: {{ time(record.created_at) }} · Updated: {{ time(record.updated_at) }} · Request status: {{ record.status }}</p>
+        <section v-if="savedMode" class="saved-mode">
+          <h2>Investigation mode: <span class="mode-name">{{ savedMode }}</span></h2>
+          <p v-if="effectiveLimits">Saved effective maximums: {{ effectiveLimits.MAX_MODEL_TURNS ?? 'Not recorded' }} model turns ·
+            {{ effectiveLimits.MAX_DISCOVERY_CALLS ?? 'Not recorded' }} discovery requests ·
+            {{ effectiveLimits.MAX_EXECUTION_REQUESTS ?? 'Not recorded' }} execution requests ·
+            {{ effectiveLimits.MAX_RAG_SEARCHES ?? 'Not recorded' }} RAG searches</p>
+        </section>
         <h2>Execution status reported by server</h2><p>{{ record.execution.summary }}</p>
+        <section v-if="record.execution.loop_progress">
+          <h2>{{ record.execution.loop_progress.partial ? "Partial investigation" : "Investigation progress" }}</h2>
+          <p>Model turns: {{ record.execution.loop_progress.model_turns }} / {{ record.execution.loop_progress.limits.MAX_MODEL_TURNS }}
+            · Discovery requests: {{ record.execution.loop_progress.discovery_calls }} / {{ record.execution.loop_progress.limits.MAX_DISCOVERY_CALLS }}
+            · Execution requests: {{ record.execution.loop_progress.execution_requests }} / {{ record.execution.loop_progress.limits.MAX_EXECUTION_REQUESTS }}
+            · RAG searches: {{ record.execution.loop_progress.knowledge_searches }}<template v-if="record.execution.loop_progress.limits.MAX_RAG_SEARCHES != null"> / {{ record.execution.loop_progress.limits.MAX_RAG_SEARCHES }}</template></p>
+          <p>{{ record.execution.loop_progress.stop_reason }}</p>
+        </section>
+        <section v-if="record.execution.assessment">
+          <h2>Saved investigation assessment</h2>
+          <p>Evidence references were validated against saved records. This checks provenance, not whether an AI interpretation is correct.</p>
+          <h3>Observations</h3><ul><li v-for="(claim, n) in record.execution.assessment.observations" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
+          <h3>Hypotheses</h3><ul><li v-for="(claim, n) in record.execution.assessment.hypotheses" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
+          <h3>Contradictions</h3><ul><li v-for="(claim, n) in record.execution.assessment.contradictions" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
+          <h3>Missing evidence</h3><ul><li v-for="(item, n) in record.execution.assessment.missing_evidence" :key="n">{{ item }}</li></ul>
+          <h3>Conclusion</h3><p>{{ record.execution.assessment.conclusion.text }} <code>{{ record.execution.assessment.conclusion.references.join(", ") }}</code></p>
+          <h3>Next steps</h3><ul><li v-for="(item, n) in record.execution.assessment.next_steps" :key="n">{{ item }}</li></ul>
+        </section>
         <h2>Latest saved response</h2><p class="text">{{ record.response_text ?? 'Not recorded; inspect saved explanation events below.' }}</p>
         <p>Hypotheses and conclusions are shown within the original explanation. They are AI interpretations, not independently verified findings.</p>
         <details><summary>Settings at request creation</summary><pre>{{ pretty(record.settings) }}</pre></details>
@@ -116,7 +145,8 @@ function download() {
         <p v-if="record.settings?.redact_evidence !== false">Sensitive-value redaction was enabled for this request. Evidence may also be compacted for model input or limited by its source/runner. Character counts are not token counts.</p>
         <p v-else>Sensitive-value redaction was disabled for this request. Collector results may contain sensitive values and were available to the configured model. Evidence may also be compacted for model input or limited by its source/runner.</p>
         <article v-for="event in collectors" :key="event.id">
-          <h2>{{ event.collector_name }} · Version {{ event.collector_version }} · {{ event.status }}</h2>
+          <h2>{{ event.tool_type === "knowledge_search" ? "RAG search" : event.collector_name }} · Version {{ event.collector_version }} · {{ event.status }}</h2>
+          <p v-if="event.tool_type === 'knowledge_search'">Saved document excerpts are background guidance, not live observations. Source, content hash and excerpt truncation are recorded below.</p>
           <p>Event: {{ event.id }} · Run: {{ event.run_id ?? 'No run recorded' }}</p>
           <p>{{ time(event.started_at) }} — {{ time(event.completed_at) }}</p>
           <h3>{{ event.status === 'AWAITING_CONFIRMATION' ? 'Proposed arguments' : event.status === 'CONFIRMED' ? 'Confirmed arguments' : 'Recorded arguments' }}</h3>
@@ -132,7 +162,7 @@ function download() {
             <details><summary>Prepared model evidence</summary><pre>{{ evidence(view.model_evidence_text) }}</pre><button @click="copy(view.model_evidence_text)">Copy model evidence</button></details>
           </div>
         </article>
-        <p v-if="!collectors.length">No collector execution or input review events recorded.</p>
+        <p v-if="!collectors.length">No collector execution, RAG search or input review events recorded.</p>
       </section>
       <section v-if="tab === 'AI Explanations'">
         <p>Every recorded explanation attempt is retained. A failed explanation does not mean collection failed.</p>
@@ -166,10 +196,14 @@ function download() {
             The previous model response contained narration instead of a required tool call.
             LogHawk requested a correction, reusing the existing conversation and discovery results.
           </p>
+          <p v-if="invocation.stage === 'empty_response_recovery'">
+            The previous model response contained neither text nor tool calls. LogHawk made one bounded recovery attempt using saved evidence. Previously completed collectors were not rerun.
+          </p>
+          <p v-if="invocation.stage === 'investigation_evaluation'">The model evaluates saved context and available evidence, then chooses discovery, collection, RAG retrieval or a finish assessment. A completed invocation does not mean a collector executed.</p>
           <p>Invocation: {{ invocation.id }} · Explanation attempt: {{ invocation.explanation_attempt_id ?? 'Not applicable' }}</p>
           <p>Provider: {{ invocation.provider ?? 'Not recorded' }} · Configured model: {{ invocation.configured_model ?? 'Not recorded' }} · Returned model: {{ invocation.returned_model ?? 'Not reported' }}</p>
           <p>{{ time(invocation.started_at) }} — {{ time(invocation.completed_at) }} · Duration including preparation: {{ invocation.duration_ms == null ? 'Not recorded' : (invocation.duration_ms / 1000).toFixed(2) + ' seconds' }}</p>
-          <table><thead><tr><th>Setting</th><th>Recorded value</th></tr></thead><tbody><tr v-for="(value, key) in invocation.settings ?? {}" :key="key"><td>{{ key }}</td><td>{{ value }}</td></tr></tbody></table>
+          <table><thead><tr><th>Setting</th><th>Recorded value</th></tr></thead><tbody><tr v-for="(value, key) in invocation.settings ?? {}" :key="key"><td>{{ key }}</td><td>{{ typeof value === "object" ? pretty(value) : value }}</td></tr></tbody></table>
           <h3>Provider token usage</h3><pre>{{ invocation.usage == null ? 'Not reported' : pretty(invocation.usage) }}</pre>
           <p v-if="invocation.error_text" class="text">{{ invocation.error_text }}</p>
           <details v-for="view in record.evidence_views.filter(v => v.invocation_id === invocation.id)" :key="view.id">
@@ -182,6 +216,7 @@ function download() {
   </section>
 </template>
 <style scoped>
+.saved-mode { border-left: 3px solid #0f766e; padding: .25rem 1rem; margin: 1rem 0; } .mode-name { text-transform: capitalize; }
 button { margin: .3rem .5rem .3rem 0; } nav { display: flex; flex-wrap: wrap; margin: 1rem 0; }
 button[aria-pressed="true"] { outline: 2px solid #3684bd; }
 article { border: 1px solid #64748b; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }

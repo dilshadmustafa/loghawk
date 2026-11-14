@@ -1,0 +1,34 @@
+Title: Investigating Inventory Failures and Reduced Payment Traffic
+Scope: LogHawk Kind demo, namespace loghawk-demo.
+
+Symptoms:
+- inventory-service and order-service report HTTP 503.
+- Order logs identify inventory-service as the dependency.
+- payment-service receives fewer requests.
+
+Dependency order:
+order-service calls inventory-service before payment-service.
+An inventory failure prevents the payment call for that order.
+
+Investigation:
+1. Compare request and error rates across all three services.
+2. Inspect order logs for the dependency field.
+3. Correlate request IDs with inventory logs.
+4. Compare payment traffic before, during and after the incident.
+5. Check whether traffic-generator activity also changed.
+
+Interpretation:
+Reduced payment traffic does not by itself indicate a payment
+failure. It may result from orders failing at the inventory step.
+
+Evidence supporting an inventory-related hypothesis:
+Inventory errors and order dependency errors occur together,
+with matching request IDs and reduced downstream payment calls.
+
+Alternative explanations:
+Reduced incoming traffic, stopped traffic generation, missing
+scrapes or other order-service failures can also reduce payment traffic.
+
+Recovery verification:
+Confirm inventory and order successes, then verify payment traffic
+returns relative to incoming order traffic.

@@ -186,6 +186,7 @@ llm_tool_calls = Table(
     Column("request_id", String, ForeignKey("llm_tool_requests.id", ondelete="CASCADE"), nullable=False),
     Column("origin", String, nullable=False, server_default="AI"),
     Column("origin_userid", String, nullable=False),
+    Column("tool_type", String, nullable=False, server_default="collector"),
     Column("collector_name", String, nullable=False),
     Column("collector_version", String, nullable=False),
     Column("artifact_id", String, nullable=True),

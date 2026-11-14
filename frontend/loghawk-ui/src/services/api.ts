@@ -217,12 +217,17 @@ export const sendRcaMessage = (
   reviewArguments = false,
   redactEvidence = true,
   investigationId?: string,
+  mode: import("../types/api").RcaMode = "performance",
+  requestId?: string,
 ) => request<import("../types/api").RcaAnswer>("/rca/chat", {
   method: "POST", body: JSON.stringify({
     messages, review_arguments: reviewArguments, redact_evidence: redactEvidence,
-    investigation_id: investigationId || null,
+    investigation_id: investigationId || null, mode, request_id: requestId,
   }),
 });
+export const getRcaProfiles = () => request<import("../types/api").RcaProfiles>("/rca/profiles");
+export const getRcaProgress = (requestId: string, signal?: AbortSignal) =>
+  request<import("../types/api").RcaLiveProgress>(`/rca/chat/${encodeURIComponent(requestId)}/progress`, { signal });
 export const confirmRcaCollector = (requestId: string, confirmationId: string, approved: boolean, reviewedArguments?: Record<string, unknown>) =>
   request<import("../types/api").RcaAnswer>(`/rca/chat/${encodeURIComponent(requestId)}/confirm`, {
     method: "POST", body: JSON.stringify({ confirmation_id: confirmationId, approved, arguments: reviewedArguments }),

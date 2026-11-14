@@ -1,0 +1,50 @@
+Title: Prometheus Queries and Evidence Interpretation
+Scope: LogHawk Kind demo, namespace loghawk-demo.
+
+Recent request rate by service and response status:
+sum by (service, status) (
+  rate(demo_requests_total{namespace="loghawk-demo"}[5m])
+)
+
+Recent HTTP 503/504 rate by service:
+sum by (service) (
+  rate(demo_requests_total{
+    namespace="loghawk-demo",status=~"503|504"
+  }[5m])
+)
+
+Estimated 95th-percentile request latency in seconds:
+histogram_quantile(
+  0.95,
+  sum by (service, le) (
+    rate(demo_request_duration_seconds_bucket{
+      namespace="loghawk-demo"
+    }[5m])
+  )
+)
+
+Interpretation:
+- Request counters are cumulative; rate measures change per second.
+- Histogram quantiles are estimates based on configured buckets.
+- Sparse traffic or missing samples can make estimates unreliable.
+- An empty result is not equivalent to zero errors.
+- up=1 indicates successful scraping.
+- kube_pod_info supplies metadata, not application health.
+- Multiple metric series do not necessarily represent different pods.
+
+Time alignment:
+These queries evaluate recent windows relative to the evaluation
+time. A current query cannot establish what happened during an old
+incident. Use matching historical evidence or a collector supporting
+the required historical query.
+
+LogHawk evidence:
+Stage A contains aggregated features.
+Stage B contains anomaly results.
+Stage C groups correlated anomalies into incidents.
+An anomaly or correlation score is not proof of a root cause.
+
+Reporting:
+Separate observations, hypotheses, contradictions and missing
+evidence. Cite saved evidence for observations. Treat retrieved
+runbooks as background guidance rather than incident observations.

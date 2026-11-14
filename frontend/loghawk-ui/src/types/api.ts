@@ -169,8 +169,66 @@ export interface RagAnswer {
   sources: { reference: string; source: string }[];
 }
 
+export type RcaMode = "quality" | "balanced" | "performance";
+export interface RcaLimits {
+  MAX_MODEL_TURNS: number;
+  MAX_DISCOVERY_CALLS: number;
+  MAX_EXECUTION_REQUESTS: number;
+  MAX_RAG_SEARCHES: number;
+}
+export interface RcaProfile {
+  mode: RcaMode;
+  label: string;
+  description: string;
+  limits: RcaLimits;
+  preset_limits: RcaLimits;
+  limited_by_configuration: boolean;
+}
+export interface RcaProfiles { default_mode: RcaMode; profiles: RcaProfile[]; }
+export interface RcaProgressEvent {
+  id: string; collector_name: string; collector_version: string; tool_type?: string;
+  status: string; arguments: Record<string, unknown> | null; run_id: string | null;
+  started_at: string; completed_at: string | null; summary: string;
+}
+export interface RcaProgressInvocation {
+  id: string; stage: string; invocation_number: number; status: string;
+  started_at: string; completed_at: string | null; duration_ms: number | null;
+  error_text: string | null;
+  settings: { effective_timeout_seconds?: number; context_preparation?: Record<string, unknown> } | null;
+}
+export interface RcaLiveProgress {
+  snapshot_stale?: boolean;
+  investigation_id?: string;
+  request_id: string; status: string; revision: string;
+  created_at: string; updated_at: string; server_time: string;
+  settings: Record<string, unknown> | null;
+  live_progress: Record<string, unknown> | null;
+  events: RcaProgressEvent[]; invocations: RcaProgressInvocation[];
+  answer?: RcaAnswer;
+  pending?: RcaAnswer["pending"];
+}
 export interface RcaMessage { role: "user" | "assistant"; content: string; }
+export interface RcaLoopProgress {
+  model_turns: number;
+  discovery_calls: number;
+  execution_requests: number;
+  knowledge_searches: number;
+  limits: Record<string, number>;
+  remaining_seconds: number;
+  partial: boolean;
+  stop_reason: string;
+}
+export interface RcaAssessment {
+  observations: { text: string; references: string[] }[];
+  hypotheses: { text: string; references: string[] }[];
+  contradictions: { text: string; references: string[] }[];
+  missing_evidence: string[];
+  conclusion: { text: string; references: string[] };
+  next_steps: string[];
+}
 export interface RcaExecutionSummary {
+  loop_progress?: RcaLoopProgress | null;
+  assessment?: RcaAssessment | null;
   request_id: string;
   request_status: string;
   discovery_calls: number;
@@ -183,6 +241,8 @@ export interface RcaExecutionSummary {
   evidence_redaction_enabled: boolean;
   summary: string;
   events: {
+    tool_type?: string;
+    call_id?: string;
     collector: string;
     version: string;
     status: string;
@@ -193,6 +253,7 @@ export interface RcaExecutionSummary {
   }[];
 }
 export interface RcaAnswer {
+  duplicate?: boolean;
   investigation_id?: string;
   explanation?: {
     status: "RUNNING" | "COMPLETED" | "FAILED";
@@ -246,6 +307,7 @@ export interface RcaHistoryPage {
   items: RcaHistoryItem[]; total: number; limit: number; offset: number;
 }
 export interface RcaHistoryEvent {
+  tool_type?: string;
   id: string; collector_name: string; collector_version: string; status: string;
   origin_userid: string; origin_software: string; origin: string;
   run_id: string | null; arguments: Record<string, unknown> | null;

@@ -35,6 +35,10 @@ def _embedding_model(model: str | None = None) -> str:
     return prefixes[config.LH_LLM_PROVIDER] + name
 
 
+class EmptyToolResponseError(RuntimeError):
+    """A successful provider response contained neither visible text nor tool calls."""
+
+
 class LiteLLMClient:
     """Small LogHawk interface over LiteLLM's normalized SDK responses."""
 
@@ -110,6 +114,7 @@ class LiteLLMClient:
     def complete_tool_turn(
         self, messages: list[dict], tools: list[dict], *, timeout: float,
         require_tool: bool = False, audit_callback=None,
+        response_schema: dict[str, Any] | None = None,
     ) -> dict:
         """Native tool responses may legitimately contain no assistant text."""
         from litellm import completion
@@ -119,32 +124,66 @@ class LiteLLMClient:
                       num_retries=0, max_tokens=config.LH_LLM_TOOL_MAX_TOKENS)
         if config.LH_LLM_PROVIDER == "ollama":
             kwargs["num_ctx"] = config.LH_LLM_TOOL_CONTEXT_LENGTH
+        if response_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "loghawk_investigation_assessment",
+                    "schema": response_schema,
+                },
+            }
         if tools:
             kwargs.update(
                 tools=tools,
                 tool_choice="required" if require_tool else "auto",
             )
         response = completion(**kwargs)
+        choices = getattr(response, "choices", None) or []
+        choice = choices[0] if choices else None
+        message = choice.message.model_dump(exclude_none=True) if choice is not None else {}
+        content = message.get("content") or ""
+        if isinstance(content, list):
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        calls = message.get("tool_calls") or []
+        finish_reason = getattr(choice, "finish_reason", None)
         if audit_callback is not None:
             usage = getattr(response, "usage", None)
             if hasattr(usage, "model_dump"):
                 usage = usage.model_dump(exclude_none=True)
-            audit_callback({"returned_model": getattr(response, "model", None),
-                            "usage": usage if isinstance(usage, dict) else None})
-        choice = response.choices[0]
-        if choice.finish_reason == "length":
+            audit_callback({
+                "returned_model": getattr(response, "model", None),
+                "usage": usage if isinstance(usage, dict) else None,
+                "response_diagnostics": {
+                    "finish_reason": finish_reason,
+                    "visible_content_chars": len(content),
+                    "tool_call_count": len(calls),
+                    "choice_count": len(choices),
+                },
+            })
+        if choice is None:
+            raise RuntimeError("Tool provider returned no response choices.")
+        if finish_reason == "length":
             raise RuntimeError("Tool model reached its output-token limit; increase LH_LLM_TOOL_MAX_TOKENS.")
-        message = choice.message.model_dump(exclude_none=True)
-        result = {"role": "assistant", "content": message.get("content") or ""}
-        if message.get("tool_calls"):
-            result["tool_calls"] = message["tool_calls"]
-        if not result["content"] and not result.get("tool_calls"):
-            raise RuntimeError("Tool model returned neither text nor tool calls.")
+        if finish_reason in {"content_filter", "refusal"} or message.get("refusal"):
+            raise RuntimeError("Tool provider declined the response.")
+        result = {"role": "assistant", "content": content}
+        if calls:
+            result["tool_calls"] = calls
+        if not content.strip() and not calls:
+            if finish_reason not in {None, "stop"}:
+                raise RuntimeError("Tool provider returned an incomplete response without text or tool calls.")
+            raise EmptyToolResponseError("Tool model returned neither text nor tool calls.")
         return result
 
-    def explain_collector_evidence(self, messages: list[dict], *, timeout: float, audit_callback=None) -> str:
-        """Generate text only. No tools, execution dispatcher, or automatic retries."""
-        message = self.complete_tool_turn(messages, [], timeout=timeout, audit_callback=audit_callback)
+    def explain_collector_evidence(
+        self, messages: list[dict], *, timeout: float, audit_callback=None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> str:
+        """Generate text or a structured assessment without tools or automatic retries."""
+        message = self.complete_tool_turn(
+            messages, [], timeout=timeout, audit_callback=audit_callback,
+            response_schema=response_schema,
+        )
         if message.get("tool_calls"):
             raise RuntimeError("Explanation model returned tool calls; none were executed.")
         return message["content"]

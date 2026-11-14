@@ -1,0 +1,36 @@
+Title: Investigating Payment Errors and Payment Timeouts
+Scope: LogHawk Kind demo, namespace loghawk-demo.
+
+Symptoms:
+- order-service returns HTTP 503 or 504.
+- Order logs identify payment-service in the dependency field.
+- Payment errors or latency increase during the incident window.
+
+Investigate:
+1. Establish the incident start time, end time and timezone.
+2. Compare order, payment and inventory error rates.
+3. Compare payment latency with the caller's 0.6-second timeout.
+4. Correlate request_id values across order and payment logs.
+5. Inspect pod state and restarts as supporting evidence.
+
+Interpretation:
+Payment HTTP 503 responses can cause order-service HTTP 503.
+A delayed payment response can cause order-service HTTP 504 even
+when payment-service eventually records HTTP 200.
+
+Order HTTP 504 alone does not establish payment latency as the
+cause: the application also uses 504 for connection failures.
+
+Evidence supporting a payment-related hypothesis:
+- Matching request IDs and timestamps.
+- Order logs naming payment-service as the failing dependency.
+- Payment errors or excessive latency in the same interval.
+
+Contradictions to examine:
+- Order logs instead name inventory-service.
+- Payment activity is normal throughout the relevant interval.
+- Available measurements describe a different time window.
+
+Recovery verification:
+Confirm successful order requests, reduced error rates and
+latency below the caller deadline. Pod readiness alone is insufficient.

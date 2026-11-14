@@ -1,8 +1,10 @@
 """Authenticated Web UI RCA chat using the shared collector assistant."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, StrictBool
 from loghawk.api.routers.auth import require_webui_user
-from loghawk.api.services import assistant_chat_service, collector_tool_service
+from loghawk.api.services import assistant_chat_service, collector_tool_service, collector_tool_store, rca_profiles
 
 router = APIRouter(dependencies=[Depends(require_webui_user)])
 
@@ -11,6 +13,8 @@ class ChatRequest(BaseModel):
     review_arguments: StrictBool = False
     redact_evidence: StrictBool = True
     investigation_id: str | None = Field(default=None, max_length=64)
+    mode: Literal["quality", "balanced", "performance"] = "performance"
+    request_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 class Confirmation(BaseModel):
     confirmation_id: str = Field(min_length=1, max_length=64)
@@ -23,12 +27,32 @@ def chat(body: ChatRequest, user: dict = Depends(require_webui_user)) -> dict:
         return assistant_chat_service.chat(
             body.messages, user["userid"], origin_software="web",
             review_arguments=body.review_arguments, redact_evidence=body.redact_evidence,
-            investigation_id=body.investigation_id,
+            investigation_id=body.investigation_id, mode=body.mode, request_id=body.request_id,
         )
+    except collector_tool_store.ExistingRequest as exc:
+        # A duplicate follows the original request through the progress endpoint.
+        return {"request_id": exc.request_id, "status": "PROCESSING", "response": "",
+                "duplicate": True}
+    except collector_tool_store.RequestConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc),
+                            headers={"X-LogHawk-Execution": "not-started"}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+@router.get("/profiles")
+def profiles() -> dict:
+    return rca_profiles.available_profiles()
+
+
+@router.get("/chat/{request_id}/progress")
+def chat_progress(request_id: str, user: dict = Depends(require_webui_user)) -> dict:
+    result = collector_tool_store.progress_detail(request_id, user["userid"], origin_software="web")
+    if result is None:
+        raise HTTPException(status_code=404, detail="RCA request not found.")
+    return result
+
 
 @router.post("/chat/{request_id}/confirm")
 def confirm(request_id: str, body: Confirmation, user: dict = Depends(require_webui_user)) -> dict:

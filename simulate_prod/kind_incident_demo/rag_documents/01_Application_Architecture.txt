@@ -1,0 +1,30 @@
+Title: LogHawk Demo — Order Processing Architecture
+Scope: The simulated application in Kubernetes namespace loghawk-demo.
+
+Components:
+- traffic-generator sends requests to order-service.
+- order-service calls inventory-service first.
+- If inventory succeeds, order-service calls payment-service.
+- All application services expose /work, /health and /metrics.
+
+Dependency behavior:
+Each order-service dependency call has a 0.6-second timeout.
+A dependency HTTP error causes order-service to return HTTP 503.
+A dependency timeout or connection error causes order-service to
+return HTTP 504.
+
+If inventory-service fails, order-service stops processing that
+request before calling payment-service. Lower payment traffic can
+therefore be a consequence of inventory failures.
+
+Health interpretation:
+The /health endpoint does not check successful order processing.
+A pod can remain Ready while application requests fail.
+Prometheus up=1 means scraping succeeded; it does not prove that
+orders or payments are succeeding.
+
+Evidence:
+Compare application status codes, latency, dependency names and
+request IDs over the same time window.
+This architecture document describes expected behavior, not the
+root cause of any particular incident.

@@ -1868,8 +1868,22 @@ class HawkConsole(App[None]):
                  f"Request: {execution.get('request_id', result.get('request_id', ''))}",
                  str(execution.get("summary", "")),
                  f"Discovery calls: {execution.get('discovery_calls', 0)}"]
+        progress = execution.get("loop_progress")
+        if progress:
+            limits = progress["limits"]
+            lines.extend([
+                "Partial investigation" if progress["partial"] else "Investigation progress",
+                f"Model turns: {progress['model_turns']}/{limits['MAX_MODEL_TURNS']} · "
+                f"Discovery requests: {progress['discovery_calls']}/{limits['MAX_DISCOVERY_CALLS']} · "
+                f"Execution requests: {progress['execution_requests']}/{limits['MAX_EXECUTION_REQUESTS']} · "
+                f"RAG searches: {progress['knowledge_searches']}",
+                progress.get("stop_reason", ""),
+            ])
+        if execution.get("assessment"):
+            lines.extend(["", "Saved investigation assessment (references validated):",
+                          json.dumps(execution["assessment"], indent=2, ensure_ascii=False)])
         for event in execution.get("events", []):
-            lines.extend(["", f"Collector: {event.get('collector', 'unknown')}",
+            lines.extend(["", f"Tool ({event.get('tool_type', 'collector')}): {event.get('collector', 'unknown')}",
                           f"Version: {event.get('version', '')}",
                           f"Status: {event.get('status', 'UNKNOWN')}"])
             if event.get("run_id"):
@@ -1888,6 +1902,10 @@ class HawkConsole(App[None]):
                 evidence_label = ("Collector evidence (sensitive values redacted; may be truncated):"
                                   if execution.get("evidence_redaction_enabled", True)
                                   else "Collector evidence (sensitive-value redaction disabled; may be truncated):")
+                if event.get("tool_type") == "knowledge_search":
+                    evidence_label = "RAG excerpts (redacted background knowledge, not live observations):"
+                elif event.get("tool_type") == "assessment":
+                    evidence_label = "Saved assessment:"
                 lines.extend(["", evidence_label, evidence])
         lines.extend(["", "AI/LLM explanation (not execution confirmation):",
                       str(result.get("response", "")), "",

@@ -192,8 +192,11 @@ def _tool_calling_positive_int(name: str, default: int) -> int:
 
 LH_LLM_TOOL_CONTEXT_LENGTH = _tool_calling_positive_int("LH_LLM_TOOL_CONTEXT_LENGTH", 8192)
 LH_LLM_TOOL_MAX_TOKENS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_TOKENS", 2048)
+LH_LLM_TOOL_MAX_MODEL_TURNS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_MODEL_TURNS", 15)
 LH_LLM_TOOL_MAX_DISCOVERY_CALLS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_DISCOVERY_CALLS", 5)
 LH_LLM_TOOL_MAX_EXECUTION_REQUESTS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_EXECUTION_REQUESTS", 5)
+LH_LLM_TOOL_MAX_RAG_SEARCHES = _tool_calling_positive_int("LH_LLM_TOOL_MAX_RAG_SEARCHES", 5)
+LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS", 180)
 LH_LLM_TOOL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_TIMEOUT_SECONDS", 300)
 LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS", 300)
 LH_LLM_TOOL_MAX_RESULT_CHARS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_RESULT_CHARS", 6000)

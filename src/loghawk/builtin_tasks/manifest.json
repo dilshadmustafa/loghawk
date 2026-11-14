@@ -28,6 +28,54 @@
       "enabled": true
     },
     {
+      "name": "prometheus-query-range",
+      "version": "1",
+      "display_name": "Prometheus historical range query",
+      "description": "Query historical Prometheus metrics for an explicit incident time range. Requires timezone-aware start_time and end_time; never infer an absent timezone. Read-only, maximum 24 hours, 300 evaluation points per series and 10 returned series. Use a larger step for longer ranges; results may be limited by Prometheus retention and series limits.",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "A PromQL expression, not a shell command. Example: rate(http_requests_total[5m])."
+          },
+          "start_time": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 40,
+            "description": "Inclusive start with timezone, for example 2026-11-03T09:07:00Z or 2026-11-03T14:37:00+05:30."
+          },
+          "end_time": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 40,
+            "description": "Inclusive end with timezone, after start_time and at most 24 hours later."
+          },
+          "step_seconds": {
+            "type": "integer",
+            "default": 60,
+            "minimum": 15,
+            "maximum": 3600,
+            "description": "Seconds between evaluation points. At most 300 inclusive evaluation points; increase this for longer windows."
+          }
+        },
+        "required": [
+          "query",
+          "start_time",
+          "end_time"
+        ],
+        "additionalProperties": false
+      },
+      "task_kind": "collector",
+      "artifact_type": "python",
+      "source_file": "collector_tasks/prometheus_range.py",
+      "execution_policy": "ai-assisted",
+      "approved": true,
+      "enabled": true
+    },
+    {
       "name": "kubernetes-pods",
       "version": "1",
       "display_name": "Kubernetes pod status",
