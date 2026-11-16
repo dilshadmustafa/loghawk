@@ -142,8 +142,8 @@ function download() {
         <p>Older requests may lack questions, settings or model-usage metadata. Not recorded means unavailable, not zero.</p>
       </section>
       <section v-if="tab === 'Evidence & Inputs'">
-        <p v-if="record.settings?.redact_evidence !== false">Sensitive-value redaction was enabled for this request. Evidence may also be compacted for model input or limited by its source/runner. Character counts are not token counts.</p>
-        <p v-else>Sensitive-value redaction was disabled for this request. Collector results may contain sensitive values and were available to the configured model. Evidence may also be compacted for model input or limited by its source/runner.</p>
+        <p v-if="record.settings?.redact_evidence !== false">Sensitive-value redaction was enabled. Saved collector results, arguments, failure diagnostics, and rejected tool arguments are redacted; redacted collector evidence is sent to the model. Evidence may also be compacted for model input or limited by its source/runner. While awaiting confirmation, the API temporarily retains exact arguments for up to 10 minutes so execution can resume; that pending state is not controlled by this setting. Character counts are not token counts.</p>
+        <p v-else>Sensitive-value redaction was disabled. Collector results, arguments, failure diagnostics, and rejected tool arguments may contain sensitive values in RCA History; collector evidence is also sent to the configured model unredacted. Evidence may still be compacted for model input or limited by its source/runner. While awaiting confirmation, the API temporarily retains exact arguments for up to 10 minutes so execution can resume. Character counts are not token counts.</p>
         <article v-for="event in collectors" :key="event.id">
           <h2>{{ event.tool_type === "knowledge_search" ? "RAG search" : event.collector_name }} · Version {{ event.collector_version }} · {{ event.status }}</h2>
           <p v-if="event.tool_type === 'knowledge_search'">Saved document excerpts are background guidance, not live observations. Source, content hash and excerpt truncation are recorded below.</p>

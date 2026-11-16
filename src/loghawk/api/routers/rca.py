@@ -13,7 +13,7 @@ class ChatRequest(BaseModel):
     review_arguments: StrictBool = False
     redact_evidence: StrictBool = True
     investigation_id: str | None = Field(default=None, max_length=64)
-    mode: Literal["quality", "balanced", "performance"] = "performance"
+    mode: Literal["quality", "balanced", "performance"] = rca_profiles.DEFAULT_MODE
     request_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 class Confirmation(BaseModel):

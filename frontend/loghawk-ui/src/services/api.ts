@@ -217,7 +217,7 @@ export const sendRcaMessage = (
   reviewArguments = false,
   redactEvidence = true,
   investigationId?: string,
-  mode: import("../types/api").RcaMode = "performance",
+  mode?: import("../types/api").RcaMode,
   requestId?: string,
 ) => request<import("../types/api").RcaAnswer>("/rca/chat", {
   method: "POST", body: JSON.stringify({

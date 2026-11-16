@@ -2222,9 +2222,11 @@ Ordinary RCA requests without an investigation retain their existing collection 
 
 **Limits and confirmations:** server configuration sets administrator ceilings. `LH_LLM_TOOL_MAX_MODEL_TURNS` defaults to 15. Discovery and execution-request defaults remain 5; the configuration example below uses 10 for each. `LH_LLM_TOOL_MAX_RAG_SEARCHES` defaults to 5 and separately limits RAG searches. Rejected discovery or execution requests consume their corresponding allowance. Duplicate collector/version/validated-argument combinations are rejected and consume an execution request; confirmation does not count again. There is no separate collector-execution setting. RAG searches permit at most one search per model turn and do not consume collector discovery or execution allowances. An identical RAG query and limit is not repeated within the request.
 
-**Investigation modes:** select a mode above RCA Chat before submitting. **Performance is the default.** The server resolves and saves its effective limits with the request, and RCA History shows the saved mode and limits.
+**Investigation modes:** select a mode above RCA Chat before submitting. The default is controlled by `LH_RCA_DEFAULT_MODE` and is Balanced if unset. The server resolves and saves its effective limits with the request, and RCA History shows the saved mode and limits.
 
-| Maximum per request | Quality | Balanced | Performance (default) |
+If an investigation is marked **PARTIAL** because it reached its model-turn limit, the response explains that saved evidence is retained and recommends starting a New Chat with a mode that displays a higher model-turn limit, if available. This allows more assessment turns but does not guarantee completion.
+
+| Maximum per request | Quality | Balanced | Performance |
 |---|---:|---:|---:|
 | Model turns | 15 | 8 | 5 |
 | Discovery requests | 10 | 4 | 2 |
@@ -2412,10 +2414,12 @@ Configure these values in `.env` on the API server:
 | Variable | Purpose | Code default |
 |---|---|---|
 | `LH_LLM_TOOL_CALLING_ENABLED` | Enable collector tool calling in Web RCA and signed-in Console chat | `false` |
+| `LH_RCA_DEFAULT_MODE` | Default mode for new Web UI RCA chats; valid values are `quality`, `balanced`, or `performance` | `balanced` |
 | `LH_LLM_TOOL_MODEL` | Tool-capable model using the configured LiteLLM provider | `qwen3:4b-instruct` |
 | `LH_LLM_TOOL_CONTEXT_LENGTH` | Ollama context window; prompt input is bounded by this value minus reserved output tokens | `8192` |
 | `LH_LLM_TOOL_MAX_TOKENS` | Maximum generated tokens per model response | `2048` |
 | `LH_LLM_TOOL_MAX_MODEL_TURNS` | Count limit for investigation model turns, including narration corrections; not a timeout | `15` |
+| `LH_LLM_TOOL_MAX_EVIDENCE_REFERENCES_PER_CLAIM` | Maximum distinct saved-evidence references allowed for each assessment claim | `20` |
 | `LH_LLM_TOOL_MAX_DISCOVERY_CALLS` | Maximum discovery calls per request, including pagination and rejected discovery arguments | `5` |
 | `LH_LLM_TOOL_MAX_EXECUTION_REQUESTS` | Maximum execution requests, including rejected requests; confirmation does not count again | `5` |
 | `LH_LLM_TOOL_MAX_RAG_SEARCHES` | Maximum RAG searches per request; administrator ceiling for investigation modes | `5` |
@@ -2428,10 +2432,12 @@ Example slow local Ollama overrides (these are not the code defaults):
 
 ```ini
 LH_LLM_TOOL_CALLING_ENABLED=true
+LH_RCA_DEFAULT_MODE=balanced
 LH_LLM_TOOL_MODEL=qwen3:4b-instruct
 LH_LLM_TOOL_CONTEXT_LENGTH=10240
 LH_LLM_TOOL_MAX_TOKENS=2048
 LH_LLM_TOOL_MAX_MODEL_TURNS=15
+LH_LLM_TOOL_MAX_EVIDENCE_REFERENCES_PER_CLAIM=20
 LH_LLM_TOOL_MAX_DISCOVERY_CALLS=10
 LH_LLM_TOOL_MAX_EXECUTION_REQUESTS=10
 LH_LLM_TOOL_MAX_RAG_SEARCHES=5

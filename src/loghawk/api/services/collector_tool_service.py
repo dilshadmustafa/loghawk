@@ -86,6 +86,11 @@ def redact(value):
     return clean(value)
 
 
+def _audit_copy(value, redaction_enabled):
+    """Apply the request redaction preference to persisted audit/evidence copies."""
+    return redact(value) if redaction_enabled else value
+
+
 def redact_audit_metadata(value):
     """Preserve known numeric LLM settings/counts; redact other metadata."""
     safe_numeric_fields = {
@@ -626,7 +631,7 @@ def _remaining(deadline):
 
 def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False,
              redact_evidence=True):
-    call_id = store.record(request_id, target, redact(arguments), "RUNNING", "")
+    call_id = store.record(request_id, target, _audit_copy(arguments, redact_evidence), "RUNNING", "")
     result = {}
     try:
         _remaining(deadline)
@@ -663,15 +668,7 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
     evidence = {"evidence_ref": "collector:" + call_id, "collector": target["name"], "version": target["version"], "arguments": arguments,
                 "run_id": result.get("run_id"), "recorded_at": store.now(), "result": result}
     try:
-        if redact_evidence:
-            saved_evidence = redact(evidence)
-        else:
-            # The opt-out applies to successful collector output only. Keep arguments
-            # and failed-run diagnostics redacted.
-            saved_evidence = dict(evidence)
-            saved_evidence["arguments"] = redact(arguments)
-            if isinstance(result, dict) and result.get("status") == "FAILED":
-                saved_evidence["result"] = redact(result)
+        saved_evidence = _audit_copy(evidence, redact_evidence)
         text = json.dumps(saved_evidence, ensure_ascii=False)
     except (TypeError, ValueError, RecursionError):
         text = json.dumps({"collector": target["name"], "version": target["version"],
@@ -816,7 +813,9 @@ def resume(request_id: str, userid: str, confirmation_id: str, approved: bool, *
         state["legacy_investigation"] = state.pop("investigation_context")
     pending = state.pop("pending")
     if not approved:
-        store.record(request_id, pending["target"], redact(pending["arguments"]), "CANCELLED", "Cancelled by user.")
+        store.record(request_id, pending["target"],
+                     _audit_copy(pending["arguments"], state.get("redact_evidence", True)),
+                     "CANCELLED", "Cancelled by user.")
         if state.get("investigation_context"):
             state["messages"].append({"role": "tool", "tool_call_id": pending["call_id"],
                                       "content": "Cancelled by the user. Do not repeat this collector request."})
@@ -825,8 +824,8 @@ def resume(request_id: str, userid: str, confirmation_id: str, approved: bool, *
         return _reply(request_id, "CANCELLED", "Collector request cancelled. No further calls were run.")
     deadline = time.monotonic() + state["remaining"]
     reviewed = pending["reviewed_arguments"]
-    store.record(request_id, pending["target"], redact(reviewed),
-                 "CONFIRMED", ("Input arguments reviewed by the authenticated request owner."
+    store.record(request_id, pending["target"],
+                 _audit_copy(reviewed, state.get("redact_evidence", True)), "CONFIRMED", ("Input arguments reviewed by the authenticated request owner."
                                if state.get("review_arguments", True)
                                else "Execution confirmed by the authenticated request owner."))
     if state.get("investigation_context"):
@@ -886,8 +885,9 @@ def _loop(request_id, state, userid):
                             raise ValueError("Maximum knowledge searches reached.")
                 elif function.get("name") != "stop_without_execution":
                     raise ValueError("Unknown tool; no further calls were executed.")
+                raw = function.get("arguments", "{}")
+                payload = None
                 try:
-                    raw = function.get("arguments", "{}")
                     if not isinstance(raw, str) or len(raw) > 32000:
                         raise ValueError("Invalid or oversized collector arguments.")
                     payload = json.loads(raw)
@@ -941,20 +941,42 @@ def _loop(request_id, state, userid):
                         return _reply(request_id, "COMPLETED", prefix + message)
                     if function.get("name") != "execute_collector":
                         raise ValueError("Unknown tool. Use list_collectors or execute_collector.")
+                    collector_id = payload.get("collector_id") if isinstance(payload, dict) else None
+                    if isinstance(collector_id, str):
+                        target = state["catalog"].get(collector_id)
                     target, arguments = _resolve_execution(state, payload)
                     _reserve_execution(state, target, arguments)
                 except (ValueError, TypeError) as exc:
                     text = str(redact(str(exc)))
                     name = function.get("name", "unknown")
                     rejected_target = target or {"name": name if name in {"list_collectors", "search_knowledge", "finish_investigation"} else "unknown"}
-                    store.record(request_id, rejected_target, {}, "REJECTED", text)
+                    if payload is None:
+                        if isinstance(raw, str):
+                            audit_arguments = {"raw_tool_arguments": raw[:32000]}
+                            if len(raw) > 32000:
+                                audit_arguments["truncated"] = True
+                        else:
+                            audit_arguments = {"raw_tool_arguments": raw}
+                    elif name == "execute_collector" and isinstance(payload, dict):
+                        audit_arguments = {
+                            "collector_id": payload.get("collector_id"),
+                            "version": payload.get("version"),
+                            "arguments": payload.get("arguments"),
+                        }
+                    else:
+                        audit_arguments = payload
+                    store.record(request_id, rejected_target,
+                                 _audit_copy(audit_arguments, state.get("redact_evidence", True)),
+                                 "REJECTED", text)
                 else:
                     review_arguments = state.get("review_arguments", True)
                     if review_arguments or target["policy"] == "ai-assisted":
                         pending = {"target": target, "arguments": arguments, "call_id": call["id"],
                                    "confirmation_id": uuid4().hex}
                         state.update(pending=pending, remaining=_remaining(deadline))
-                        store.record(request_id, target, redact(arguments), "AWAITING_CONFIRMATION",
+                        store.record(request_id, target,
+                                     _audit_copy(arguments, state.get("redact_evidence", True)),
+                                     "AWAITING_CONFIRMATION",
                                      ("Waiting for input-argument review; collector approval is unchanged."
                                       if review_arguments else "Execution policy requires human confirmation."))
                         _publish_progress(request_id, state, "awaiting_confirmation")
@@ -972,6 +994,14 @@ def _loop(request_id, state, userid):
                 continue
             tools = _available_tools(state)
             if state.get("model_turns", 0) >= _limit(state, "MAX_MODEL_TURNS"):
+                if state.get("investigation_context"):
+                    mode = str(state.get("mode") or "selected").replace("_", " ").title()
+                    turn_limit = _limit(state, "MAX_MODEL_TURNS")
+                    raise ValueError(
+                        f"{mode} mode reached its {turn_limit}-turn model limit before the investigation "
+                        "could be finalized. Saved evidence remains available. Start a New Chat using a "
+                        "mode that displays a higher model-turn limit, if available."
+                    )
                 raise ValueError("Model-turn limit reached before completion; saved evidence remains available.")
             if not state.get("investigation_context") and state["execution_requests"] >= _limit(state, "MAX_EXECUTION_REQUESTS"):
                 if state.get("execution_attempted"):
@@ -1065,8 +1095,17 @@ def _loop(request_id, state, userid):
                 raise ValueError("Stop must be requested alone. None of this batch ran.")
             if names.count("list_collectors") > _limit(state, "MAX_DISCOVERY_CALLS") - state["discovery_calls"]:
                 raise ValueError("Model exceeded the remaining discovery limit. None of this batch ran.")
-            if names.count("execute_collector") > _limit(state, "MAX_EXECUTION_REQUESTS") - state["execution_requests"]:
-                raise ValueError("Model exceeded the remaining execution-request limit. None of this batch ran.")
+            execution_limit = _limit(state, "MAX_EXECUTION_REQUESTS")
+            remaining_executions = max(0, execution_limit - state["execution_requests"])
+            requested_executions = names.count("execute_collector")
+            if requested_executions > remaining_executions:
+                mode_label = str(state.get("mode", "selected")).replace("_", " ").title()
+                raise ValueError(
+                    f"Partial investigation: {mode_label} mode allows up to {execution_limit} "
+                    f"collector execution requests. The model requested {requested_executions} "
+                    f"in one batch with {remaining_executions} remaining; none ran. Start a New Chat "
+                    "with a mode that allows more collector requests."
+                )
             ids = [c.get("id") for c in calls]
             if any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
                 raise ValueError("Model returned invalid tool-call IDs.")

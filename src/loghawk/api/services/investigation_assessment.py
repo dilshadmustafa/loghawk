@@ -3,14 +3,15 @@ import hashlib
 import json
 
 from loghawk.builtin_tasks.contracts import validate_arguments
+from loghawk.config import LH_LLM_TOOL_MAX_EVIDENCE_REFERENCES_PER_CLAIM
 
 CLAIM = {
     "type": "object", "properties": {
         "text": {"type": "string", "minLength": 1, "maxLength": 1500,
                  "description": "One concise evidence-based claim; preserve material uncertainty and coverage limits."},
         "references": {"type": "array", "items": {"type": "string", "maxLength": 200},
-                       "maxItems": 10,
-                       "description": "At most 10 distinct supplied evidence labels supporting this claim. Cite primary records; do not repeat labels."},
+                       "maxItems": LH_LLM_TOOL_MAX_EVIDENCE_REFERENCES_PER_CLAIM,
+                       "description": f"At most {LH_LLM_TOOL_MAX_EVIDENCE_REFERENCES_PER_CLAIM} distinct supplied evidence labels supporting this claim. Cite primary records; do not repeat labels."},
     }, "required": ["text", "references"], "additionalProperties": False,
 }
 ASSESSMENT_SCHEMA = {
@@ -40,7 +41,7 @@ def tools():
             "parameters": SEARCH_SCHEMA}},
         {"type": "function", "function": {
             "name": "finish_investigation",
-            "description": "Finish with a concise assessment of roughly 500-700 tokens: 3-5 key observations where supported, hypotheses, contradictions, missing evidence, conclusion and next steps. Cite primary supplied evidence labels, at most 10 distinct labels per claim. Observations require references. Preserve uncertainty and coverage limits. Call alone; the validated assessment is the final response.",
+            "description": f"Finish with a concise assessment of roughly 500-700 tokens: 3-5 key observations where supported, hypotheses, contradictions, missing evidence, conclusion and next steps. Cite primary supplied evidence labels, at most {LH_LLM_TOOL_MAX_EVIDENCE_REFERENCES_PER_CLAIM} distinct labels per claim. Observations require references. Preserve uncertainty and coverage limits. Call alone; the validated assessment is the final response.",
             "parameters": ASSESSMENT_SCHEMA}},
     ]
 
@@ -127,7 +128,7 @@ def validate_model_assessment(value, aliases, references):
     }
     claims = [*result["observations"], *result["hypotheses"],
               *result["contradictions"], result["conclusion"]]
-    # Check every supplied label, including those after the tenth entry.
+    # Check every supplied label before deduplicating and enforcing the configured cap.
     for claim in claims:
         if any(label not in alias_to_reference for label in claim["references"]):
             raise ValueError(
@@ -136,7 +137,7 @@ def validate_model_assessment(value, aliases, references):
     for claim in claims:
         labels = list(dict.fromkeys(claim["references"]))
         claim["references"] = [alias_to_reference[label] for label in labels]
-    # More than ten unique references fails; no distinct reference is discarded.
+    # More than the configured number of unique references fails; none are discarded.
     return validate(result, references)
 
 

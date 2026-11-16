@@ -31,12 +31,14 @@ const argumentDraft = ref("");
 const reviewInputArgs = ref(false);
 const redactEvidence = ref(true);
 const newChatDialog = ref<HTMLDialogElement | null>(null);
-const mode = ref<RcaMode>("performance");
+const mode = ref<RcaMode>("balanced");
+const defaultMode = ref<RcaMode>("balanced");
 const profiles = ref<RcaProfile[]>([]);
 const selectedProfile = computed(() => profiles.value.find(p => p.mode === mode.value));
 const activeId = ref("");
-const requestMode = ref<RcaMode>("performance");
+const requestMode = ref<RcaMode>("balanced");
 const requestInvestigationId = ref("");
+const currentInvestigationId = computed(() => investigationId.value || requestInvestigationId.value);
 const progress = ref<Progress | null>(null);
 const progressAnchor = ref(-1);
 const startedAt = ref("");
@@ -87,10 +89,19 @@ function confirmNewChat() {
   void router.replace({ path: "/rca/chat", query: {} });
   void loadInvestigationOptions(0);
 }
-onBeforeRouteUpdate(() => {
+onBeforeRouteUpdate((to) => {
   if (busy.value || pending.value || uncertain.value) return false;
   resetTracking(); messages.value = []; error.value = ""; argumentDraft.value = "";
+  const nextInvestigationId = typeof to.query.investigation === "string"
+    ? to.query.investigation : "";
+  directEntry.value = !nextInvestigationId;
+  chatStarted.value = false;
+  selectedInvestigation.value = null;
+  investigationSearch.value = "";
+  pickerOpen.value = false;
+  if (!nextInvestigationId) void loadInvestigationOptions(0);
 });
+
 onBeforeUnmount(() => { disposed = true; ++operation; ++investigationListGeneration; if (investigationSearchTimer !== undefined) window.clearTimeout(investigationSearchTimer); stopPolling(); });
 const blockedReason = computed(() => {
   if (!ready.value) return "Loading investigation modes and session…";
@@ -244,6 +255,9 @@ async function initialize() {
     const [available, user] = await Promise.all([getRcaProfiles(), getCurrentUser()]);
     if (disposed) return;
     profiles.value = available.profiles;
+    defaultMode.value = available.default_mode;
+    mode.value = available.default_mode;
+    requestMode.value = available.default_mode;
     storageKey = `loghawk.rca.active.${encodeURIComponent(user.userid)}`;
     let saved: SavedRequest | null = null;
     try { saved = JSON.parse(sessionStorage.getItem(storageKey) || "null") as SavedRequest | null; } catch { clearSaved(); }
@@ -411,8 +425,8 @@ async function decide(approved: boolean) {
         View investigation details ↗
       </RouterLink>
     </section>
-    <p v-else-if="investigationId">Investigation:
-      <RouterLink :to="'/rca/investigations/' + investigationId">{{ investigationId }}</RouterLink>.
+    <p v-else-if="currentInvestigationId">Investigation:
+      <RouterLink :to="'/rca/investigations/' + currentInvestigationId">{{ currentInvestigationId }}</RouterLink>.
       Each request captures its current incident and evidence selection.
       <span v-if="directEntry && chatStarted"> This chat is fixed to this investigation; use New Chat to choose another context.</span>
     </p>
@@ -432,7 +446,7 @@ async function decide(approved: boolean) {
       <div class="mode-options">
         <label v-for="profile in profiles" :key="profile.mode" :class="{ selected: mode === profile.mode }">
           <input type="radio" name="rca-mode" :value="profile.mode" v-model="mode" />
-          {{ profile.label }}<span v-if="profile.mode === 'performance'"> · default</span>
+          {{ profile.label }}<span v-if="profile.mode === defaultMode"> · default</span>
         </label>
       </div>
       <template v-if="selectedProfile">
@@ -458,7 +472,7 @@ async function decide(approved: boolean) {
       <input type="checkbox" v-model="redactEvidence" :disabled="busy || !!pending || uncertain" />
       Redact sensitive values in collector evidence
     </label>
-    <p>Checked by default. If unchecked, successful collector results are saved and sent to the configured model without sensitive-value redaction. Use this only when you are comfortable retaining and sharing those values.</p>
+    <p>Checked by default. Redaction applies to saved collector results, saved arguments, failure diagnostics, rejected tool arguments, and collector evidence sent to the model. If unchecked, these may be retained or sent unredacted. While a collector awaits confirmation, the API temporarily retains its exact arguments for up to 10 minutes so execution can resume; this pending state is not controlled by this checkbox.</p>
     <p>Collector tool calling must be enabled on the API server. Active requests reconnect when you return to this page in the same browser tab.</p>
     <div class="conversation">
       <template v-for="({ message, showProgress }, index) in conversation" :key="index">

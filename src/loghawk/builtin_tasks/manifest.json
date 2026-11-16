@@ -45,13 +45,13 @@
             "type": "string",
             "minLength": 20,
             "maxLength": 40,
-            "description": "Inclusive start with timezone, for example 2026-11-03T09:07:00Z or 2026-11-03T14:37:00+05:30."
+            "description": "Required RFC 3339 timestamp with a timezone: use Z or an explicit UTC offset, for example 2026-11-03T09:07:00Z or 2026-11-03T14:37:00+05:30. If the source timestamp has no timezone, determine the correct timezone before calling; do not omit or guess it."
           },
           "end_time": {
             "type": "string",
             "minLength": 20,
             "maxLength": 40,
-            "description": "Inclusive end with timezone, after start_time and at most 24 hours later."
+            "description": "Required RFC 3339 timestamp with a timezone: use Z or an explicit UTC offset. It must be after start_time and at most 24 hours later. If the source timestamp has no timezone, determine the correct timezone before calling; do not omit or guess it."
           },
           "step_seconds": {
             "type": "integer",

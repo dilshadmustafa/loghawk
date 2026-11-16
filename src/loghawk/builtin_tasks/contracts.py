@@ -116,8 +116,13 @@ def _validate_value(value, schema, path):
         return {key: _validate_value(item, props[key], f"{path}.{key}") for key, item in result.items()}
     if kind in {"array", "string"}:
         low, high = ("minItems", "maxItems") if kind == "array" else ("minLength", "maxLength")
-        if len(value) < schema.get(low, 0) or len(value) > schema.get(high, 32000):
-            raise ValueError(f"{path} exceeds its size constraints")
+        unit = "items" if kind == "array" else "characters"
+        minimum = schema.get(low, 0)
+        maximum = schema.get(high, 32000)
+        if len(value) < minimum:
+            raise ValueError(f"{path} must contain at least {minimum} {unit}")
+        if len(value) > maximum:
+            raise ValueError(f"{path} must contain at most {maximum} {unit}")
         if kind == "array":
             return [_validate_value(item, schema["items"], f"{path}[]") for item in value]
     if kind in {"integer", "number"}:

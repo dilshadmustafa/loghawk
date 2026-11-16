@@ -441,6 +441,12 @@ class HawkConsole(App[None]):
                            disabled=self._api_client is None)
             yield TickCheckbox("Redact sensitive values in collector evidence", value=True,
                            id="redact-collector-evidence", disabled=self._api_client is None)
+            yield Static(
+                "Checked by default: redact saved collector results, arguments, failures, and rejected tool arguments. "
+                "If unchecked, collector evidence may be saved and sent to the model unredacted. Pending confirmations "
+                "temporarily retain exact arguments for up to 10 minutes so execution can resume.",
+                classes="muted",
+            )
             with Container(id="task-create-pane"):
                 yield Static("Create Task", classes="pane-title")
                 with Container(id="task-create-fields"):

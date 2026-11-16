@@ -2,7 +2,7 @@
 
 from loghawk import config
 
-DEFAULT_MODE = "performance"
+DEFAULT_MODE = config.LH_RCA_DEFAULT_MODE
 LIMIT_KEYS = (
     "MAX_MODEL_TURNS", "MAX_DISCOVERY_CALLS", "MAX_EXECUTION_REQUESTS", "MAX_RAG_SEARCHES",
 )
