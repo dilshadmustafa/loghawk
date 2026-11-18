@@ -182,9 +182,16 @@ class _UploadStream:
 
 def import_staged(key,user,name,stream,size,digest,evidence_type,record_path=None,original_uri=None,incident_id=None):
     name,fmt=validate_source(name,evidence_type);now=utc_now();source_id=uuid4().hex
-    prefix=config.LH_INVESTIGATION_SOURCE_S3_PREFIX.strip("/")
-    if not prefix or any(p in {".",".."} for p in prefix.split("/")):raise ValueError("Invalid investigation source prefix.")
-    folder=key or incident_id or "standalone-evidence";object_key=f"{prefix}/{folder}/{source_id}/original.{fmt}";snapshot=f"s3://{config.LH_S3_BUCKET}/{object_key}"
+    prefix=config.LH_RCA_SOURCE_S3_PREFIX.strip("/")
+    if not prefix or any(p in {".",".."} for p in prefix.split("/")):raise ValueError("Invalid RCA source prefix.")
+    if key:
+        owner_folder=f"investigations/{key}"
+    elif incident_id:
+        owner_folder=f"incidents/{incident_id}"
+    else:
+        owner_folder="standalone-evidence"
+    object_key=f"{prefix}/{owner_folder}/{source_id}/original.{fmt}"
+    snapshot=f"s3://{config.LH_S3_BUCKET}/{object_key}"
     from loghawk.api.services import evidence_membership as membership
     with connect("server") as db:
         if incident_id:

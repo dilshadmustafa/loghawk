@@ -67,10 +67,11 @@ def call(fn, *args, **kwargs):
 def listing(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
             q: str = Query("", max_length=200), severity: str | None = Query(None, max_length=100),
             service: str | None = Query(None, max_length=300), created_from: date | None = None,
-            created_to: date | None = None, user=Depends(require_authenticated_user)):
+            created_to: date | None = None, linkable: bool = Query(False),
+            user=Depends(require_authenticated_user)):
     if created_from and created_to and created_from > created_to:
         raise HTTPException(422, "Created-from date must be on or before created-to date.")
-    return call(store.listing, user, offset, limit, q, severity, service, created_from, created_to)
+    return call(store.listing, user, offset, limit, q, severity, service, created_from, created_to, include_all=linkable)
 
 
 @router.post("", status_code=201)

@@ -55,9 +55,9 @@ def create(user, source_incident_id, summary, start_time, end_time, severity, pr
     return detail(key, user)
 
 
-def listing(user, offset=0, limit=50, query="", severity=None, service=None, created_from=None, created_to=None):
+def listing(user, offset=0, limit=50, query="", severity=None, service=None, created_from=None, created_to=None, include_all=False):
     clauses, values = ["deleted_at IS NULL"], []
-    if user.get("role") not in MANAGERS:
+    if not include_all and user.get("role") not in MANAGERS:
         clauses.append("userid=?")
         values.append(user["userid"])
     term = str(query or "").strip().lower()

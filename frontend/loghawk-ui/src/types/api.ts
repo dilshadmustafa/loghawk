@@ -337,7 +337,7 @@ export interface RcaHistoryDetail {
 }
 
 export interface InvestigationSource {
-  id: string; name: string; status: string; evidence_type: string; format: string;
+  id: string; userid?: string; name: string; status: string; evidence_type: string; format: string;
   record_count: number; error?: string; sha256?: string; original_uri?: string;
   snapshot_uri?: string; mapping: Record<string, string>; tool_call_id?: string;
   is_directly_linked?: boolean | number;
@@ -349,9 +349,10 @@ export interface Investigation {
   id: string; userid: string; problem: string; status: string;
   created_at: string; updated_at: string; can_modify: boolean;
   reported_context: Record<string, unknown>;
-  incidents: {id: string; source_incident_id: string; primary_details: Record<string, unknown>}[];
+  incidents: {id: string; userid: string; source_incident_id: string; primary_details: Record<string, unknown>}[];
   sources: InvestigationSource[];
-  evidence_links: Record<string, unknown>[]; incident_evidence: Record<string, unknown>[];
+  evidence_links: Record<string, unknown>[];
+  incident_evidence: {id: string; incident_id: string; source_id: string; selection: number[] | null; can_modify_attachment: boolean}[];
   findings: {id: string; content: string; origin: string; userid: string; created_at: string;
              request_id?: string; supersedes_id?: string; evidence: unknown[]}[];
   requests: {request_id: string; created_at: string; status: string | null; origin_software: string | null; evidence_removed: boolean}[];

@@ -91,23 +91,30 @@ function download() {
 }
 </script>
 <template>
-  <section>
-    <h1>RCA Request History</h1>
-    <RouterLink to="/rca/history">Back to History</RouterLink>
-    <button :disabled="busy || explaining" @click="load">Refresh</button>
-    <button v-if="record" @click="copy(pretty(record))">Copy JSON</button>
-    <button v-if="record" @click="download">Download JSON</button>
-    <p v-if="busy" role="status">Loading request…</p><p v-if="error" role="alert">{{ error }}</p>
-    <p role="status">{{ notice }}</p>
+  <section class="view rca-history-detail">
+    <header class="view-header">
+      <div><p class="eyebrow">AI INVESTIGATION</p><h1>RCA Request History</h1></div>
+      <div class="actions">
+        <RouterLink class="btn" to="/rca/history">← Back to History</RouterLink>
+        <button class="btn" :disabled="busy || explaining" @click="load">Refresh</button>
+        <button v-if="record" class="btn" @click="copy(pretty(record))">Copy JSON</button>
+        <button v-if="record" class="btn" @click="download">Download JSON</button>
+      </div>
+    </header>
+    <p v-if="busy" class="muted" role="status">Loading request…</p><p v-if="error" class="alert failure" role="alert">{{ error }}</p>
+    <p v-if="notice" class="alert" role="status">{{ notice }}</p>
     <template v-if="record">
-      <p>Request ID: <code>{{ record.id }}</code> · {{ record.userid }} · {{ record.origin_software }}</p>
-      <section v-if="record.investigation">
+      <p class="card request-meta">Request ID: <code>{{ record.id }}</code> · {{ record.userid }} · {{ record.origin_software }}</p>
+      <section v-if="record.investigation" class="card snapshot-card">
         <RouterLink :to="`/rca/investigations/${record.investigation.investigation_id}`">Open Investigation</RouterLink>
         <details><summary>Saved request context snapshot</summary><pre>{{ pretty(record.investigation.snapshot) }}</pre></details>
         <p>This snapshot preserves the inputs selected for this request. Regeneration does not add later attachments.</p>
       </section>
-      <nav aria-label="History sections"><button v-for="name in tabs" :key="name" :aria-pressed="tab === name" @click="tab = name">{{ name }}</button></nav>
-      <section v-if="tab === 'Overview'">
+      <nav class="tabs history-tabs" aria-label="History sections">
+        <button v-for="name in tabs" :key="name" :aria-pressed="tab === name"
+          :class="{ active: tab === name }" @click="tab = name">{{ name }}</button>
+      </nav>
+      <section v-if="tab === 'Overview'" class="card history-panel">
         <h2>Question</h2><p class="text">{{ record.question_text ?? 'Not recorded' }}</p>
         <p>Started: {{ time(record.created_at) }} · Updated: {{ time(record.updated_at) }} · Request status: {{ record.status }}</p>
         <section v-if="savedMode" class="saved-mode">
@@ -141,7 +148,7 @@ function download() {
         <details><summary>Settings at request creation</summary><pre>{{ pretty(record.settings) }}</pre></details>
         <p>Older requests may lack questions, settings or model-usage metadata. Not recorded means unavailable, not zero.</p>
       </section>
-      <section v-if="tab === 'Evidence & Inputs'">
+      <section v-if="tab === 'Evidence & Inputs'" class="card history-panel">
         <p v-if="record.settings?.redact_evidence !== false">Sensitive-value redaction was enabled. Saved collector results, arguments, failure diagnostics, and rejected tool arguments are redacted; redacted collector evidence is sent to the model. Evidence may also be compacted for model input or limited by its source/runner. While awaiting confirmation, the API temporarily retains exact arguments for up to 10 minutes so execution can resume; that pending state is not controlled by this setting. Character counts are not token counts.</p>
         <p v-else>Sensitive-value redaction was disabled. Collector results, arguments, failure diagnostics, and rejected tool arguments may contain sensitive values in RCA History; collector evidence is also sent to the configured model unredacted. Evidence may still be compacted for model input or limited by its source/runner. While awaiting confirmation, the API temporarily retains exact arguments for up to 10 minutes so execution can resume. Character counts are not token counts.</p>
         <article v-for="event in collectors" :key="event.id">
@@ -164,10 +171,11 @@ function download() {
         </article>
         <p v-if="!collectors.length">No collector execution, RAG search or input review events recorded.</p>
       </section>
-      <section v-if="tab === 'AI Explanations'">
+      <section v-if="tab === 'AI Explanations'" class="card history-panel">
         <p>Every recorded explanation attempt is retained. A failed explanation does not mean collection failed.</p>
         <button
           v-if="record.explanation?.can_retry || record.explanation?.can_regenerate"
+          class="btn primary"
           :disabled="busy || explaining"
           @click="explainAgain">
           {{ record.explanation?.can_regenerate
@@ -184,11 +192,11 @@ function download() {
           <button @click="copy(event.result_text ?? '')">Copy explanation</button>
         </article><p v-if="!explanations.length">No explanation attempts recorded.</p>
       </section>
-      <section v-if="tab === 'Timeline'">
+      <section v-if="tab === 'Timeline'" class="card history-panel">
         <ol><li v-for="entry in timeline" :key="entry.id"><strong>{{ time(entry.at) }} · {{ entry.label }}</strong><p>{{ entry.detail }}</p></li></ol>
         <p>Events are ordered by recorded timestamp. View the other tabs for evidence and full attempt details.</p>
       </section>
-      <section v-if="tab === 'LLM Usage'">
+      <section v-if="tab === 'LLM Usage'" class="card history-panel">
         <p>Historical settings captured for each invocation. Dispatch calls include discovery; invocation counts include correction turns and explanation retries. PREPARING means the API call may not have started. Token usage is shown only when reported by the provider.</p>
         <article v-for="invocation in record.invocations" :key="invocation.id">
           <h2>{{ invocation.invocation_number }} · {{ stageLabel(invocation.stage) }} · {{ invocation.status }}</h2>
@@ -203,7 +211,9 @@ function download() {
           <p>Invocation: {{ invocation.id }} · Explanation attempt: {{ invocation.explanation_attempt_id ?? 'Not applicable' }}</p>
           <p>Provider: {{ invocation.provider ?? 'Not recorded' }} · Configured model: {{ invocation.configured_model ?? 'Not recorded' }} · Returned model: {{ invocation.returned_model ?? 'Not reported' }}</p>
           <p>{{ time(invocation.started_at) }} — {{ time(invocation.completed_at) }} · Duration including preparation: {{ invocation.duration_ms == null ? 'Not recorded' : (invocation.duration_ms / 1000).toFixed(2) + ' seconds' }}</p>
-          <table><thead><tr><th>Setting</th><th>Recorded value</th></tr></thead><tbody><tr v-for="(value, key) in invocation.settings ?? {}" :key="key"><td>{{ key }}</td><td>{{ typeof value === "object" ? pretty(value) : value }}</td></tr></tbody></table>
+          <div class="settings-table-wrap">
+            <table class="settings-table"><thead><tr><th>Setting</th><th>Recorded value</th></tr></thead><tbody><tr v-for="(value, key) in invocation.settings ?? {}" :key="key"><td>{{ key }}</td><td>{{ typeof value === "object" ? pretty(value) : value }}</td></tr></tbody></table>
+          </div>
           <h3>Provider token usage</h3><pre>{{ invocation.usage == null ? 'Not reported' : pretty(invocation.usage) }}</pre>
           <p v-if="invocation.error_text" class="text">{{ invocation.error_text }}</p>
           <details v-for="view in record.evidence_views.filter(v => v.invocation_id === invocation.id)" :key="view.id">
@@ -216,10 +226,40 @@ function download() {
   </section>
 </template>
 <style scoped>
-.saved-mode { border-left: 3px solid #0f766e; padding: .25rem 1rem; margin: 1rem 0; } .mode-name { text-transform: capitalize; }
-button { margin: .3rem .5rem .3rem 0; } nav { display: flex; flex-wrap: wrap; margin: 1rem 0; }
-button[aria-pressed="true"] { outline: 2px solid #3684bd; }
-article { border: 1px solid #64748b; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
-pre, .text { white-space: pre-wrap; overflow-wrap: anywhere; } pre { max-height: 36rem; overflow-y: auto; }
-code, td, dd, li p { overflow-wrap: anywhere; } table { width: 100%; } dt { font-weight: bold; } dd { margin-bottom: .5rem; }
+.rca-history-detail { width: min(1400px, 100%); }
+.rca-history-detail .view-header { flex-wrap: wrap; }
+.rca-history-detail .view-header > div:first-child { flex: 1; min-width: 200px; }
+.eyebrow { margin: .2rem 0 .5rem; color: #aebbc7; font-size: .8rem; letter-spacing: .07em; text-transform: uppercase; }
+.request-meta { margin: 0; overflow-wrap: anywhere; }
+.alert { padding: .85rem 1rem; border: 1px solid #355c59; border-radius: .5rem; background: #172d30; overflow-wrap: anywhere; }
+.alert.failure { border-color: #89515c; background: #34242a; color: #ffc4cc; }
+.snapshot-card { display: grid; gap: .5rem; }
+.history-tabs { display: flex; gap: .3rem; overflow-x: auto; border-bottom: 1px solid #344553; padding-bottom: .5rem; }
+.history-tabs button { white-space: nowrap; border-color: transparent; background: transparent; }
+.history-tabs button.active { color: #8fe5ce; background: #203d3b; border-color: #47766b; }
+.history-panel { display: grid; gap: .85rem; min-width: 0; }
+.history-panel > .btn.primary { justify-self: start; width: fit-content; }
+.history-panel > h2:first-child { margin-top: 0; }
+.saved-mode { border-left: 3px solid #6bd7bb; padding: .25rem 1rem; margin: .5rem 0; }
+.mode-name { text-transform: capitalize; }
+.rca-history-detail button { padding: .55rem .75rem; color: #e8edf2; background: #243442; border: 1px solid #405665; border-radius: .45rem; cursor: pointer; font: inherit; }
+.rca-history-detail button:hover:not(:disabled) { border-color: #6bd7bb; background: #2b414c; }
+.rca-history-detail button:disabled { opacity: .45; cursor: not-allowed; }
+.rca-history-detail .btn.primary { color: #08131b; background: #6bd7bb; border-color: #6bd7bb; font-weight: 700; }
+.rca-history-detail button:focus-visible, .rca-history-detail a:focus-visible { outline: 2px solid #8fe5ce; outline-offset: 3px; }
+article { margin: 0; padding: 1rem; border: 1px solid #2d404e; border-radius: .65rem; background: #111c26; }
+pre, .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+pre { max-height: 36rem; overflow-y: auto; padding: .8rem; border-radius: .4rem; background: #0d151c; }
+code, td, dd, li p { overflow-wrap: anywhere; }
+table { width: 100%; border-collapse: collapse; }
+.settings-table-wrap { max-width: 100%; overflow-x: auto; }
+.settings-table th:first-child, .settings-table td:first-child { white-space: nowrap; overflow-wrap: normal; }
+th { color: #93a7b6; font-size: .75rem; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+th, td { padding: .65rem; border-bottom: 1px solid #293a46; vertical-align: top; }
+dt { font-weight: bold; } dd { margin-bottom: .5rem; }
+@media (max-width: 700px) {
+  .rca-history-detail .actions { align-items: stretch; }
+  .history-tabs button { padding: .5rem .6rem; }
+  .history-panel { padding: .9rem; }
+}
 </style>

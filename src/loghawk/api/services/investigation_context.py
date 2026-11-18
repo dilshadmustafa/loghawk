@@ -34,7 +34,13 @@ def capture(key,userid,request_id,question,redact,conversation=None):
             elif selection is None or selections[source] is None:selections[source]=None
             else:selections[source]=sorted(set(selection)|set(selections[source]))
         for source_id,selection in sorted(selections.items()):
-            source=store.owned(db,"rca_evidence_sources",source_id,userid)
+            source=db.execute("SELECT * FROM rca_evidence_sources WHERE id=?",(source_id,)).fetchone()
+            if not source:
+                raise ValueError("A selected evidence source is no longer available.")
+            if source["userid"]!=userid:
+                shared_incident_source=db.execute("SELECT 1 FROM rca_incident_sources m JOIN rca_investigation_incidents l ON l.incident_id=m.incident_id JOIN rca_incidents i ON i.id=l.incident_id WHERE l.investigation_id=? AND m.source_id=? AND i.userid=? AND i.deleted_at IS NULL LIMIT 1",(key,source_id,source["userid"])).fetchone()
+                if not shared_incident_source:
+                    raise PermissionError("Selected evidence is not owned by the investigation owner or attached to one of its active linked incidents.")
             item={"source_id":source_id,"name":source["name"],"sha256":source["sha256"],
                   "original_uri":source["original_uri"],"evidence_type":source["evidence_type"],
                   "mapping":json.loads(source["mapping_json"]),"selected_record_numbers":selection,

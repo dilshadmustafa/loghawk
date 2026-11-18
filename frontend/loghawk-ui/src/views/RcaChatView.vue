@@ -431,15 +431,17 @@ async function decide(approved: boolean) {
       <span v-if="directEntry && chatStarted"> This chat is fixed to this investigation; use New Chat to choose another context.</span>
     </p>
     <p v-else-if="directEntry && chatStarted">General RCA chat · This chat has no investigation context. Use New Chat to select one.</p>
-    <button :disabled="busy || !!pending || uncertain" @click="requestNewChat">
+    <button class="btn" :disabled="busy || !!pending || uncertain" @click="requestNewChat">
       New Chat
     </button>
-    <dialog ref="newChatDialog" aria-labelledby="new-chat-title">
+    <dialog ref="newChatDialog" class="new-chat-dialog" aria-labelledby="new-chat-title">
       <h2 id="new-chat-title">Start a new chat?</h2>
       <p>Clear the current conversation and RCA output?
          Saved history, audit records, and execution evidence will remain available.</p>
-      <button @click="confirmNewChat">Yes</button>
-      <button autofocus @click="newChatDialog?.close()">No</button>
+      <div class="dialog-actions">
+        <button class="btn primary" @click="confirmNewChat">Yes</button>
+        <button class="btn" autofocus @click="newChatDialog?.close()">No</button>
+      </div>
     </dialog>
     <fieldset class="investigation-modes" :disabled="!ready || busy || !!pending || uncertain">
       <legend>Investigation mode</legend>
@@ -568,6 +570,11 @@ async function decide(approved: boolean) {
 
 <style scoped>
 .rca-chat { max-width: 1000px; }
+.new-chat-dialog { width: min(32rem, calc(100vw - 2rem)); max-width: calc(100vw - 2rem); padding: 1.25rem; color: #e8edf2; background: #131f28; border: 1px solid #51716f; border-radius: .75rem; box-shadow: 0 18px 48px #000a; }
+.new-chat-dialog::backdrop { background: rgb(3 9 14 / 72%); backdrop-filter: blur(2px); }
+.new-chat-dialog h2 { margin: 0 0 .75rem; }
+.new-chat-dialog p { margin: .4rem 0 1.2rem; color: #c5d1d9; line-height: 1.5; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: .6rem; }
 .investigation-context-picker { position: relative; max-width: 680px; margin: .75rem 0; }
 .investigation-context-picker > label, .context-search { display: block; font-weight: 700; margin-bottom: .35rem; }
 .context-trigger { display: flex; align-items: center; gap: .65rem; width: 100%; text-align: left; padding: .7rem .85rem; border: 1px solid #51716f; border-radius: .5rem; color: #e8edf2; background: #17232d; }

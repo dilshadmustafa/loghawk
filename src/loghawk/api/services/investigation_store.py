@@ -77,10 +77,16 @@ def detail(key,user):
  with connect("server") as db:
   row=require(db,key,user);result=decoded(row);result["can_modify"]=row["userid"]==user["userid"] and row["status"]=="OPEN"
   result["incidents"]=[decoded(r) for r in db.execute("SELECT i.* FROM rca_incidents i JOIN rca_investigation_incidents l ON i.id=l.incident_id WHERE l.investigation_id=? AND i.deleted_at IS NULL ORDER BY l.created_at",(key,)).fetchall()]
-  result["sources"]=[decoded(r) for r in db.execute("SELECT DISTINCT s.*,EXISTS(SELECT 1 FROM rca_investigation_sources m WHERE m.investigation_id=? AND m.source_id=s.id) AS is_directly_linked FROM rca_evidence_sources s WHERE s.id IN (SELECT source_id FROM rca_investigation_sources WHERE investigation_id=?) OR s.id IN (SELECT source_id FROM rca_investigation_evidence WHERE investigation_id=?) OR s.id IN (SELECT m.source_id FROM rca_incident_sources m JOIN rca_investigation_incidents i ON i.incident_id=m.incident_id WHERE i.investigation_id=?) OR s.id IN (SELECT e.source_id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=?) ORDER BY s.created_at",(key,key,key,key,key)).fetchall()]
+  result["sources"]=[decoded(r) for r in db.execute("SELECT DISTINCT s.*,EXISTS(SELECT 1 FROM rca_investigation_sources m WHERE m.investigation_id=? AND m.source_id=s.id) AS is_directly_linked FROM rca_evidence_sources s WHERE s.id IN (SELECT source_id FROM rca_investigation_sources WHERE investigation_id=?) OR s.id IN (SELECT source_id FROM rca_investigation_evidence WHERE investigation_id=?) OR s.id IN (SELECT m.source_id FROM rca_incident_sources m JOIN rca_investigation_incidents i ON i.incident_id=m.incident_id JOIN rca_incidents x ON x.id=i.incident_id WHERE i.investigation_id=? AND x.deleted_at IS NULL) OR s.id IN (SELECT e.source_id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=?) ORDER BY s.created_at",(key,key,key,key,key)).fetchall()]
   result["sources"]=[s for s in result["sources"] if s["status"] not in {"DISMISSED","REMOVED"}]
   result["evidence_links"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_evidence WHERE investigation_id=?",(key,)).fetchall()]
-  result["incident_evidence"]=[decoded(r) for r in db.execute("SELECT e.* FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id JOIN rca_incidents x ON x.id=e.incident_id WHERE i.investigation_id=? AND x.deleted_at IS NULL",(key,)).fetchall()]
+  result["incident_evidence"]=[]
+  evidence_rows=db.execute("SELECT e.*,x.userid AS incident_owner_id,s.userid AS source_owner_id FROM rca_incident_evidence e JOIN rca_investigation_incidents i ON i.incident_id=e.incident_id JOIN rca_incidents x ON x.id=e.incident_id JOIN rca_evidence_sources s ON s.id=e.source_id WHERE i.investigation_id=? AND x.deleted_at IS NULL",(key,)).fetchall()
+  for evidence_row in evidence_rows:
+   item=decoded(evidence_row)
+   item["can_modify_attachment"]=bool(result["can_modify"] and evidence_row["source_owner_id"]==evidence_row["incident_owner_id"] and (evidence_row["incident_owner_id"]==user["userid"] or user.get("role") in MANAGERS))
+   item.pop("incident_owner_id",None);item.pop("source_owner_id",None)
+   result["incident_evidence"].append(item)
   result["findings"]=[decoded(r) for r in db.execute("SELECT * FROM rca_investigation_findings WHERE investigation_id=? ORDER BY created_at,id",(key,)).fetchall()]
   for f in result["findings"]:f["evidence"]=[decoded(r) for r in db.execute("SELECT * FROM rca_finding_evidence WHERE finding_id=?",(f["id"],)).fetchall()]
   result["requests"]=[dict(r) for r in db.execute("SELECT l.id,l.request_id,l.created_at,r.status,r.origin_software FROM rca_investigation_requests l LEFT JOIN llm_tool_requests r ON r.id=l.request_id WHERE l.investigation_id=? ORDER BY l.created_at DESC",(key,)).fetchall()]
@@ -88,11 +94,14 @@ def detail(key,user):
  return result
 
 def source_access(db,key,source_id,user,write=False):
- parent=require(db,key,user,write=write);source=owned(db,"rca_evidence_sources",source_id,parent["userid"])
+ parent=require(db,key,user,write=write)
+ source=db.execute("SELECT * FROM rca_evidence_sources WHERE id=?",(source_id,)).fetchone()
+ if not source:raise PermissionError("Evidence source not found.")
  direct=membership.exists(db,"investigation",key,source_id)
- incident=db.execute("SELECT m.id FROM rca_incident_sources m JOIN rca_investigation_incidents i ON i.incident_id=m.incident_id WHERE i.investigation_id=? AND m.source_id=? LIMIT 1",(key,source_id)).fetchone()
+ incident=db.execute("SELECT m.id FROM rca_incident_sources m JOIN rca_investigation_incidents i ON i.incident_id=m.incident_id JOIN rca_incidents x ON x.id=i.incident_id WHERE i.investigation_id=? AND m.source_id=? AND x.deleted_at IS NULL LIMIT 1",(key,source_id)).fetchone()
  finding=db.execute("SELECT e.id FROM rca_finding_evidence e JOIN rca_investigation_findings f ON f.id=e.finding_id WHERE f.investigation_id=? AND e.source_id=? LIMIT 1",(key,source_id)).fetchone()
  if not direct and not incident and not finding:raise PermissionError("Source is not linked to this investigation or one of its incidents.")
+ if write and source["userid"]!=parent["userid"]:raise PermissionError("Only the evidence owner can change source-wide settings.")
  return source
 
 def preview(key,source_id,user,offset=0,limit=100):
@@ -116,12 +125,20 @@ def select_records(db,source,selection):
 
 def attach(key,user,source_id,selection=None,incident_id=None):
  with connect("server") as db:
-  parent=require(db,key,user,write=True);source=owned(db,"rca_evidence_sources",source_id,parent["userid"]);selected=select_records(db,source,selection)
+  parent=require(db,key,user,write=True)
   if incident_id:
-   owned(db,"rca_incidents",incident_id,parent["userid"])
+   incident=db.execute("SELECT * FROM rca_incidents WHERE id=? AND deleted_at IS NULL",(incident_id,)).fetchone()
+   if not incident:raise ValueError("This incident is not active.")
    if not db.execute("SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?",(key,incident_id)).fetchone():raise ValueError("Attach the incident to this investigation first.")
-   table,column,target="rca_incident_evidence","incident_id",incident_id;membership.ensure(db,"incident",incident_id,source_id)
-  else:table,column,target="rca_investigation_evidence","investigation_id",key;membership.ensure(db,"investigation",key,source_id)
+   source=db.execute("SELECT * FROM rca_evidence_sources WHERE id=?",(source_id,)).fetchone()
+   if not source or source["userid"]!=incident["userid"]:raise PermissionError("Incident evidence must belong to that incident's owner.")
+   if incident["userid"]!=user["userid"] and user.get("role") not in MANAGERS:raise PermissionError("Only the incident owner, an Administrator, or a Power User can change its evidence attachments.")
+   table,column,target="rca_incident_evidence","incident_id",incident_id
+  else:
+   source=owned(db,"rca_evidence_sources",source_id,parent["userid"])
+   table,column,target="rca_investigation_evidence","investigation_id",key
+  selected=select_records(db,source,selection)
+  membership.ensure(db,"incident" if incident_id else "investigation",target,source_id)
   payload=encode(selected);old=db.execute(f"SELECT id FROM {table} WHERE {column}=? AND source_id=?",(target,source_id)).fetchone()
   if old:db.execute(f"UPDATE {table} SET selection_json=? WHERE id=?",(payload,old["id"]))
   else:db.execute(f"INSERT INTO {table} (id,{column},source_id,selection_json,created_at) VALUES (?,?,?,?,?)",(uuid4().hex,target,source_id,payload,utc_now()))
@@ -233,7 +250,9 @@ def add_incidents(key, user, source_id, record_numbers):
 
 def link_incident(key,user,incident_id):
     with connect("server") as db:
-        parent=require(db,key,user,write=True);owned(db,"rca_incidents",incident_id,parent["userid"])
+        require(db,key,user,write=True)
+        incident=db.execute("SELECT id FROM rca_incidents WHERE id=? AND deleted_at IS NULL",(incident_id,)).fetchone()
+        if not incident:raise ValueError("This incident is not active or no longer exists.")
         if not db.execute("SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?",(key,incident_id)).fetchone():
             db.execute("INSERT INTO rca_investigation_incidents (id,investigation_id,incident_id,created_at) VALUES (?,?,?,?)",(uuid4().hex,key,incident_id,utc_now()))
     return detail(key,user)
@@ -243,7 +262,7 @@ def set_source_type(key, user, source_id, evidence_type):
         raise ValueError("Invalid evidence type.")
     with connect("server") as db:
         require(db, key, user, write=True)
-        source = source_access(db, key, source_id, user)
+        source = source_access(db, key, source_id, user, write=True)
         if source["status"] not in {"READY", "FAILED"}:
             raise ValueError("Only ready or failed sources can be reclassified.")
         previous = source["evidence_type"]
@@ -256,15 +275,19 @@ def set_source_type(key, user, source_id, evidence_type):
 
 def _attachment_target(db, key, user, source_id, incident_id):
     parent = require(db, key, user, write=True)
-    source = owned(db, "rca_evidence_sources", source_id, parent["userid"])
     if incident_id:
-        owned(db, "rca_incidents", incident_id, parent["userid"])
+        incident=db.execute("SELECT * FROM rca_incidents WHERE id=? AND deleted_at IS NULL",(incident_id,)).fetchone()
+        if not incident:raise ValueError("This incident is not active.")
         if not db.execute(
             "SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?",
             (key, incident_id),
         ).fetchone():
             raise ValueError("Link the incident to this investigation first.")
+        source=db.execute("SELECT * FROM rca_evidence_sources WHERE id=?",(source_id,)).fetchone()
+        if not source or source["userid"]!=incident["userid"]:raise PermissionError("Incident evidence must belong to that incident's owner.")
+        if incident["userid"]!=user["userid"] and user.get("role") not in MANAGERS:raise PermissionError("Only the incident owner, an Administrator, or a Power User can change its evidence attachments.")
         return source, "rca_incident_evidence", "incident_id", incident_id
+    source=owned(db,"rca_evidence_sources",source_id,parent["userid"])
     return source, "rca_investigation_evidence", "investigation_id", key
 
 
@@ -298,8 +321,7 @@ def restore_evidence(key, user, source_id, selection, incident_id=None):
 
 def unlink_incident(key, user, incident_id):
     with connect("server") as db:
-        parent = require(db, key, user, write=True)
-        owned(db, "rca_incidents", incident_id, parent["userid"])
+        require(db, key, user, write=True)
         link = db.execute(
             "SELECT id FROM rca_investigation_incidents WHERE investigation_id=? AND incident_id=?",
             (key, incident_id),
