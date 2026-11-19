@@ -176,6 +176,17 @@ if _tool_calling_enabled not in {"true", "false"}:
     raise ValueError("LH_LLM_TOOL_CALLING_ENABLED must be true or false")
 LH_LLM_TOOL_CALLING_ENABLED = _tool_calling_enabled == "true"
 LH_LLM_TOOL_MODEL = os.getenv("LH_LLM_TOOL_MODEL", "qwen3:4b-instruct").strip()
+_raw_tool_model_list = os.getenv("LH_LLM_TOOL_MODEL_LIST", "").strip()
+LH_LLM_TOOL_MODEL_LIST = tuple(dict.fromkeys(
+    model.strip() for model in _raw_tool_model_list.split(",") if model.strip()
+))
+LH_LLM_REASONING_MODEL = os.getenv("LH_LLM_REASONING_MODEL", "").strip() or LH_LLM_TOOL_MODEL
+_raw_reasoning_model_list = os.getenv("LH_LLM_REASONING_MODEL_LIST", "").strip()
+LH_LLM_REASONING_MODEL_LIST = tuple(dict.fromkeys(
+    model.strip() for model in _raw_reasoning_model_list.split(",") if model.strip()
+))
+if not LH_LLM_REASONING_MODEL and not LH_LLM_REASONING_MODEL_LIST:
+    raise ValueError("LH_LLM_REASONING_MODEL must not be blank when no reasoning model list is configured")
 if LH_LLM_TOOL_CALLING_ENABLED and not LH_LLM_TOOL_MODEL:
     raise ValueError("LH_LLM_TOOL_MODEL must not be blank when tool calling is enabled")
 
@@ -201,7 +212,15 @@ LH_LLM_TOOL_MAX_EXECUTION_REQUESTS = _tool_calling_positive_int("LH_LLM_TOOL_MAX
 LH_LLM_TOOL_MAX_RAG_SEARCHES = _tool_calling_positive_int("LH_LLM_TOOL_MAX_RAG_SEARCHES", 5)
 LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS", 180)
 LH_LLM_TOOL_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_TIMEOUT_SECONDS", 300)
-LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS = _tool_calling_positive_int("LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS", 300)
+LH_LLM_REASONING_CONTEXT_LENGTH = _tool_calling_positive_int(
+    "LH_LLM_REASONING_CONTEXT_LENGTH", LH_LLM_TOOL_CONTEXT_LENGTH
+)
+LH_LLM_REASONING_MAX_TOKENS = _tool_calling_positive_int(
+    "LH_LLM_REASONING_MAX_TOKENS", LH_LLM_TOOL_MAX_TOKENS
+)
+LH_LLM_REASONING_TIMEOUT_SECONDS = _tool_calling_positive_int(
+    "LH_LLM_REASONING_TIMEOUT_SECONDS", 300
+)
 LH_LLM_TOOL_MAX_RESULT_CHARS = _tool_calling_positive_int("LH_LLM_TOOL_MAX_RESULT_CHARS", 6000)
 
 LH_RCA_DEFAULT_MODE = os.getenv("LH_RCA_DEFAULT_MODE", "balanced").strip().lower()

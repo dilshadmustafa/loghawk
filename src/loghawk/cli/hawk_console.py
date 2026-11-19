@@ -1729,7 +1729,7 @@ class HawkConsole(App[None]):
                         {"messages": messages, "review_arguments": review_arguments,
                          "redact_evidence": redact_evidence, "investigation_id": self._investigation_id},
                         timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS
-                                + config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30)
+                                + config.LH_LLM_REASONING_TIMEOUT_SECONDS + 30)
                     )
                     response = result["response"]
                 if not response:
@@ -2002,7 +2002,7 @@ class HawkConsole(App[None]):
         try:
             result = self._api_client.post_json(
                 f"/api/v1/console/chat/{request_id}/explanation/retry", {},
-                timeout=config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30,
+                timeout=config.LH_LLM_REASONING_TIMEOUT_SECONDS + 30,
             )
         except Exception as exc:
             self.app.call_from_thread(
@@ -2055,7 +2055,7 @@ class HawkConsole(App[None]):
                 f"/api/v1/console/chat/{pending['request_id']}/confirm",
                 {"confirmation_id": pending["confirmation_id"], "approved": approved, "arguments": arguments},
                 timeout=max(300, config.LH_LLM_TOOL_TIMEOUT_SECONDS
-                                + config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS + 30),
+                                + config.LH_LLM_REASONING_TIMEOUT_SECONDS + 30),
             )
         except Exception as exc:
             # ConsoleApiClient prefixes HTTP validation errors with their status.

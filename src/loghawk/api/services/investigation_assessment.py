@@ -162,7 +162,8 @@ def partial(reason):
             "next_steps": ["Review saved evidence and the stop reason before starting another request."]}
 
 
-def render(value):
+def render(value, citation_labels=None):
+    citation_labels = citation_labels or {}
     lines = []
     for key in ("observations", "hypotheses", "contradictions", "missing_evidence", "conclusion", "next_steps"):
         lines.append(key.replace("_", " ").title())
@@ -171,8 +172,10 @@ def render(value):
             if isinstance(item, str):
                 lines.append("- " + item)
             else:
-                refs = ", ".join(item["references"])
-                lines.append("- " + item["text"] + (f" [{refs}]" if refs else ""))
+                citations = [citation_labels.get(reference, "Evidence citation unavailable")
+                             for reference in item["references"]]
+                lines.append("- " + item["text"] +
+                             (f"\n  Evidence: {'; '.join(citations)}" if citations else ""))
         if not entries:
             lines.append("- None reported.")
         lines.append("")

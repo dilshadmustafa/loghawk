@@ -14,6 +14,8 @@ class ChatRequest(BaseModel):
     redact_evidence: StrictBool = True
     investigation_id: str | None = Field(default=None, max_length=64)
     mode: Literal["quality", "balanced", "performance"] = rca_profiles.DEFAULT_MODE
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    reasoning_model: str | None = Field(default=None, min_length=1, max_length=200)
     request_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 class Confirmation(BaseModel):
@@ -21,13 +23,17 @@ class Confirmation(BaseModel):
     approved: StrictBool
     arguments: dict[str, object] | None = None
 
+class ExplanationRequest(BaseModel):
+    reasoning_model: str | None = Field(default=None, min_length=1, max_length=200)
+
 @router.post("/chat")
 def chat(body: ChatRequest, user: dict = Depends(require_webui_user)) -> dict:
     try:
         return assistant_chat_service.chat(
             body.messages, user["userid"], origin_software="web",
             review_arguments=body.review_arguments, redact_evidence=body.redact_evidence,
-            investigation_id=body.investigation_id, mode=body.mode, request_id=body.request_id,
+            investigation_id=body.investigation_id, mode=body.mode, model=body.model,
+            reasoning_model=body.reasoning_model, request_id=body.request_id,
         )
     except collector_tool_store.ExistingRequest as exc:
         # A duplicate follows the original request through the progress endpoint.
@@ -67,11 +73,21 @@ def confirm(request_id: str, body: Confirmation, user: dict = Depends(require_we
 
 
 @router.post("/chat/{request_id}/explanation/retry")
-def retry_explanation(request_id: str, user: dict = Depends(require_webui_user)) -> dict:
-    from loghawk.api.services import collector_tool_service
+def retry_explanation(
+    request_id: str, body: ExplanationRequest | None = None,
+    user: dict = Depends(require_webui_user),
+) -> dict:
+    try:
+        reasoning_model = (
+            rca_profiles.resolve_reasoning_model(body.reasoning_model)
+            if body and body.reasoning_model is not None else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         return collector_tool_service.retry_explanation(
             request_id, user["userid"], origin_software="web",
+            reasoning_model=reasoning_model,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -81,13 +97,20 @@ def retry_explanation(request_id: str, user: dict = Depends(require_webui_user))
 
 @router.post("/chat/{request_id}/explanation/regenerate")
 def regenerate_explanation(
-    request_id: str, user: dict = Depends(require_webui_user),
+    request_id: str, body: ExplanationRequest | None = None,
+    user: dict = Depends(require_webui_user),
 ) -> dict:
-    from loghawk.api.services import collector_tool_service
+    try:
+        reasoning_model = (
+            rca_profiles.resolve_reasoning_model(body.reasoning_model)
+            if body and body.reasoning_model is not None else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         return collector_tool_service.retry_explanation(
-            request_id, user["userid"],
-            origin_software="web", regenerate=True,
+            request_id, user["userid"], origin_software="web",
+            regenerate=True, reasoning_model=reasoning_model,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

@@ -114,16 +114,19 @@ class LiteLLMClient:
     def complete_tool_turn(
         self, messages: list[dict], tools: list[dict], *, timeout: float,
         require_tool: bool = False, audit_callback=None,
-        response_schema: dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None, model: str | None = None,
+        context_length: int | None = None, max_tokens: int | None = None,
     ) -> dict:
         """Native tool responses may legitimately contain no assistant text."""
         from litellm import completion
 
-        kwargs = self._chat_kwargs(config.LH_LLM_TOOL_MODEL)
+        kwargs = self._chat_kwargs(model or config.LH_LLM_TOOL_MODEL)
+        output_limit = config.LH_LLM_TOOL_MAX_TOKENS if max_tokens is None else max_tokens
+        context_limit = config.LH_LLM_TOOL_CONTEXT_LENGTH if context_length is None else context_length
         kwargs.update(messages=messages, temperature=0.1, timeout=timeout,
-                      num_retries=0, max_tokens=config.LH_LLM_TOOL_MAX_TOKENS)
+                      num_retries=0, max_tokens=output_limit)
         if config.LH_LLM_PROVIDER == "ollama":
-            kwargs["num_ctx"] = config.LH_LLM_TOOL_CONTEXT_LENGTH
+            kwargs["num_ctx"] = context_limit
         if response_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",
@@ -163,7 +166,7 @@ class LiteLLMClient:
         if choice is None:
             raise RuntimeError("Tool provider returned no response choices.")
         if finish_reason == "length":
-            raise RuntimeError("Tool model reached its output-token limit; increase LH_LLM_TOOL_MAX_TOKENS.")
+            raise RuntimeError("Model reached its output-token limit; increase the configured maximum output tokens.")
         if finish_reason in {"content_filter", "refusal"} or message.get("refusal"):
             raise RuntimeError("Tool provider declined the response.")
         result = {"role": "assistant", "content": content}
@@ -177,12 +180,14 @@ class LiteLLMClient:
 
     def explain_collector_evidence(
         self, messages: list[dict], *, timeout: float, audit_callback=None,
-        response_schema: dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None, model: str | None = None,
+        context_length: int | None = None, max_tokens: int | None = None,
     ) -> str:
         """Generate text or a structured assessment without tools or automatic retries."""
         message = self.complete_tool_turn(
             messages, [], timeout=timeout, audit_callback=audit_callback,
-            response_schema=response_schema,
+            response_schema=response_schema, model=model,
+            context_length=context_length, max_tokens=max_tokens,
         )
         if message.get("tool_calls"):
             raise RuntimeError("Explanation model returned tool calls; none were executed.")

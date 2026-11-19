@@ -184,7 +184,7 @@ export interface RcaProfile {
   preset_limits: RcaLimits;
   limited_by_configuration: boolean;
 }
-export interface RcaProfiles { default_mode: RcaMode; profiles: RcaProfile[]; }
+export interface RcaProfiles { default_mode: RcaMode; profiles: RcaProfile[]; models: string[]; default_model: string; reasoning_models: string[]; default_reasoning_model: string; }
 export interface RcaProgressEvent {
   id: string; collector_name: string; collector_version: string; tool_type?: string;
   status: string; arguments: Record<string, unknown> | null; run_id: string | null;
@@ -229,6 +229,7 @@ export interface RcaAssessment {
 export interface RcaExecutionSummary {
   loop_progress?: RcaLoopProgress | null;
   assessment?: RcaAssessment | null;
+  assessment_citations?: Record<string, string>;
   request_id: string;
   request_status: string;
   discovery_calls: number;

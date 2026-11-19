@@ -136,6 +136,10 @@ def execution_summary(request_id: str) -> dict:
             "FROM llm_tool_calls WHERE request_id = ? ORDER BY started_at, id",
             (request_id,),
         ).fetchall()
+        snapshot_row = db.execute(
+            "SELECT snapshot_json FROM rca_investigation_requests WHERE request_id = ?",
+            (request_id,),
+        ).fetchone()
     events = []
     counts = {"succeeded": 0, "failed": 0, "rejected": 0, "cancelled": 0, "running": 0}
     discovery_calls = 0
@@ -162,8 +166,18 @@ def execution_summary(request_id: str) -> dict:
         request_settings = {}
     evidence_redaction_enabled = request_settings.get("redact_evidence", True) is not False
     saved_state = json.loads(request["state_json"] or "{}")
-    loop = saved_state.get("loop_progress") or saved_state.get("explanation", {}).get("context", {}).get("loop_progress")
-    assessment = saved_state.get("assessment") or saved_state.get("explanation", {}).get("context", {}).get("assessment")
+    explanation_context = saved_state.get("explanation", {}).get("context", {})
+    loop = saved_state.get("loop_progress") or explanation_context.get("loop_progress")
+    assessment = saved_state.get("assessment") or explanation_context.get("assessment")
+    snapshot = explanation_context.get("investigation_context")
+    if not isinstance(snapshot, dict) and snapshot_row:
+        try:
+            snapshot = json.loads(snapshot_row["snapshot_json"] or "{}")
+        except (TypeError, ValueError):
+            snapshot = None
+    aliases = (saved_state.get("evidence_aliases") or
+               explanation_context.get("evidence_aliases") or {})
+    citation_labels = assessment_citation_labels(request_id, snapshot, aliases) if snapshot else {}
     waiting = request["status"] == "PENDING"
     parts = [f"{value} {key}" for key, value in counts.items() if value]
     if waiting:
@@ -174,12 +188,14 @@ def execution_summary(request_id: str) -> dict:
             "discovery_calls": discovery_calls, **counts, "awaiting_confirmation": waiting,
             "evidence_redaction_enabled": evidence_redaction_enabled,
             "loop_progress": loop, "assessment": assessment,
+            "assessment_citations": citation_labels,
             "summary": "; ".join(parts) + ".", "events": events}
 
 
 def begin_explanation(request_id: str, userid: str, origin_software: str,
                       timeout: int, context: dict | None = None,
-                      *, regenerate: bool = False) -> dict:
+                      *, regenerate: bool = False,
+                      reasoning_model: str | None = None) -> dict:
     """Atomically claim a text-only explanation; retain evidence and progress, never runnable state."""
     timestamp = now()
     with connect("server") as db:
@@ -198,9 +214,16 @@ def begin_explanation(request_id: str, userid: str, origin_software: str,
             )
             if not eligible:
                 raise ValueError("Explanation is not eligible for this action or another attempt is still running.")
-            context = previous["context"]
+            # Retries explain the saved evidence using the API's current limits.
+            from loghawk import config
+            context = dict(previous["context"])
+            context["reasoning_context_length"] = config.LH_LLM_REASONING_CONTEXT_LENGTH
+            context["reasoning_max_tokens"] = config.LH_LLM_REASONING_MAX_TOKENS
         elif row["status"] != "PROCESSING" or previous:
             raise ValueError("This request has already entered its explanation stage.")
+        if reasoning_model is not None:
+            context = dict(context or {})
+            context["reasoning_model"] = reasoning_model
         explanation = {"status": "RUNNING", "attempt_id": uuid4().hex,
                        "attempts": (previous or {}).get("attempts", 0) + 1,
                        "stage": (
@@ -220,22 +243,6 @@ def begin_explanation(request_id: str, userid: str, origin_software: str,
         if result.rowcount != 1:
             raise ValueError("Another explanation attempt already claimed this request.")
     return explanation
-
-
-def complete_assessment(request_id: str, context: dict, response: str) -> None:
-    """Keep the validated assessment as the final explanation without another model call."""
-    explanation = {"status": "COMPLETED", "attempts": 0, "stage": "investigation_assessment",
-                   "context": context, "response": response, "error": None}
-    with connect("server") as db:
-        result = db.execute(
-            "UPDATE llm_tool_requests SET state_json = ?, status = 'COMPLETED', "
-            "response_text = ?, updated_at = ? WHERE id = ? AND status = 'PROCESSING'",
-            (json.dumps({"explanation": explanation}), response, now(), request_id),
-        )
-        if result.rowcount != 1:
-            raise ValueError("This request has already entered its explanation stage.")
-    record(request_id, {"name": "ai_explanation"}, {"stage": "investigation_assessment", "attempts": 0},
-           "EXPLANATION_COMPLETED", response, tool_type="explanation")
 
 
 def finish_explanation(request_id: str, attempt_id: str, response: str, error: str | None) -> None:
@@ -276,8 +283,15 @@ def settings_snapshot() -> dict:
     from loghawk import config
     names = ("MODEL", "CONTEXT_LENGTH", "MAX_TOKENS", "MAX_DISCOVERY_CALLS",
              "MAX_EXECUTION_REQUESTS", "MAX_MODEL_TURNS", "MAX_RAG_SEARCHES", "TIMEOUT_SECONDS",
-             "MODEL_CALL_TIMEOUT_SECONDS", "EXPLANATION_TIMEOUT_SECONDS", "MAX_RESULT_CHARS")
-    return {"LH_LLM_TOOL_" + name: getattr(config, "LH_LLM_TOOL_" + name) for name in names}
+             "MODEL_CALL_TIMEOUT_SECONDS", "MAX_RESULT_CHARS")
+    settings = {"LH_LLM_TOOL_" + name: getattr(config, "LH_LLM_TOOL_" + name) for name in names}
+    settings.update({
+        "LH_LLM_REASONING_MODEL": config.LH_LLM_REASONING_MODEL,
+        "LH_LLM_REASONING_CONTEXT_LENGTH": config.LH_LLM_REASONING_CONTEXT_LENGTH,
+        "LH_LLM_REASONING_MAX_TOKENS": config.LH_LLM_REASONING_MAX_TOKENS,
+        "LH_LLM_REASONING_TIMEOUT_SECONDS": config.LH_LLM_REASONING_TIMEOUT_SECONDS,
+    })
+    return settings
 
 
 def initialize_history(request_id: str, question: str, settings: dict) -> None:
@@ -329,7 +343,7 @@ def begin_invocation(request_id: str, stage: str, settings: dict, provider: str,
             (id, request_id, explanation_attempt_id, stage, invocation_number, configured_model,
              provider, settings_json, started_at, created_at, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PREPARING')""",
-            (invocation_id, request_id, attempt_id, stage, number, settings.get("LH_LLM_TOOL_MODEL"),
+            (invocation_id, request_id, attempt_id, stage, number, settings.get("model") or settings.get("LH_LLM_TOOL_MODEL"),
              provider, json.dumps(settings), created_at, created_at))
     return invocation_id
 
@@ -651,3 +665,70 @@ def assessment_references(request_id, snapshot):
                 if chunk.get("evidence_ref") == expected:
                     refs[expected] = "background knowledge"
     return refs
+
+
+def assessment_citation_labels(request_id, snapshot, aliases=None):
+    # Map saved canonical references to request-scoped E labels and readable citations.
+    if not isinstance(snapshot, dict):
+        return {}
+    descriptions = {}
+    for incident in snapshot.get("incidents", []):
+        details = incident.get("primary_details") or {}
+        label = details.get("incident_id") or incident.get("source_incident_id")
+        service = details.get("primary_service")
+        if not service and details.get("services"):
+            services = details["services"]
+            service = ", ".join(map(str, services)) if isinstance(services, list) else str(services)
+        interval = " — ".join(str(details[key]) for key in ("start_time", "end_time") if details.get(key))
+        parts = [f"Incident {label}" if label else "Incident"]
+        if service:
+            parts.append(str(service))
+        if interval:
+            parts.append(interval)
+        descriptions["incident:" + incident["id"]] = " · ".join(parts)
+    for finding in snapshot.get("findings", []):
+        content = " ".join(str(finding.get("content", "")).split())[:120]
+        descriptions["finding:" + finding["id"]] = "User finding" + (f" · {content}" if content else "")
+    for source in snapshot.get("evidence", []):
+        name = str(source.get("name") or "Imported evidence")
+        evidence_type = str(source.get("evidence_type") or "Evidence")
+        for row in source.get("records", []):
+            number = row.get("record_number")
+            descriptions[f"source:{source['source_id']}:record:{number}"] = (
+                f"{evidence_type} · {name} · record {number}"
+            )
+        collector = source.get("collector_evidence")
+        if collector:
+            collector_name = collector.get("collector_name") if isinstance(collector, dict) else None
+            run_id = collector.get("run_id") if isinstance(collector, dict) else None
+            detail = " · ".join(str(part) for part in (collector_name, f"run {run_id}" if run_id else None) if part)
+            descriptions["source:" + source["source_id"]] = (
+                f"{name} · saved collector evidence" + (f" · {detail}" if detail else "")
+            )
+
+    with connect("server") as db:
+        rows = db.execute(
+            "SELECT id, tool_type, collector_name, run_id, result_text FROM llm_tool_calls "
+            "WHERE request_id = ? AND status = 'COMPLETED' "
+            "AND tool_type IN ('collector', 'knowledge_search')", (request_id,),
+        ).fetchall()
+    for row in rows:
+        if row["tool_type"] == "collector":
+            run = f" · run {row['run_id']}" if row["run_id"] else ""
+            descriptions["collector:" + row["id"]] = f"Collector {row['collector_name']}{run}"
+            continue
+        try:
+            chunks = json.loads(row["result_text"] or "{}").get("chunks", [])
+        except (TypeError, ValueError):
+            chunks = []
+        for index, chunk in enumerate(chunks, 1):
+            reference = f"rag:{row['id']}:{index}"
+            if chunk.get("evidence_ref") == reference:
+                descriptions[reference] = f"RAG · {chunk.get('source') or 'saved document'} · excerpt {index}"
+
+    from loghawk.api.services import investigation_assessment
+    alias_map = investigation_assessment.assign_aliases(sorted(descriptions), dict(aliases or {}))
+    return {
+        reference: f"{alias_map[reference]} — {description}"
+        for reference, description in descriptions.items()
+    }

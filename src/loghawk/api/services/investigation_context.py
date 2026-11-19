@@ -1,5 +1,6 @@
 """Capture immutable, redacted request inputs and prepare bounded model context."""
 import json
+import re
 from datetime import datetime
 from uuid import uuid4
 from loghawk.api.services import investigation_store as store, investigation_assessment as assessment
@@ -132,7 +133,25 @@ def _record_projection(source, record, relation, maximum_fields):
                 "namespace", "summary", "message"]
     mapping = source.get("mapping", {})
     keys = []
-    for key in priority:
+    for key in priority[:3]:
+        actual = mapping.get(key, key)
+        if not isinstance(actual, str) or actual not in fields or actual in keys:
+            continue
+        if key == "entity_id" and "service" in keys and fields.get(actual) == fields.get("service"):
+            continue
+        keys.append(actual)
+    correlation_ids = {"traceid", "requestid", "correlationid", "transactionid",
+                       "spanid", "parentspanid", "rootspanid"}
+    for canonical in ("trace_id", "request_id", "correlation_id", "transaction_id",
+                      "span_id", "parent_span_id", "root_span_id"):
+        actual = mapping.get(canonical)
+        if isinstance(actual, str) and actual in fields and actual not in keys:
+            keys.append(actual)
+    for field_name in fields:
+        normalized = re.sub(r"[^a-z0-9]", "", str(field_name).casefold())
+        if normalized in correlation_ids and field_name not in keys:
+            keys.append(field_name)
+    for key in priority[3:]:
         actual = mapping.get(key, key)
         if not isinstance(actual, str) or actual not in fields or actual in keys:
             continue

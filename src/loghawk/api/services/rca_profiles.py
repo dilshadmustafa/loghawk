@@ -36,8 +36,52 @@ def resolve_profile(mode: str | None = None) -> dict:
     return {"mode": mode, "limits": {key: min(preset[key], ceilings[key]) for key in LIMIT_KEYS}}
 
 
+def available_models() -> dict:
+    """Return the explicitly configured RCA model choices and their default."""
+    models = list(config.LH_LLM_TOOL_MODEL_LIST)
+    default_model = models[0] if models else config.LH_LLM_TOOL_MODEL
+    return {"models": models, "default_model": default_model}
+
+
+def resolve_model(model: str | None = None) -> str:
+    """Resolve a request model, restricting selection to the configured allowlist."""
+    choices = available_models()
+    if model is None:
+        return choices["default_model"]
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("RCA model must be a non-empty configured model name.")
+    selected = model.strip()
+    if choices["models"] and selected in choices["models"]:
+        return selected
+    if not choices["models"] and selected == config.LH_LLM_TOOL_MODEL:
+        return selected
+    raise ValueError("Selected RCA model is not configured in LH_LLM_TOOL_MODEL_LIST.")
+
+
+def available_reasoning_models() -> dict:
+    """Return the configured reasoning-model choices and their default."""
+    models = list(config.LH_LLM_REASONING_MODEL_LIST)
+    default_model = models[0] if models else config.LH_LLM_REASONING_MODEL
+    return {"reasoning_models": models, "default_reasoning_model": default_model}
+
+
+def resolve_reasoning_model(model: str | None = None) -> str:
+    """Resolve a reasoning model, restricting selection to its configured allowlist."""
+    choices = available_reasoning_models()
+    if model is None:
+        return choices["default_reasoning_model"]
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("Reasoning model must be a non-empty configured model name.")
+    selected = model.strip()
+    if choices["reasoning_models"] and selected in choices["reasoning_models"]:
+        return selected
+    if not choices["reasoning_models"] and selected == config.LH_LLM_REASONING_MODEL:
+        return selected
+    raise ValueError("Selected reasoning model is not configured in LH_LLM_REASONING_MODEL_LIST.")
+
+
 def available_profiles() -> dict:
-    """Expose effective limits so the UI can show administrator reductions."""
+    """Expose effective limits and both model choices so the UI can show server settings."""
     profiles = []
     for mode, preset in _PRESETS.items():
         resolved = resolve_profile(mode)
@@ -47,4 +91,4 @@ def available_profiles() -> dict:
             "preset_limits": preset_limits,
             "limited_by_configuration": resolved["limits"] != preset_limits,
         })
-    return {"default_mode": DEFAULT_MODE, "profiles": profiles}
+    return {"default_mode": DEFAULT_MODE, "profiles": profiles, **available_models(), **available_reasoning_models()}

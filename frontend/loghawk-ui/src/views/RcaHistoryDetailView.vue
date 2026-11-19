@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { getRcaHistoryDetail, retryRcaExplanation, regenerateRcaExplanation } from "../services/api";
+import { getRcaHistoryDetail, getRcaProfiles, retryRcaExplanation, regenerateRcaExplanation } from "../services/api";
 import type { RcaHistoryDetail, RcaLimits } from "../types/api";
 const route = useRoute();
 const record = ref<RcaHistoryDetail | null>(null);
 const busy = ref(false), error = ref(""), notice = ref("");
 const explaining = ref(false);
+const reasoningModels = ref<string[]>([]);
+const defaultReasoningModel = ref("");
+const retryReasoningModel = ref("");
+const retryReasoningChoices = computed(() =>
+  reasoningModels.value.length ? reasoningModels.value
+    : defaultReasoningModel.value ? [defaultReasoningModel.value] : []);
 const tabs = ["Overview", "Evidence & Inputs", "AI Explanations", "Timeline", "LLM Usage"];
 const tab = ref("Overview");
 const stageLabel = (stage: string) =>
@@ -19,6 +25,8 @@ const stageLabel = (stage: string) =>
     explanation_regeneration: "Explanation regeneration",
   } as Record<string, string>)[stage] ?? stage;
 const pretty = (value: unknown) => value == null ? "Not recorded" : JSON.stringify(value, null, 2);
+const assessmentCitations = (references: string[]) =>
+  references.map(reference => record.value?.execution.assessment_citations?.[reference] ?? "Evidence citation unavailable").join("; ");
 const evidence = (value: string | null) => { if (value == null) return "Not recorded"; try { return pretty(JSON.parse(value)); } catch { return value; } };
 const time = (value: string | null) => value ? new Date(value).toLocaleString() : "Not recorded";
 const savedMode = computed(() => record.value?.settings?.mode);
@@ -39,8 +47,22 @@ let generation = 0;
 async function load() {
   const current = ++generation;
   busy.value = true; error.value = ""; record.value = null;
-  try { const value = await getRcaHistoryDetail(String(route.params.id)); if (current === generation) record.value = value; }
-  catch (e) { if (current === generation) error.value = e instanceof Error ? e.message : String(e); }
+  try {
+    const value = await getRcaHistoryDetail(String(route.params.id));
+    if (current === generation) record.value = value;
+    try {
+      const profiles = await getRcaProfiles();
+      if (current === generation) {
+        reasoningModels.value = profiles.reasoning_models || [];
+        defaultReasoningModel.value = profiles.default_reasoning_model || "";
+        retryReasoningModel.value = defaultReasoningModel.value || reasoningModels.value[0] || "";
+      }
+    } catch {
+      if (current === generation) {
+        reasoningModels.value = []; defaultReasoningModel.value = ""; retryReasoningModel.value = "";
+      }
+    }
+  } catch (e) { if (current === generation) error.value = e instanceof Error ? e.message : String(e); }
   finally { if (current === generation) busy.value = false; }
 }
 watch(() => route.params.id, () => { tab.value = "Overview"; notice.value = ""; void load(); }, { immediate: true });
@@ -58,7 +80,7 @@ async function explainAgain() {
   try {
     const action = explanation.can_regenerate
       ? regenerateRcaExplanation : retryRcaExplanation;
-    await action(requestId);
+    await action(requestId, retryReasoningModel.value || defaultReasoningModel.value);
     if (pageGeneration !== generation) return;
     const refreshed = await getRcaHistoryDetail(requestId);
     if (pageGeneration === generation) {
@@ -136,11 +158,11 @@ function download() {
         <section v-if="record.execution.assessment">
           <h2>Saved investigation assessment</h2>
           <p>Evidence references were validated against saved records. This checks provenance, not whether an AI interpretation is correct.</p>
-          <h3>Observations</h3><ul><li v-for="(claim, n) in record.execution.assessment.observations" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
-          <h3>Hypotheses</h3><ul><li v-for="(claim, n) in record.execution.assessment.hypotheses" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
-          <h3>Contradictions</h3><ul><li v-for="(claim, n) in record.execution.assessment.contradictions" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
+          <h3>Observations</h3><ul><li v-for="(claim, n) in record.execution.assessment.observations" :key="n">{{ claim.text }} <code>{{ assessmentCitations(claim.references) }}</code></li></ul>
+          <h3>Hypotheses</h3><ul><li v-for="(claim, n) in record.execution.assessment.hypotheses" :key="n">{{ claim.text }} <code>{{ assessmentCitations(claim.references) }}</code></li></ul>
+          <h3>Contradictions</h3><ul><li v-for="(claim, n) in record.execution.assessment.contradictions" :key="n">{{ claim.text }} <code>{{ assessmentCitations(claim.references) }}</code></li></ul>
           <h3>Missing evidence</h3><ul><li v-for="(item, n) in record.execution.assessment.missing_evidence" :key="n">{{ item }}</li></ul>
-          <h3>Conclusion</h3><p>{{ record.execution.assessment.conclusion.text }} <code>{{ record.execution.assessment.conclusion.references.join(", ") }}</code></p>
+          <h3>Conclusion</h3><p>{{ record.execution.assessment.conclusion.text }} <code>{{ assessmentCitations(record.execution.assessment.conclusion.references) }}</code></p>
           <h3>Next steps</h3><ul><li v-for="(item, n) in record.execution.assessment.next_steps" :key="n">{{ item }}</li></ul>
         </section>
         <h2>Latest saved response</h2><p class="text">{{ record.response_text ?? 'Not recorded; inspect saved explanation events below.' }}</p>
@@ -173,18 +195,21 @@ function download() {
       </section>
       <section v-if="tab === 'AI Explanations'" class="card history-panel">
         <p>Every recorded explanation attempt is retained. A failed explanation does not mean collection failed.</p>
-        <button
-          v-if="record.explanation?.can_retry || record.explanation?.can_regenerate"
-          class="btn primary"
-          :disabled="busy || explaining"
-          @click="explainAgain">
-          {{ record.explanation?.can_regenerate
-            ? "Regenerate AI Explanation" : "Retry AI Explanation" }}
-        </button>
+        <div v-if="record.explanation?.can_retry || record.explanation?.can_regenerate" class="explanation-actions">
+          <button class="btn primary" :disabled="busy || explaining" @click="explainAgain">
+            {{ record.explanation?.can_regenerate
+              ? "Regenerate AI Explanation" : "Retry AI Explanation" }}
+          </button>
+          <label v-if="retryReasoningChoices.length" class="explanation-model-control" for="history-retry-reasoning-model">
+            Reasoning model
+            <select id="history-retry-reasoning-model" v-model="retryReasoningModel" :disabled="busy || explaining">
+              <option v-for="item in retryReasoningChoices" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </label>
+        </div>
         <p v-if="explaining" role="status">Generating explanation from saved evidence…</p>
-        <p>Uses the API server's currently loaded model settings.
-          After changing model settings in .env, restart the API server.
-          Collectors will not run again.</p>
+        <p>Uses the selected reasoning model. The API server's current reasoning timeout applies.
+          After changing server settings in .env, restart the API server. Retries use saved evidence and do not rerun collectors or RAG searches.</p>
         <article v-for="event in explanations" :key="event.id">
           <h2>{{ event.status }}</h2><p>{{ time(event.started_at) }} — {{ time(event.completed_at) }}</p>
           <h3>Attempt and model metadata</h3><pre>{{ pretty(event.arguments) }}</pre>
@@ -239,6 +264,9 @@ function download() {
 .history-tabs button.active { color: #8fe5ce; background: #203d3b; border-color: #47766b; }
 .history-panel { display: grid; gap: .85rem; min-width: 0; }
 .history-panel > .btn.primary { justify-self: start; width: fit-content; }
+.explanation-actions { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; }
+.explanation-model-control { display: grid; gap: .3rem; min-width: min(16rem, 100%); font-weight: 700; }
+.explanation-model-control select { min-width: 16rem; max-width: 100%; padding: .55rem .7rem; color: #e8edf2; background: #17232d; border: 1px solid #405665; border-radius: .45rem; font: inherit; }
 .history-panel > h2:first-child { margin-top: 0; }
 .saved-mode { border-left: 3px solid #6bd7bb; padding: .25rem 1rem; margin: .5rem 0; }
 .mode-name { text-transform: capitalize; }

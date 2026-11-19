@@ -816,7 +816,7 @@ LLM and embedding settings are loaded from the repository-root `.env` by `src/lo
 | Web UI | **RAG Operations** question answering and the embeddings used when indexing uploaded or scraped documents; **Tasks & Collectors** task artifact drafting; **RCA Chat** only when collector tool calling is disabled. |
 | Hawk Console | **LLM Terminal** ordinary chat when collector tool calling is disabled, RAG-backed questions and their embeddings, and AI-proposed shell commands requested with **/command**. |
 
-When collector tool calling is enabled, RCA model turns use LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS, the active investigation loop uses LH_LLM_TOOL_TIMEOUT_SECONDS, and a separate final explanation or retry uses LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS. During an investigation RAG search, retrieval is also bounded by the remaining investigation budget; its query-embedding request is capped by LH_LLM_TIMEOUT_SECONDS. This setting does not limit collector runs, task execution, or the shell command after it is approved and run.
+When collector tool calling is enabled, RCA model turns use LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS, the active investigation loop uses LH_LLM_TOOL_TIMEOUT_SECONDS, and the selected Reasoning model generates the final assessment and uses LH_LLM_REASONING_TIMEOUT_SECONDS for that call and each retry. During an investigation RAG search, retrieval is also bounded by the remaining investigation budget; its query-embedding request is capped by LH_LLM_TIMEOUT_SECONDS. This setting does not limit collector runs, task execution, or the shell command after it is approved and run.
 
 For Bedrock, configure the AWS region with `AWS_REGION` or `AWS_DEFAULT_REGION` and provide AWS credentials through the usual AWS credential chain. For Azure AI / Microsoft Foundry, configure the endpoint and key through `LH_LLM_BASE_URL` and `LH_LLM_API_KEY`.
 
@@ -1947,7 +1947,7 @@ Step-by-step guides for getting started with LogHawk:
 - [LogHawk Web UI Beginner Guide](Howto_Guides/LogHawk_Web_UI_Beginners_Guide.docx)
 - [Hawk Console Beginner Guide](Howto_Guides/Hawk_Console_Beginners_Guide.docx)
 - [How to do RCA and Investigation with LogHawk](https://github.com/dilshadmustafa/loghawk/blob/main/Howto_Guides/How_to_Do_RCA_and_Investigation_With_LogHawk.docx) — Create incidents and investigations, add evidence, select investigation modes, follow live RCA progress, and use RCA History.
-- [LogHawk Cloud Ollama Beginners Guide](Howto_Guides/LogHawk_Cloud_Ollama_Beginners_Guide.docx) — Beginner setup guidance for configuring LogHawk with Ollama on cloud GPU instances from Vast.ai and Runpod.
+- [LogHawk Cloud GPU Ollama Beginners Guide](Howto_Guides/LogHawk_Cloud_GPU_Ollama_Beginners_Guide.docx) — Beginner setup guidance for configuring LogHawk with Ollama on cloud GPU instances from Vast.ai and Runpod.
 - [How to Create Custom Collectors](Howto_Guides/How_to_Create_Custom_Collectors.docx) — Input schemas, Python examples, approval and execution policies, AI discovery, and troubleshooting.
 - [How to Use ChatGPT to Create Custom Collectors](Howto_Guides/How_to_Use_ChatGPT_to_Create_Custom_Collectors.docx) — Attach the collector guide, use ready-to-copy prompts, generate code and input schemas, and create and test collectors through Web UI or Hawk Console.
 - [How to Schedule LogHawk Pipelines](Howto_Guides/How_to_Schedule_LogHawk_Pipelines.docx) — Schedule training and detection, configure the batch S3 location, and email incident reports using cron or Windows Task Scheduler.
@@ -2241,9 +2241,9 @@ Pending confirmation saves the conversation, evidence references, remaining proc
 
 **History and results:** RCA Chat, RCA History and Hawk Console RCA Output show investigation progress and the saved assessment. Timeline distinguishes investigation evaluation, narration correction, collector execution, RAG search and explanation. Only collector events contribute to collector success/failure counts. Assessment references are checked against selected snapshot records, saved collector results and retrieved excerpts. This validates provenance, not the correctness of an AI interpretation.
 
-**Latency controls:** a valid **finish_investigation** assessment is saved and rendered directly as the final answer, avoiding a second generation of the same assessment. Prompts target a concise assessment of roughly 500-700 tokens with primary evidence references, while retaining uncertainty, stop reasons and coverage caveats. Response shape and all evidence labels are validated before exact duplicate labels are removed. The limit of ten references per claim applies to distinct labels; an assessment with too many distinct references is rejected without discarding them.
+**Final assessment:** the Investigation model's validated **finish_investigation** result is retained as a provisional assessment. The selected Reasoning model then reviews the saved evidence and produces the final validated assessment. This adds one model call after the investigation loop; if it fails, the provisional assessment remains saved and can be retried without rerunning collectors or RAG searches. Prompts target a concise assessment of roughly 500-700 tokens with primary evidence references, while retaining uncertainty, stop reasons and coverage caveats. Response shape and all evidence labels are validated before exact duplicate labels are removed. The limit of ten references per claim applies to distinct labels; an assessment with too many distinct references is rejected without discarding them.
 
-**Timeout and turn limits:** `LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS` limits one model call in the investigation loop. Its effective limit is the smaller of that value and the time remaining in `LH_LLM_TOOL_TIMEOUT_SECONDS`. The overall setting bounds active server-side investigation processing across model and tool work; it excludes time spent waiting for human confirmation. `LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS` is a separate budget for a final explanation attempt and each retry. Explanation retries use saved evidence and do not rerun collectors or RAG searches. `LH_LLM_TOOL_MAX_MODEL_TURNS=15` is a count limit, including narration-correction turns; it is not a timeout. The investigation may stop earlier, and the first applicable time or turn limit reached ends the loop. Timeouts and exhausted limits retain collected evidence and report a partial investigation; longer limits allow longer waits but do not make model generation faster.
+**Timeout and turn limits:** `LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS` limits one model call in the investigation loop. Its effective limit is the smaller of that value and the time remaining in `LH_LLM_TOOL_TIMEOUT_SECONDS`. The overall setting bounds active server-side investigation processing across model and tool work; it excludes time spent waiting for human confirmation. `LH_LLM_REASONING_TIMEOUT_SECONDS` is a separate budget for the Reasoning model final assessment and each retry. Explanation retries use saved evidence and do not rerun collectors or RAG searches. `LH_LLM_TOOL_MAX_MODEL_TURNS=15` is a count limit, including narration-correction turns; it is not a timeout. The investigation may stop earlier, and the first applicable time or turn limit reached ends the loop. Timeouts and exhausted limits retain collected evidence and report a partial investigation; longer limits allow longer waits but do not make model generation faster.
 
 **Why an RCA input may show 1,500 characters:** there is no environment variable set to 1,500. `LH_LLM_TOOL_MAX_RESULT_CHARS=6000` is the starting character ceiling per model tool result. Prompt preparation estimates the complete input and fits it within the available token budget, bounded by `LH_LLM_TOOL_CONTEXT_LENGTH - LH_LLM_TOOL_MAX_TOKENS` and the current request budget. It drops older chat turns first, then reduces model-facing evidence limits. The investigation snapshot builder also allocates at most `min(1500, remaining character space / included sources)` characters to each attached collector-evidence source. That 1,500-character value is an internal per-source allocation cap, not an environment setting; the actual allocation can be smaller. RCA History records the effective model-input limits.
 
@@ -2251,7 +2251,7 @@ For example, context length 10,240 with 2,048 output tokens leaves up to 8,192 i
 
 Prometheus vector compaction factors out labels shared by series and, if the result still exceeds the available limit, removes series from the end in source order; it does not evenly sample vector series. Matrix results can have time points sampled before series are removed. If RCA History reports `included_series: 0` and `omitted_series: 16`, those series were omitted from that model view; check saved collector evidence to see what the collector returned. Returned evidence is retained separately before model compaction, subject to any limits already applied by the collector or runner.
 
-When a separate final explanation is needed, it retains the `LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS` budget, including each explicit retry. Investigation explanations request the assessment JSON schema from the provider and validate the returned structure and evidence references. Malformed output or unsupported labels leave explanation retryable. **Retry AI Explanation** and **Regenerate AI Explanation** use saved evidence and current model settings, without running collectors or RAG retrieval again. The saved pre-explanation assessment remains available when explanation fails.
+The Reasoning model uses `LH_LLM_REASONING_TIMEOUT_SECONDS` for the final assessment and each explicit retry. Investigation explanations request the assessment JSON schema from the provider and validate the returned structure and evidence references. Malformed output or unsupported labels leave explanation retryable. **Retry AI Explanation** and **Regenerate AI Explanation** use saved evidence and the reasoning model selected for the request, without running collectors or RAG retrieval again. The saved provisional assessment remains available when reasoning fails.
 
 Investigation prompts live in `src/loghawk/prompts/investigation/`; each request snapshots the prompt text and hash it used. Restart the API server after changing configuration or prompt files.
 
@@ -2415,7 +2415,8 @@ Configure these values in `.env` on the API server:
 |---|---|---|
 | `LH_LLM_TOOL_CALLING_ENABLED` | Enable collector tool calling in Web RCA and signed-in Console chat | `false` |
 | `LH_RCA_DEFAULT_MODE` | Default mode for new Web UI RCA chats; valid values are `quality`, `balanced`, or `performance` | `balanced` |
-| `LH_LLM_TOOL_MODEL` | Tool-capable model using the configured LiteLLM provider | `qwen3:4b-instruct` |
+| `LH_LLM_TOOL_MODEL` | Default tool-capable model and fallback when no model list is configured | `qwen3:4b-instruct` |
+| `LH_LLM_TOOL_MODEL_LIST` | Optional comma-separated Investigation model choices; RCA Chat defaults to the first listed model | Empty (uses `LH_LLM_TOOL_MODEL`) |
 | `LH_LLM_TOOL_CONTEXT_LENGTH` | Ollama context window; prompt input is bounded by this value minus reserved output tokens | `8192` |
 | `LH_LLM_TOOL_MAX_TOKENS` | Maximum generated tokens per model response | `2048` |
 | `LH_LLM_TOOL_MAX_MODEL_TURNS` | Count limit for investigation model turns, including narration corrections; not a timeout | `15` |
@@ -2425,7 +2426,11 @@ Configure these values in `.env` on the API server:
 | `LH_LLM_TOOL_MAX_RAG_SEARCHES` | Maximum RAG searches per request; administrator ceiling for investigation modes | `5` |
 | `LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS` | Maximum time for one investigation model call; the effective cap can be shorter if less overall time remains | `180` |
 | `LH_LLM_TOOL_TIMEOUT_SECONDS` | Overall active investigation processing budget across model and tool work; excludes human confirmation wait | `300` |
-| `LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS` | Separate budget for a final explanation attempt and each retry; retries use saved evidence | `300` |
+| `LH_LLM_REASONING_MODEL` | Default Reasoning model; falls back to `LH_LLM_TOOL_MODEL` when unset and the list is empty | `LH_LLM_TOOL_MODEL` |
+| `LH_LLM_REASONING_MODEL_LIST` | Optional comma-separated Reasoning model choices; RCA Chat defaults to the first listed model | Empty (uses `LH_LLM_REASONING_MODEL`) |
+| `LH_LLM_REASONING_CONTEXT_LENGTH` | Ollama context window for final assessments and explanations; prompt input is bounded by this value minus reserved output tokens | `LH_LLM_TOOL_CONTEXT_LENGTH` |
+| `LH_LLM_REASONING_MAX_TOKENS` | Maximum generated tokens for final assessments and explanations | `LH_LLM_TOOL_MAX_TOKENS` |
+| `LH_LLM_REASONING_TIMEOUT_SECONDS` | Separate budget for the final assessment or explanation attempt and each retry; retries use saved evidence | `300` |
 | `LH_LLM_TOOL_MAX_RESULT_CHARS` | Starting character ceiling per model tool result; prompt preparation may lower the effective limit | `6000` |
 
 Example slow local Ollama overrides (these are not the code defaults):
@@ -2434,6 +2439,7 @@ Example slow local Ollama overrides (these are not the code defaults):
 LH_LLM_TOOL_CALLING_ENABLED=true
 LH_RCA_DEFAULT_MODE=balanced
 LH_LLM_TOOL_MODEL=qwen3:4b-instruct
+LH_LLM_TOOL_MODEL_LIST=qwen3:4b-instruct,bonsai-2:9b
 LH_LLM_TOOL_CONTEXT_LENGTH=10240
 LH_LLM_TOOL_MAX_TOKENS=2048
 LH_LLM_TOOL_MAX_MODEL_TURNS=15
@@ -2443,7 +2449,11 @@ LH_LLM_TOOL_MAX_EXECUTION_REQUESTS=10
 LH_LLM_TOOL_MAX_RAG_SEARCHES=5
 LH_LLM_TOOL_MODEL_CALL_TIMEOUT_SECONDS=600
 LH_LLM_TOOL_TIMEOUT_SECONDS=3000
-LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS=3000
+LH_LLM_REASONING_MODEL=qwen3:4b-instruct
+LH_LLM_REASONING_MODEL_LIST=qwen3:4b-instruct,bonsai-2:9b
+LH_LLM_REASONING_CONTEXT_LENGTH=10240
+LH_LLM_REASONING_MAX_TOKENS=2048
+LH_LLM_REASONING_TIMEOUT_SECONDS=3000
 LH_LLM_TOOL_MAX_RESULT_CHARS=6000
 ```
 
@@ -2451,11 +2461,13 @@ The tool model uses `LH_LLM_PROVIDER`, `LH_LLM_BASE_URL`, and the associated
 provider credentials. Task drafting can separately use
 `LH_LLM_CODEASSIST_MODEL`; leaving that blank uses `LH_LLM_MODEL`.
 
-A validated investigation finish is rendered directly. A separate explanation,
-when needed or explicitly retried, uses a model call without execution tools.
-Its timeout is additional to the investigation budget and is not reduced by the
-per-call investigation timeout. Structured investigation explanations use the
-assessment schema; plain collector explanations retain their text format.
+The Investigation model coordinates collector discovery, collector execution
+requests and RAG searches. A successful finish is then reviewed by the selected
+Reasoning model, which creates the final evidence-validated assessment without
+execution tools. The reasoning call has its own context length, output-token
+reservation and timeout; it is additional to the investigation budget and is
+not reduced by the per-call investigation timeout. Retries use saved evidence
+and the request's saved Reasoning model selection.
 
 Restart the API server after changing its settings. Restart Hawk Console
 after updating its local configuration; its HTTP timeout accounts for both

@@ -1,12 +1,13 @@
 """Shared authenticated assistant chat for Web UI and Hawk Console."""
 from fastapi import HTTPException
-from loghawk.api.services import task_store2 as task_store
+from loghawk.api.services import task_store2 as task_store, rca_profiles
 from loghawk.llm import get_llm_client
 import loghawk.config as config
 
 def chat(chat_messages: list[dict], userid: str, *, origin_software: str,
          review_arguments: bool = False, redact_evidence: bool = True,
          investigation_id: str | None = None, mode: str | None = None,
+         model: str | None = None, reasoning_model: str | None = None,
          request_id: str | None = None) -> dict:
     if investigation_id and not config.LH_LLM_TOOL_CALLING_ENABLED:
         raise HTTPException(status_code=422, detail="Enable LLM tool calling to use investigation context.",
@@ -17,7 +18,8 @@ def chat(chat_messages: list[dict], userid: str, *, origin_software: str,
             return collector_tool_service.start(
                 chat_messages, userid, origin_software=origin_software,
                 review_arguments=review_arguments, redact_evidence=redact_evidence,
-                investigation_id=investigation_id, mode=mode, request_id=request_id,
+                investigation_id=investigation_id, mode=mode, model=model,
+                reasoning_model=reasoning_model, request_id=request_id,
             )
         except collector_tool_store.RequestConflict:
             raise
@@ -28,7 +30,8 @@ def chat(chat_messages: list[dict], userid: str, *, origin_software: str,
                                 headers={"X-LogHawk-Execution": "not-started"}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    candidates = [config.LH_LLM_MODEL, *config.LH_LLM_FALLBACK_MODELS]
+    selected_model = rca_profiles.resolve_model(model) if model is not None else None
+    candidates = [selected_model] if selected_model else [config.LH_LLM_MODEL, *config.LH_LLM_FALLBACK_MODELS]
     last_error = None
     for model in dict.fromkeys(item for item in candidates if item):
         try:

@@ -219,10 +219,13 @@ export const sendRcaMessage = (
   investigationId?: string,
   mode?: import("../types/api").RcaMode,
   requestId?: string,
+  model?: string,
+  reasoningModel?: string,
 ) => request<import("../types/api").RcaAnswer>("/rca/chat", {
   method: "POST", body: JSON.stringify({
     messages, review_arguments: reviewArguments, redact_evidence: redactEvidence,
-    investigation_id: investigationId || null, mode, request_id: requestId,
+    investigation_id: investigationId || null, mode, model, reasoning_model: reasoningModel,
+    request_id: requestId,
   }),
 });
 export const getRcaProfiles = () => request<import("../types/api").RcaProfiles>("/rca/profiles");
@@ -233,15 +236,15 @@ export const confirmRcaCollector = (requestId: string, confirmationId: string, a
     method: "POST", body: JSON.stringify({ confirmation_id: confirmationId, approved, arguments: reviewedArguments }),
   });
 
-export const regenerateRcaExplanation = (requestId: string) =>
+export const regenerateRcaExplanation = (requestId: string, reasoningModel?: string) =>
   request<import("../types/api").RcaAnswer>(
     `/rca/chat/${encodeURIComponent(requestId)}/explanation/regenerate`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify({ reasoning_model: reasoningModel }) },
   );
 
-export const retryRcaExplanation = (requestId: string) =>
+export const retryRcaExplanation = (requestId: string, reasoningModel?: string) =>
   request<import("../types/api").RcaAnswer>(`/rca/chat/${encodeURIComponent(requestId)}/explanation/retry`, {
-    method: "POST",
+    method: "POST", body: JSON.stringify({ reasoning_model: reasoningModel }),
   });
 
 export const getBuiltinTasks = () =>

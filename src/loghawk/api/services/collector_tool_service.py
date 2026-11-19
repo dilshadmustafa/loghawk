@@ -221,6 +221,8 @@ def _limit(state, name):
 def _progress(state, *, reason=None):
     state["loop_progress"] = {
         "mode": state.get("mode", "configured"),
+        "model": state.get("model", config.LH_LLM_TOOL_MODEL),
+        "reasoning_model": state.get("reasoning_model", config.LH_LLM_REASONING_MODEL),
         "model_turns": state.get("model_turns", 0),
         "discovery_calls": state["discovery_calls"],
         "execution_requests": state["execution_requests"],
@@ -360,7 +362,8 @@ def _discover(state, arguments):
         reply = {"role": "tool", "tool_call_id": "discovery-budget", "content": text}
         return (len(text) <= config.LH_LLM_TOOL_MAX_RESULT_CHARS
                 and _input_tokens([{"role": "user", "content": state.get("original_question", "")}, reply],
-                                 _dispatcher_tools() + (assessment.tools() if state.get("investigation_context") else [])) <= state["budget"])
+                                 _dispatcher_tools() + (assessment.tools() if state.get("investigation_context") else []),
+                                 state.get("model")) <= state["budget"])
     if not fits(result):
         raise ValueError("Insufficient discovery context; shorten the question or increase LH_LLM_TOOL_CONTEXT_LENGTH.")
     selected = {}
@@ -408,7 +411,7 @@ class ContextBudgetError(ValueError):
     """Input rejected before a tool request or collector execution is created."""
 
 
-def _input_tokens(messages, tools):
+def _input_tokens(messages, tools, model=None):
     """Estimate provider input tokens, including tools and template headroom.
 
     LiteLLM may use a fallback tokenizer for local models, so this is not an
@@ -416,7 +419,7 @@ def _input_tokens(messages, tools):
     """
     from litellm import token_counter
     try:
-        count = token_counter(model=_chat_model(config.LH_LLM_TOOL_MODEL),
+        count = token_counter(model=_chat_model(model or config.LH_LLM_TOOL_MODEL),
                               messages=messages, tools=tools or None)
         if not isinstance(count, int) or count <= 0:
             raise ValueError("Token counter unavailable")
@@ -508,9 +511,14 @@ def _visible_labels(prepared_context, views):
     return sorted(labels)
 
 
-def _prepare_model_inputs(snapshot, events, aliases, make_messages, tools, budget, drop_history=None):
+def _prepare_model_inputs(snapshot, events, aliases, make_messages, tools, budget, drop_history=None,
+                          model=None, context_length=None, max_tokens=None):
     """Allocate one full prompt, rebuilding all model views from immutable originals."""
     started = time.monotonic()
+    context_setting = ("LH_LLM_REASONING_CONTEXT_LENGTH" if context_length is not None
+                       else "LH_LLM_TOOL_CONTEXT_LENGTH")
+    context_length = context_length or config.LH_LLM_TOOL_CONTEXT_LENGTH
+    max_tokens = max_tokens or config.LH_LLM_TOOL_MAX_TOKENS
     ceiling = config.LH_LLM_TOOL_MAX_RESULT_CHARS
     limits = {event["call_id"]: ceiling for event in events}
     weights = {event["call_id"]: (1.5 if event.get("tool_type") == "knowledge_search" else 2)
@@ -527,14 +535,14 @@ def _prepare_model_inputs(snapshot, events, aliases, make_messages, tools, budge
                  for event in events]
         duplicates = _deduplicate_prepared_knowledge(views)
         messages = make_messages(prepared_context, views)
-        estimated = _input_tokens(messages, tools)
+        estimated = _input_tokens(messages, tools, model)
         if estimated <= budget:
             info = {
                 "policy_version": PREPARATION_VERSION,
                 "estimated_input_tokens": estimated,
-                "reserved_output_tokens": config.LH_LLM_TOOL_MAX_TOKENS,
+                "reserved_output_tokens": max_tokens,
                 "input_budget_tokens": budget,
-                "context_length_tokens": config.LH_LLM_TOOL_CONTEXT_LENGTH,
+                "context_length_tokens": context_length,
                 "result_ceiling_chars": ceiling,
                 "effective_limits_chars": limits,
                 "deduplicated_chunks": duplicates,
@@ -554,7 +562,7 @@ def _prepare_model_inputs(snapshot, events, aliases, make_messages, tools, budge
         if not candidates:
             raise ContextBudgetError(
                 "The complete prompt cannot fit while retaining minimum evidence coverage. "
-                "Increase LH_LLM_TOOL_CONTEXT_LENGTH or narrow the investigation; saved evidence is retained."
+                f"Increase {context_setting} or narrow the investigation; saved evidence is retained."
             )
         key = max(candidates, key=lambda item: (sizes[item] - floors[item]) / weights[item])
         limits[key] = max(floors[key], min(limits[key] - 1, int(sizes[key] * 0.75)))
@@ -594,7 +602,8 @@ def _prepare_loop_inputs(request_id, state, tools):
         return messages
     budget = min(state["budget"], config.LH_LLM_TOOL_CONTEXT_LENGTH - config.LH_LLM_TOOL_MAX_TOKENS)
     return _prepare_model_inputs(snapshot, events, aliases, build, tools, budget,
-                                 drop_history=lambda: _drop_oldest_turn(base))
+                                 drop_history=lambda: _drop_oldest_turn(base),
+                                 model=state.get("model"))
 
 
 def _record_prepared_inputs(request_id, invocation_id, preparation, snapshot, *, stage, redact_evidence):
@@ -694,9 +703,12 @@ def _execute(request_id, target, arguments, userid, deadline, *, confirmed=False
 def start(messages: list[dict], userid: str, *, origin_software: str = "console",
           review_arguments: bool = False, redact_evidence: bool = True,
           investigation_id: str | None = None, mode: str | None = None,
+          model: str | None = None, reasoning_model: str | None = None,
           request_id: str | None = None) -> dict:
     if any(m.get("role") not in {"user", "assistant"} for m in messages):
         raise ValueError("Only user and assistant chat messages are accepted.")
+    selected_model = rca_profiles.resolve_model(model)
+    selected_reasoning_model = rca_profiles.resolve_reasoning_model(reasoning_model)
     budget = config.LH_LLM_TOOL_CONTEXT_LENGTH - config.LH_LLM_TOOL_MAX_TOKENS
     if budget < 512:
         raise ContextBudgetError("Tool context length must exceed output-token limit by at least 512. No collector was run.")
@@ -707,9 +719,9 @@ def start(messages: list[dict], userid: str, *, origin_software: str = "console"
         history.pop(0)
     transcript = [{"role": "system", "content": SYSTEM}, *history]
     tools = _dispatcher_tools()
-    while (len(transcript) > 21 or _input_tokens(transcript, tools) > budget):
+    while (len(transcript) > 21 or _input_tokens(transcript, tools, selected_model) > budget):
         if not _drop_oldest_turn(transcript):
-            if _input_tokens(transcript, tools) > budget:
+            if _input_tokens(transcript, tools, selected_model) > budget:
                 raise ContextBudgetError(
                     "The latest question and dispatcher tools exceed the context budget. "
                     "Shorten the question or increase LH_LLM_TOOL_CONTEXT_LENGTH. No collector was run."
@@ -720,21 +732,30 @@ def start(messages: list[dict], userid: str, *, origin_software: str = "console"
              "discovery_calls": 0, "execution_requests": 0, "queue": [],
              "model_turns": 0, "knowledge_searches": 0,
              "execution_fingerprints": [], "knowledge_fingerprints": [], "evidence_aliases": {},
-             "limits": profile["limits"], "mode": profile["mode"],
+             "limits": profile["limits"], "mode": profile["mode"], "model": selected_model,
+             "reasoning_model": selected_reasoning_model,
              "review_arguments": review_arguments, "redact_evidence": redact_evidence,
              "origin_software": origin_software,
              "execution_attempted": False, "narration_corrections": 0, "empty_turn_recoveries": 0,
              "discovery_ids": [], "remaining": config.LH_LLM_TOOL_TIMEOUT_SECONDS, "budget": budget}
     submission_hash = sha256(_json({"messages": messages, "review_arguments": review_arguments,
         "redact_evidence": redact_evidence, "investigation_id": investigation_id,
-        "mode": profile["mode"]}).encode("utf-8")).hexdigest()
+        "mode": profile["mode"], "model": selected_model,
+        "reasoning_model": selected_reasoning_model}).encode("utf-8")).hexdigest()
     request_id = store.create(userid, origin_software, request_id=request_id, submission_hash=submission_hash)
     settings = redact_audit_metadata(store.settings_snapshot())
     settings.update({"review_arguments": review_arguments, "redact_evidence": redact_evidence,
-                     "mode": profile["mode"], "effective_limits": profile["limits"]})
+                     "mode": profile["mode"], "model": selected_model,
+                     "reasoning_model": selected_reasoning_model,
+                     "LH_LLM_TOOL_MODEL": selected_model, "LH_LLM_REASONING_MODEL": selected_reasoning_model,
+                     "LH_LLM_REASONING_CONTEXT_LENGTH": config.LH_LLM_REASONING_CONTEXT_LENGTH,
+                     "LH_LLM_REASONING_MAX_TOKENS": config.LH_LLM_REASONING_MAX_TOKENS,
+                     "LH_LLM_REASONING_TIMEOUT_SECONDS": config.LH_LLM_REASONING_TIMEOUT_SECONDS,
+                     "effective_limits": profile["limits"]})
     store.initialize_history(request_id, str(redact(messages[-1].get("content", ""))), settings)
     store.record(request_id, {"name": "request_settings"},
-                 {"review_arguments": review_arguments, "redact_evidence": redact_evidence},
+                 {"review_arguments": review_arguments, "redact_evidence": redact_evidence,
+                  "model": selected_model, "reasoning_model": selected_reasoning_model},
                  "REQUEST_SETTINGS", "RCA request privacy and input-review preferences.")
     _publish_progress(request_id, state, "preparing_context")
     if investigation_id:
@@ -919,9 +940,7 @@ def _loop(request_id, state, userid):
                         _publish_progress(request_id, state, "completed", reason="Model submitted a validated assessment.")
                         store.record(request_id, {"name": "finish_investigation"}, {}, "COMPLETED",
                                      json.dumps(state["assessment"], ensure_ascii=False))
-                        response = assessment.render(state["assessment"])
-                        store.complete_assessment(request_id, _explanation_context(request_id, state), response)
-                        return _reply(request_id, "COMPLETED", response)
+                        return _start_explanation(request_id, state, userid, deadline=deadline)
                     if function.get("name") == "stop_without_execution":
                         if state.get("execution_attempted", False):
                             raise ValueError("Execution was already attempted; report its actual outcome.")
@@ -1027,7 +1046,9 @@ def _loop(request_id, state, userid):
                     redact_evidence=state.get("redact_evidence", True),
                     investigation=bool(state.get("investigation_context")),
                     preparation=preparation, snapshot=state.get("investigation_context"),
-                    request_settings={"mode": state.get("mode", "configured"), "effective_limits": state["limits"]},
+                    request_settings={"mode": state.get("mode", "configured"), "model": state.get("model"),
+                                      "effective_limits": state["limits"]},
+                    model=state.get("model"),
                 )
             except EmptyToolResponseError as exc:
                 if (require_tool and state.get("empty_turn_recoveries", 0) < 1
@@ -1059,8 +1080,8 @@ def _loop(request_id, state, userid):
                             "message_count=%s estimated_input_tokens=%s tools=%s "
                             "retry_number=%s response_excerpt=%r",
                             request_id, state.get("origin_software", "unknown"),
-                            redact(config.LH_LLM_TOOL_MODEL), len(state["messages"]),
-                            _input_tokens(state["messages"], tools),
+                            redact(state.get("model", config.LH_LLM_TOOL_MODEL)), len(state["messages"]),
+                            _input_tokens(state["messages"], tools, state.get("model")),
                             [tool["function"]["name"] for tool in tools],
                             state.get("narration_corrections", 0), excerpt,
                         )
@@ -1204,7 +1225,11 @@ def _explanation_messages(context, execution, invocation_id=None):
                 {"role": "user", "content": _json(payload)}]
     messages, preparation = _prepare_model_inputs(
         snapshot, events, aliases, build, [],
-        config.LH_LLM_TOOL_CONTEXT_LENGTH - config.LH_LLM_TOOL_MAX_TOKENS)
+        context.get("reasoning_context_length", config.LH_LLM_REASONING_CONTEXT_LENGTH)
+        - context.get("reasoning_max_tokens", config.LH_LLM_REASONING_MAX_TOKENS),
+        model=context.get("reasoning_model", config.LH_LLM_REASONING_MODEL),
+        context_length=context.get("reasoning_context_length", config.LH_LLM_REASONING_CONTEXT_LENGTH),
+        max_tokens=context.get("reasoning_max_tokens", config.LH_LLM_REASONING_MAX_TOKENS))
     context["model_evidence_labels"] = preparation["info"]["visible_evidence_labels"]
     context["context_preparation"] = preparation["info"]
     if invocation_id:
@@ -1234,6 +1259,10 @@ def _explanation_context(request_id, state):
         context["evidence_aliases"] = state["evidence_aliases"]
         context["loop_progress"] = state.get("loop_progress")
     context["mode"] = state.get("mode", "configured")
+    context["model"] = state.get("model", config.LH_LLM_TOOL_MODEL)
+    context["reasoning_model"] = state.get("reasoning_model", config.LH_LLM_REASONING_MODEL)
+    context["reasoning_context_length"] = config.LH_LLM_REASONING_CONTEXT_LENGTH
+    context["reasoning_max_tokens"] = config.LH_LLM_REASONING_MAX_TOKENS
     context["effective_limits"] = state.get("limits", {})
     context["loop_progress"] = state.get("loop_progress")
     return context
@@ -1246,19 +1275,24 @@ def _start_explanation(request_id, state, userid, *, deadline=None):
     context = _explanation_context(request_id, state)
     origin = state.get("origin_software", "console")
     attempt = store.begin_explanation(
-        request_id, userid, origin, config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS, context,
+        request_id, userid, origin, config.LH_LLM_REASONING_TIMEOUT_SECONDS, context,
     )
     return _perform_explanation(request_id, attempt, origin)
 
 
 def retry_explanation(request_id: str, userid: str, *,
-                      origin_software: str, regenerate: bool = False) -> dict:
+                      origin_software: str, regenerate: bool = False,
+                      reasoning_model: str | None = None) -> dict:
     """Explain stored evidence only. This path cannot call a collector or its dispatcher."""
     if not config.LH_LLM_TOOL_CALLING_ENABLED:
         raise ValueError("Collector assistant is disabled.")
+    selected_reasoning_model = (
+        rca_profiles.resolve_reasoning_model(reasoning_model)
+        if reasoning_model is not None else None
+    )
     attempt = store.begin_explanation(
-        request_id, userid, origin_software, config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS,
-        regenerate=regenerate,
+        request_id, userid, origin_software, config.LH_LLM_REASONING_TIMEOUT_SECONDS,
+        regenerate=regenerate, reasoning_model=selected_reasoning_model,
     )
     return _perform_explanation(request_id, attempt, origin_software)
 
@@ -1266,7 +1300,7 @@ def retry_explanation(request_id: str, userid: str, *,
 def _perform_explanation(request_id, attempt, origin):
     started = time.monotonic()
     context = attempt["context"]
-    explanation_deadline = _utc_deadline(config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS)
+    explanation_deadline = _utc_deadline(config.LH_LLM_REASONING_TIMEOUT_SECONDS)
     store.update_progress(request_id, {"phase": "preparing_explanation", "phase_started_at": store.now(),
         "processing_deadline_at": None, "model_call_deadline_at": None,
         "explanation_deadline_at": explanation_deadline, "detail": "Explaining saved evidence; no collectors will run."})
@@ -1275,14 +1309,24 @@ def _perform_explanation(request_id, attempt, origin):
     audit_id = store.record(
         request_id, target,
         redact({"attempt_id": attempt["attempt_id"], "attempt": attempt["attempts"],
-                "model": config.LH_LLM_TOOL_MODEL, "provider": config.LH_LLM_PROVIDER}),
+                "investigation_model": context.get("model", config.LH_LLM_TOOL_MODEL),
+                "model": context.get("reasoning_model", config.LH_LLM_REASONING_MODEL),
+                "provider": config.LH_LLM_PROVIDER}),
         "EXPLANATION_RUNNING", "Generating explanation from saved evidence; no collectors will run.",
     )
     error = None
     metadata = {}
     invocation_id = store.begin_invocation(request_id,
         attempt["stage"],
-        {**redact_audit_metadata(store.settings_snapshot()), "mode": context.get("mode", "configured"),
+        {**redact_audit_metadata(store.settings_snapshot()),
+         "LH_LLM_REASONING_MODEL": context.get("reasoning_model", config.LH_LLM_REASONING_MODEL),
+         "LH_LLM_REASONING_CONTEXT_LENGTH": context.get(
+             "reasoning_context_length", config.LH_LLM_REASONING_CONTEXT_LENGTH),
+         "LH_LLM_REASONING_MAX_TOKENS": context.get(
+             "reasoning_max_tokens", config.LH_LLM_REASONING_MAX_TOKENS),
+         "model": context.get("reasoning_model", config.LH_LLM_REASONING_MODEL),
+         "investigation_model": context.get("model", config.LH_LLM_TOOL_MODEL),
+         "mode": context.get("mode", "configured"),
          "effective_limits": context.get("effective_limits", {})}, config.LH_LLM_PROVIDER, attempt["attempt_id"])
     try:
         if attempt["context"].get("investigation_context"):
@@ -1296,7 +1340,7 @@ def _perform_explanation(request_id, attempt, origin):
             )
         messages = _explanation_messages(attempt["context"], execution, invocation_id)
         metadata["context_preparation"] = attempt["context"].get("context_preparation", {})
-        timeout = config.LH_LLM_TOOL_EXPLANATION_TIMEOUT_SECONDS - (time.monotonic() - started)
+        timeout = config.LH_LLM_REASONING_TIMEOUT_SECONDS - (time.monotonic() - started)
         if timeout <= 0:
             raise TimeoutError("Explanation preparation exhausted its time budget.")
         store.invocation_dispatch(invocation_id, timeout)
@@ -1304,7 +1348,10 @@ def _perform_explanation(request_id, attempt, origin):
             "explanation_deadline_at": explanation_deadline})
         schema = assessment.ASSESSMENT_SCHEMA if context.get("assessment") is not None else None
         response = str(redact(get_llm_client().explain_collector_evidence(
-            messages, timeout=timeout, audit_callback=metadata.update, response_schema=schema)))
+            messages, timeout=timeout, audit_callback=metadata.update, response_schema=schema,
+            model=context.get("reasoning_model", config.LH_LLM_REASONING_MODEL),
+            context_length=context.get("reasoning_context_length", config.LH_LLM_REASONING_CONTEXT_LENGTH),
+            max_tokens=context.get("reasoning_max_tokens", config.LH_LLM_REASONING_MAX_TOKENS))))
         if attempt["context"].get("assessment") is not None:
             value = response.strip()
             if value.startswith("```") and value.endswith("```"):
@@ -1316,7 +1363,11 @@ def _perform_explanation(request_id, attempt, origin):
                  if attempt["context"].get("evidence_aliases", {}).get(ref)
                  in attempt["context"].get("model_evidence_labels", [])}
             )
-            response = assessment.render(decision)
+            citation_labels = store.assessment_citation_labels(
+                request_id, attempt["context"].get("investigation_context"),
+                attempt["context"].get("evidence_aliases"),
+            )
+            response = assessment.render(decision, citation_labels)
             if (attempt["context"].get("loop_progress") or {}).get("partial"):
                 response = "PARTIAL INVESTIGATION — " + attempt["context"].get("collection_notice", "") + "\n\n" + response
     except Exception as exc:
@@ -1327,7 +1378,13 @@ def _perform_explanation(request_id, attempt, origin):
         prefix = "Collector completed; AI response failed. " if execution["succeeded"] else "AI explanation failed. "
         response = prefix + hint + " Use Retry AI Explanation; collectors will not run again.\n" + error
         if attempt["context"].get("assessment"):
-            response += "\n\nSaved assessment (before explanation):\n" + assessment.render(attempt["context"]["assessment"])
+            citation_labels = store.assessment_citation_labels(
+                request_id, attempt["context"].get("investigation_context"),
+                attempt["context"].get("evidence_aliases"),
+            )
+            response += "\n\nSaved assessment (before explanation):\n" + assessment.render(
+                attempt["context"]["assessment"], citation_labels,
+            )
     store.finish_invocation(invocation_id, (time.monotonic() - started) * 1000, error, redact_audit_metadata(metadata))
     store.record(request_id, target, {}, "EXPLANATION_FAILED" if error else "EXPLANATION_COMPLETED",
                  error or response, call_id=audit_id)
@@ -1344,13 +1401,15 @@ def _perform_explanation(request_id, attempt, origin):
 def _audited_tool_turn(request_id, messages, tools, timeout, require_tool,
                        evidence_call_ids, *, narration_correction=False,
                        redact_evidence=True, investigation=False, empty_response_recovery=False,
-                       preparation=None, snapshot=None, request_settings=None):
+                       preparation=None, snapshot=None, request_settings=None, model=None):
     started = time.monotonic()
     stage = ("empty_response_recovery" if empty_response_recovery else
              "narration_correction" if narration_correction else
              "investigation_evaluation" if investigation else "discovery_tool_selection")
     invocation_id = store.begin_invocation(request_id, stage,
-                                           {**redact_audit_metadata(store.settings_snapshot()), **(request_settings or {})},
+                                           {**redact_audit_metadata(store.settings_snapshot()),
+                                            **({"LH_LLM_TOOL_MODEL": model} if model else {}),
+                                            **(request_settings or {})},
                                            config.LH_LLM_PROVIDER)
     metadata, error = {}, None
     try:
@@ -1386,7 +1445,8 @@ def _audited_tool_turn(request_id, messages, tools, timeout, require_tool,
             raise TimeoutError("Processing budget exhausted before model invocation.")
         store.invocation_dispatch(invocation_id, remaining)
         return get_llm_client().complete_tool_turn(messages, tools, timeout=remaining,
-                                                   require_tool=require_tool, audit_callback=metadata.update)
+                                                   require_tool=require_tool, audit_callback=metadata.update,
+                                                   model=model)
     except Exception as exc:
         error = str(redact(str(exc)))
         raise

@@ -5,7 +5,7 @@ import { ApiError, sendRcaMessage, confirmRcaCollector, retryRcaExplanation, reg
 import RcaLiveProgress from "../components/RcaLiveProgress.vue";
 import type { Investigation, RcaMessage, RcaAnswer, RcaExecutionSummary, RcaMode, RcaProfile, RcaLiveProgress as Progress } from "../types/api";
 type ChatEntry = RcaMessage & { requestId?: string; execution?: RcaExecutionSummary; explanation?: RcaAnswer["explanation"] };
-type SavedRequest = { id: string; mode: RcaMode; startedAt: string; baseline: string; operationLabel: string; reviewArguments: boolean; redactEvidence: boolean; confirmationId?: string; explanationAttempts?: number; investigationId?: string };
+type SavedRequest = { id: string; mode: RcaMode; model?: string; reasoningModel?: string; startedAt: string; baseline: string; operationLabel: string; reviewArguments: boolean; redactEvidence: boolean; confirmationId?: string; explanationAttempts?: number; investigationId?: string };
 const route = useRoute(), router = useRouter();
 const investigationId = computed(() => typeof route.query.investigation === "string" ? route.query.investigation : "");
 const directEntry = ref(!investigationId.value);
@@ -34,6 +34,18 @@ const newChatDialog = ref<HTMLDialogElement | null>(null);
 const mode = ref<RcaMode>("balanced");
 const defaultMode = ref<RcaMode>("balanced");
 const profiles = ref<RcaProfile[]>([]);
+const availableModels = ref<string[]>([]);
+const defaultModel = ref("");
+const selectedModel = ref("");
+const requestModel = ref("");
+const availableReasoningModels = ref<string[]>([]);
+const defaultReasoningModel = ref("");
+const selectedReasoningModel = ref("");
+const requestReasoningModel = ref("");
+const retryReasoningModel = ref("");
+const retryReasoningModels = computed(() =>
+  availableReasoningModels.value.length ? availableReasoningModels.value
+    : defaultReasoningModel.value ? [defaultReasoningModel.value] : []);
 const selectedProfile = computed(() => profiles.value.find(p => p.mode === mode.value));
 const activeId = ref("");
 const requestMode = ref<RcaMode>("balanced");
@@ -51,6 +63,8 @@ const conversation = computed(() => {
   if (activeId.value) entries.splice(progressAnchor.value + 1, 0, { showProgress: true });
   return entries;
 });
+const assessmentCitations = (references: string[], execution?: RcaExecutionSummary) =>
+  references.map(reference => execution?.assessment_citations?.[reference] ?? "Evidence citation unavailable").join("; ");
 let storageKey = "", baseline = "", operation = 0, resolved = false, disposed = false, postInFlight = false;
 let confirmationId = "", explanationAttempts: number | undefined;
 let timer: number | undefined;
@@ -58,7 +72,7 @@ let pollController: AbortController | undefined;
 
 function saveActive() {
   if (!storageKey || !activeId.value) return;
-  const value: SavedRequest = { id: activeId.value, mode: mode.value, startedAt: startedAt.value,
+  const value: SavedRequest = { id: activeId.value, mode: requestMode.value, model: requestModel.value, reasoningModel: requestReasoningModel.value, startedAt: startedAt.value,
     baseline, operationLabel: operationLabel.value, reviewArguments: reviewInputArgs.value, redactEvidence: redactEvidence.value,
     confirmationId, explanationAttempts, investigationId: requestInvestigationId.value };
   try { sessionStorage.setItem(storageKey, JSON.stringify(value)); } catch { /* Polling remains available in this page. */ }
@@ -171,6 +185,16 @@ function receive(answer: RcaAnswer) {
 function applySnapshot(value: Progress) {
   progress.value = value; checkedAt.value = Date.now();
   const savedMode = value.settings?.mode;
+  const savedModel = value.settings?.model;
+  if (typeof savedModel === "string" && savedModel) {
+    requestModel.value = savedModel;
+    if (busy.value || pending.value || uncertain.value) selectedModel.value = savedModel;
+  }
+  const savedReasoningModel = value.settings?.reasoning_model;
+  if (typeof savedReasoningModel === "string" && savedReasoningModel) {
+    requestReasoningModel.value = savedReasoningModel;
+    if (busy.value || pending.value || uncertain.value) selectedReasoningModel.value = savedReasoningModel;
+  }
   if (savedMode === "quality" || savedMode === "balanced" || savedMode === "performance") {
     requestMode.value = savedMode;
     if (busy.value || pending.value || uncertain.value) mode.value = savedMode;
@@ -255,6 +279,15 @@ async function initialize() {
     const [available, user] = await Promise.all([getRcaProfiles(), getCurrentUser()]);
     if (disposed) return;
     profiles.value = available.profiles;
+    availableModels.value = available.models || [];
+    defaultModel.value = available.default_model || "";
+    selectedModel.value = defaultModel.value;
+    requestModel.value = defaultModel.value;
+    availableReasoningModels.value = available.reasoning_models || [];
+    defaultReasoningModel.value = available.default_reasoning_model || "";
+    selectedReasoningModel.value = defaultReasoningModel.value;
+    requestReasoningModel.value = defaultReasoningModel.value;
+    retryReasoningModel.value = defaultReasoningModel.value;
     defaultMode.value = available.default_mode;
     mode.value = available.default_mode;
     requestMode.value = available.default_mode;
@@ -263,7 +296,10 @@ async function initialize() {
     try { saved = JSON.parse(sessionStorage.getItem(storageKey) || "null") as SavedRequest | null; } catch { clearSaved(); }
     if (saved && /^[a-f0-9]{32}$/i.test(saved.id) && ["quality", "balanced", "performance"].includes(saved.mode)) {
       chatStarted.value = true;
-      mode.value = saved.mode; reviewInputArgs.value = saved.reviewArguments; redactEvidence.value = saved.redactEvidence;
+      mode.value = saved.mode;
+      if (saved.model) { selectedModel.value = saved.model; requestModel.value = saved.model; }
+      if (saved.reasoningModel) { selectedReasoningModel.value = saved.reasoningModel; requestReasoningModel.value = saved.reasoningModel; }
+      reviewInputArgs.value = saved.reviewArguments; redactEvidence.value = saved.redactEvidence;
       confirmationId = saved.confirmationId || ""; explanationAttempts = saved.explanationAttempts;
       requestInvestigationId.value = saved.investigationId || "";
       beginTracking(saved.id, saved.operationLabel || "Reconnecting to investigation", saved.baseline || "", saved.startedAt);
@@ -298,9 +334,11 @@ async function send() {
   draft.value = "";
   const id = crypto.randomUUID().replaceAll("-", "");
   confirmationId = ""; explanationAttempts = undefined; requestInvestigationId.value = investigationId.value;
+  requestModel.value = selectedModel.value || defaultModel.value;
+  requestReasoningModel.value = selectedReasoningModel.value || defaultReasoningModel.value;
   const current = beginTracking(id, "Submitting request");
   postInFlight = true;
-  try { settle(await sendRcaMessage(history, reviewInputArgs.value, redactEvidence.value, investigationId.value, mode.value, id), current); }
+  try { settle(await sendRcaMessage(history, reviewInputArgs.value, redactEvidence.value, investigationId.value, mode.value, id, requestModel.value, requestReasoningModel.value), current); }
   catch (e) {
     if (!isCurrent(current) || resolved) return;
     if (e instanceof ApiError && e.executionNotStarted) {
@@ -359,7 +397,7 @@ async function retryExplanation(message: ChatEntry) {
   try {
     const currentExplanation = progress.value?.answer?.explanation ?? explanation;
     const action = currentExplanation.can_regenerate ? regenerateRcaExplanation : retryRcaExplanation;
-    settle(await action(message.requestId), current);
+    settle(await action(message.requestId, retryReasoningModel.value || defaultReasoningModel.value), current);
   } catch (e) { rejectedAction(current, e); }
   finally { if (isCurrent(current)) postInFlight = false; }
 }
@@ -463,6 +501,28 @@ async function decide(approved: boolean) {
       <p v-else>Loading server limits…</p>
     </fieldset>
     <button v-if="!ready && error" @click="initialize">Reload investigation modes</button>
+    <section
+      v-if="availableModels.length || availableReasoningModels.length"
+      class="model-routing"
+      aria-labelledby="model-routing-title">
+      <h2 id="model-routing-title">Model routing</h2>
+      <div class="model-routing-grid">
+        <div v-if="availableModels.length" class="rca-model-picker">
+          <label for="rca-investigation-model">Investigation model</label>
+          <select id="rca-investigation-model" v-model="selectedModel" :disabled="!ready || busy || !!pending || uncertain">
+            <option v-for="item in availableModels" :key="item" :value="item">{{ item }}</option>
+          </select>
+          <p>Coordinates tools and RAG searches.</p>
+        </div>
+        <div v-if="availableReasoningModels.length" class="rca-model-picker">
+          <label for="rca-reasoning-model">Reasoning model</label>
+          <select id="rca-reasoning-model" v-model="selectedReasoningModel" :disabled="!ready || busy || !!pending || uncertain">
+            <option v-for="item in availableReasoningModels" :key="item" :value="item">{{ item }}</option>
+          </select>
+          <p>Analyzes evidence and writes the assessment.</p>
+        </div>
+      </div>
+    </section>
     <label>
       <input type="checkbox" v-model="reviewInputArgs" :disabled="busy || !!pending || uncertain" />
       Review Input Args
@@ -495,11 +555,11 @@ async function decide(approved: boolean) {
           <details v-if="message.execution.assessment">
             <summary>Saved investigation assessment · validated evidence references</summary>
             <p>References are checked against saved evidence. Interpretations still require human judgment.</p>
-            <h4>Observations</h4><ul><li v-for="(claim, n) in message.execution.assessment.observations" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
-            <h4>Hypotheses</h4><ul><li v-for="(claim, n) in message.execution.assessment.hypotheses" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
-            <h4>Contradictions</h4><ul><li v-for="(claim, n) in message.execution.assessment.contradictions" :key="n">{{ claim.text }} <code>{{ claim.references.join(", ") }}</code></li></ul>
+            <h4>Observations</h4><ul><li v-for="(claim, n) in message.execution.assessment.observations" :key="n">{{ claim.text }} <code>{{ assessmentCitations(claim.references, message.execution) }}</code></li></ul>
+            <h4>Hypotheses</h4><ul><li v-for="(claim, n) in message.execution.assessment.hypotheses" :key="n">{{ claim.text }} <code>{{ assessmentCitations(claim.references, message.execution) }}</code></li></ul>
+            <h4>Contradictions</h4><ul><li v-for="(claim, n) in message.execution.assessment.contradictions" :key="n">{{ claim.text }} <code>{{ assessmentCitations(claim.references, message.execution) }}</code></li></ul>
             <h4>Missing evidence</h4><ul><li v-for="(item, n) in message.execution.assessment.missing_evidence" :key="n">{{ item }}</li></ul>
-            <h4>Conclusion</h4><p>{{ message.execution.assessment.conclusion.text }} <code>{{ message.execution.assessment.conclusion.references.join(", ") }}</code></p>
+            <h4>Conclusion</h4><p>{{ message.execution.assessment.conclusion.text }} <code>{{ assessmentCitations(message.execution.assessment.conclusion.references, message.execution) }}</code></p>
             <h4>Next steps</h4><ul><li v-for="(item, n) in message.execution.assessment.next_steps" :key="n">{{ item }}</li></ul>
           </details>
           <ul v-if="message.execution.events.length">
@@ -528,11 +588,19 @@ async function decide(approved: boolean) {
         </section>
         <div class="message-text">{{ message.content }}</div>
         <div v-if="message.explanation?.can_retry || message.explanation?.can_regenerate">
-          <button :disabled="busy || !!pending || uncertain" @click="retryExplanation(message)">
-            {{ message.explanation?.can_regenerate
-              ? "Regenerate AI Explanation" : "Retry AI Explanation" }}
-          </button>
-          <p>Uses saved evidence and the API server's currently loaded model settings.
+          <div class="explanation-actions">
+            <button :disabled="busy || !!pending || uncertain" @click="retryExplanation(message)">
+              {{ message.explanation?.can_regenerate
+                ? "Regenerate AI Explanation" : "Retry AI Explanation" }}
+            </button>
+            <label v-if="retryReasoningModels.length" class="explanation-model-control" :for="'retry-reasoning-model-' + message.requestId">
+              Reasoning model
+              <select :id="'retry-reasoning-model-' + message.requestId" v-model="retryReasoningModel" :disabled="busy || !!pending || uncertain">
+                <option v-for="item in retryReasoningModels" :key="item" :value="item">{{ item }}</option>
+              </select>
+            </label>
+          </div>
+          <p>Uses the selected reasoning model and saved evidence. The API server's current reasoning timeout applies.
             Collectors will not run again.</p>
         </div>
       </article>
@@ -592,6 +660,16 @@ async function decide(approved: boolean) {
 .context-load-more { margin-top: .65rem; }
 .context-detail-link { display: inline-block; margin-top: .45rem; }
 .message, .confirmation { margin: 1rem 0; padding: 1rem; border: 1px solid #b8c3d1; border-radius: 8px; }
+.model-routing { max-width: 680px; margin: 1rem 0; padding: 1rem; border: 1px solid #344553; border-radius: .65rem; background: #111c26; }
+.model-routing > h2 { margin: 0 0 .75rem; font-size: 1rem; }
+.model-routing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.rca-model-picker { min-width: 0; margin: 0; }
+.rca-model-picker label { display: block; margin-bottom: .35rem; font-weight: 700; }
+.rca-model-picker select { width: 100%; min-width: 0; box-sizing: border-box; padding: .7rem .85rem; color: #e8edf2; background: #17232d; border: 1px solid #51716f; border-radius: .5rem; font: inherit; }
+.rca-model-picker p { margin: .4rem 0 0; color: #aebbc7; font-size: .85rem; }
+@media (max-width: 640px) {
+  .model-routing-grid { grid-template-columns: 1fr; }
+}
 .investigation-modes { margin: 1rem 0; border: 1px solid #a9c9c5; border-radius: .65rem; padding: 1rem; }
 .investigation-modes legend { font-weight: 700; }
 .mode-options { display: flex; gap: .6rem; flex-wrap: wrap; }
@@ -604,5 +682,8 @@ async function decide(approved: boolean) {
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 label, textarea { display: block; }
 textarea { width: 100%; box-sizing: border-box; margin: .5rem 0; }
+ .explanation-actions { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; margin-top: .75rem; }
+.explanation-model-control { display: grid; gap: .3rem; min-width: min(16rem, 100%); font-weight: 700; }
+.explanation-model-control select { min-width: 16rem; max-width: 100%; padding: .55rem .7rem; color: #e8edf2; background: #17232d; border: 1px solid #51716f; border-radius: .45rem; font: inherit; }
 button { margin-right: .5rem; }
 </style>
